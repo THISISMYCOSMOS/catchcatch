@@ -1,49 +1,89 @@
-# PROVE / 프루브
+# CatchCatch / 캐치캐치
 
-PROVE(프루브)는 `화장품의 진짜 가격을 증명하다`를 컨셉으로 한 링크 기반 가격 검증 서비스입니다.
+캐치캐치는 화장품 상품 링크를 넣으면 지금 가격이 살 만한 가격인지 확인해 주는 웹앱입니다.
 
-사용자는 올리브영, 쿠팡, 네이버쇼핑, 공식몰 등에서 본 화장품 상품 링크를 입력하고, PROVE는 `실구매가`, `용량당 가격`, `쿠폰`, `배송비`, `기획세트`, `직전 세일가`를 같은 기준으로 비교합니다.
+화장품은 세일이 잦고 판매처마다 조건이 다릅니다. 표시가는 낮아 보여도 쿠폰, 배송비, 용량, 기획세트 구성, 직전 세일가까지 보면 실제로는 별로 싸지 않은 경우가 있습니다. 캐치캐치는 이 조건들을 같은 기준으로 정리해서 사용자가 결제 전에 한 번 더 판단할 수 있게 합니다.
 
-결과는 단순 최저가가 아니라 지금 가격이 `진짜 세일`인지, 더 안전하고 합리적인 `구매 추천처`가 어디인지 근거와 함께 보여줍니다.
+## 하려는 것
 
-## MVP Flow
+- 상품 링크에서 이름, 브랜드, 용량, 옵션, 구성품을 읽어옵니다.
+- 올리브영, 무신사 뷰티, 쿠팡, 브랜드 공식몰의 가격 조건을 비교합니다.
+- 쿠폰과 배송비를 포함한 실구매가를 계산합니다.
+- 1ml 또는 1g 기준으로 용량당 가격을 계산합니다.
+- 최근 평균가와 직전 세일가를 비교합니다.
+- 최저가와 추천 구매처를 따로 보여줍니다.
+- 정보가 부족하거나 상품 매칭이 애매하면 신뢰도를 낮춰 표시합니다.
 
-1. Paste product link
-2. Extract product info
-3. Match same product across stores
-4. Normalize price conditions
-5. Compare current sale and previous sale
-6. Calculate real discount
-7. Recommend purchase option
-8. Save item / track price
+## 사용자 기준
 
-## Core Features
+사용자는 가입할 때 구매 기준 3개를 고릅니다.
 
-- `LINK_INPUT`: 상품 링크 하나로 검증 시작
-- `PRODUCT_EXTRACT`: 상품명, 브랜드, 용량, 옵션, 구성품 자동 추출
-- `PRICE_COMPARE`: 판매처별 표시가와 실구매가 비교
-- `UNIT_PRICE`: 1ml 또는 1g 기준 용량당 가격 계산
-- `COUPON_SHIPPING`: 쿠폰과 배송비를 반영한 실제 결제 금액 계산
-- `SALE_HISTORY`: 현재 세일가와 직전 세일가 비교
-- `REAL_DISCOUNT`: 표시 할인율이 아닌 실질 할인 정도 계산
-- `BUY_RECOMMEND`: 최저가와 구매 추천처를 분리해 제시
-- `PRICE_ALERT`: 관심 상품 저장 및 가격 변동 알림
+- 가장 적게 결제하기
+- 지금 사기 좋은지 확인하기
+- 본품·추가 용량 많이 받기
+- 용량 대비 오래 쓰기
+- 한정 사은품 챙기기
+- 필요한 만큼만 사기
 
-## Verdict Types
+결과 화면에서는 전체 판단과 함께 사용자가 고른 기준별 결과를 따로 보여줍니다.
 
-- `REAL_SALE`: 평소 가격과 직전 세일 대비 의미 있게 저렴한 경우
-- `NORMAL_PRICE`: 세일처럼 보이지만 실제로는 평소와 비슷한 경우
-- `LOWEST_CAUTION`: 최저가는 낮지만 판매처나 상품 조건 확인이 필요한 경우
-- `BUY_ELSEWHERE`: 다른 플랫폼의 구매 조건이 더 좋은 경우
-- `SET_VALUE`: 기획세트나 증정품까지 보면 구매 가치가 있는 경우
-- `LOW_REAL_BENEFIT`: 표시 할인율은 높지만 실질 이득은 낮은 경우
-- `WAIT_OK`: 지금 급하게 사지 않아도 되는 경우
+## 결과
 
-## Branch Flow
+결과는 크게 세 가지로 나눕니다.
+
+- `저점매수`: 최근 평균가나 직전 세일보다 조건이 좋은 경우
+- `원가에 가까움`: 세일처럼 보이지만 평소 가격과 큰 차이가 없는 경우
+- `적당히 살 만함`: 가격만 보면 저점은 아니지만 구성이나 사은품까지 보면 살 이유가 있는 경우
+
+결론 아래에는 가격 변화 차트, 판매처별 비교표, 기준별 판단 근거를 둡니다.
+
+## MVP 범위
+
+처음부터 모든 판매처의 실시간 가격을 자동으로 수집하지는 않습니다. 데모에서는 대표 상품과 샘플 데이터를 먼저 넣고, 링크 입력부터 결과 화면까지 흐름이 실제로 동작하는 것을 목표로 합니다.
+
+MVP에서 구현할 내용:
+
+- 회원가입 및 구매 기준 선택
+- 상품 링크 입력
+- 샘플 상품 데이터 조회
+- 실구매가, 용량당 가격, 실질 할인율 계산
+- 상품 구성품 구분
+- 최종 결론과 기준별 결과 표시
+- 관심 상품 저장 및 알림 예시
+
+## API 초안
+
+- `POST /analyze-link`
+- `GET /analysis/{id}`
+- `GET /products/{id}/offers`
+- `POST /user-criteria`
+- `POST /saved-products`
+- `GET /saved-products`
+- `POST /alerts`
+
+## 기술 방향
+
+- Frontend: React 또는 Next.js
+- Backend: Node.js 또는 NestJS
+- Database: Supabase PostgreSQL
+- AI: OpenAI API
+- Chart: Recharts
+- Deploy: Vercel, Render, Supabase
+
+AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 설명에서 단품, 기획세트, 본품, 추가 용량, 사은품을 구분하고 계산 결과를 설명하는 데 사용합니다.
+
+## 브랜치
 
 ```txt
-backend      \
-frontend/a    -> main
-frontend/b   /
+work/backend      \
+work/frontend/a    -> dev -> main
+work/frontend/b   /
 ```
 
+- `main`: 안정 버전
+- `dev`: 통합 개발 브랜치
+- `work/backend`: 백엔드 작업
+- `work/frontend/a`: 프론트엔드 1 작업
+- `work/frontend/b`: 프론트엔드 2 작업
+
+각 작업 브랜치에서 개발하고 `dev`로 합친 뒤, 안정화되면 `main`으로 올립니다.
