@@ -4,7 +4,7 @@ export type RecentAnalysisItem = {
   sellerName: string;
   analyzedAt: string;
   price: number;
-  imageUrl: null;
+  imageUrl: string | null;
 };
 
 export type ProductPreview = {
@@ -17,7 +17,7 @@ export type ProductPreview = {
   sourceUrl: string;
 };
 
-export type HomeNotificationItem = {
+type HomeNotificationBase = {
   id: string;
   title: string;
   message: string;
@@ -25,6 +25,12 @@ export type HomeNotificationItem = {
   isRead: boolean;
   type: "analysis" | "price" | "promotion" | "service";
 };
+
+export type HomeNotificationItem = HomeNotificationBase & (
+  | { actionType: "navigate"; targetPath: string }
+  | { actionType: "modal"; analysisId?: string }
+  | { actionType: "none" }
+);
 
 export const DEMO_PRODUCT_URL = "https://catchcatch.example/products/demo";
 
@@ -47,9 +53,13 @@ export const RECENT_ANALYSES: RecentAnalysisItem[] = [
   { id: "recent-6", productName: "저자극 클렌징 오일 대용량", sellerName: "플랫폼명", analyzedAt: "2026.06.28", price: 41700, imageUrl: null },
 ];
 
+export function getRecentAnalysisById(id: string) {
+  return RECENT_ANALYSES.find((analysis) => analysis.id === id) ?? null;
+}
+
 export const HOME_NOTIFICATIONS: HomeNotificationItem[] = [
-  { id: "notification-1", title: "분석이 완료되었어요", message: "000의 분석이 완료되었습니다.", createdAtLabel: "0분 전", isRead: false, type: "analysis" },
-  { id: "notification-2", title: "관심상품 가격이 변동되었어요", message: "000의 가격이 000원 내렸어요.", createdAtLabel: "0시간 전", isRead: false, type: "price" },
-  { id: "notification-3", title: "여름 세일이 시작됐어요!", message: "스킨케어 최대 00% 할인 중이에요.", createdAtLabel: "0시간 전", isRead: true, type: "promotion" },
-  { id: "notification-4", title: "서비스 점검 안내", message: "0월 00일(일) 새벽 0시~0시 서비스 점검이 있어요.", createdAtLabel: "0일 전", isRead: true, type: "service" },
+  { id: "notification-1", title: "분석이 완료되었어요", message: "000의 분석이 완료되었습니다.", createdAtLabel: "0분 전", isRead: false, type: "analysis", actionType: "modal", analysisId: "recent-1" },
+  { id: "notification-2", title: "관심상품 가격이 변동되었어요", message: "000의 가격이 000원 내렸어요.", createdAtLabel: "0시간 전", isRead: false, type: "price", actionType: "none" },
+  { id: "notification-3", title: "여름 세일이 시작됐어요!", message: "스킨케어 최대 00% 할인 중이에요.", createdAtLabel: "0시간 전", isRead: true, type: "promotion", actionType: "modal" },
+  { id: "notification-4", title: "서비스 점검 안내", message: "0월 00일(일) 새벽 0시~0시 서비스 점검이 있어요.", createdAtLabel: "0일 전", isRead: true, type: "service", actionType: "modal" },
 ];

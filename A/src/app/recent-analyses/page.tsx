@@ -4,8 +4,9 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DatePicker } from "@/components/home/date-picker";
+import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
-import { RECENT_ANALYSES } from "@/lib/mock/home";
+import { getRecentAnalysisById, RECENT_ANALYSES } from "@/lib/mock/home";
 import { isMockAuthenticated } from "@/lib/mock/session";
 
 type AppliedRange = {
@@ -29,6 +30,8 @@ export default function RecentAnalysesPage() {
   const [openCalendar, setOpenCalendar] = useState<OpenCalendar>(null);
   const [appliedRange, setAppliedRange] = useState<AppliedRange>({ startDate: "", endDate: "" });
   const [rangeError, setRangeError] = useState("");
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState("");
 
   useEffect(() => {
     const authorizationCheck = window.setTimeout(() => {
@@ -70,6 +73,25 @@ export default function RecentAnalysesPage() {
     setAppliedRange({ startDate, endDate });
   }
 
+  function openPreviousAnalysis(id: string) {
+    if (!getRecentAnalysisById(id)) {
+      setAnalysisError("이전 분석 결과를 불러오지 못했어요.");
+      setSelectedAnalysisId(null);
+      return;
+    }
+    setAnalysisError("");
+    setOpenCalendar(null);
+    setSelectedAnalysisId(id);
+  }
+
+  function closePreviousAnalysis() {
+    setSelectedAnalysisId(null);
+  }
+
+  const selectedAnalysis = selectedAnalysisId
+    ? getRecentAnalysisById(selectedAnalysisId)
+    : null;
+
   if (!isAuthorized) return null;
 
   return (
@@ -110,10 +132,16 @@ export default function RecentAnalysesPage() {
 
         {filteredAnalyses.length > 0 ? (
           <div className="recent-list">
-            {filteredAnalyses.map((item) => <RecentAnalysisCard key={item.id} item={item} />)}
+            {filteredAnalyses.map((item) => (
+              <RecentAnalysisCard key={item.id} item={item} onSelect={openPreviousAnalysis} />
+            ))}
           </div>
         ) : <p className="recent-empty">해당 기간의 분석 기록이 없어요.</p>}
+        {analysisError ? <p className="date-filter-error" role="alert">{analysisError}</p> : null}
       </div>
+      {selectedAnalysis ? (
+        <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={closePreviousAnalysis} />
+      ) : null}
     </main>
   );
 }

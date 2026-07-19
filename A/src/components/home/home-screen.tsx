@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   DEMO_PRODUCT,
   DEMO_PRODUCT_URL,
@@ -10,11 +10,18 @@ import {
   HomeNotificationItem,
   ProductPreview,
   RECENT_ANALYSES,
+  getRecentAnalysisById,
 } from "@/lib/mock/home";
+import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
+import { NotificationDetailDialog } from "@/components/home/notification-detail-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { clearMockAuthentication } from "@/lib/mock/session";
 
 type OpenPanel = "menu" | "notifications" | null;
+type OpenHomeModal =
+  | { kind: "analysis"; analysisId: string }
+  | { kind: "notification"; notificationId: string }
+  | null;
 
 const MENU_ITEMS = ["마이페이지", "세일 캘린더", "관심 상품", "고객센터", "설정"];
 
@@ -36,6 +43,19 @@ function LinkIcon() {
 
 function ArrowIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>;
+}
+
+function NotificationTypeIcon({ type }: { type: HomeNotificationItem["type"] }) {
+  if (type === "analysis") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7M3 19h18" /></svg>;
+  }
+  if (type === "price") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 8 4-4h7l4 4v7l-4 4H9l-4-4Z" /><path d="M9 8h6m-3-2v4m-3 4h6" /></svg>;
+  }
+  if (type === "promotion") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 12 8-8h7v7l-8 8Z" /><path d="M15.5 7.5h.01M8 14l2 2m0-4-2 4" /></svg>;
+  }
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 10v6m0-9h.01" /></svg>;
 }
 
 function formatPrice(price: number) {
@@ -63,19 +83,24 @@ function ProductPreviewCard({ product }: { product: ProductPreview }) {
   );
 }
 
-function NotificationItem({ item, onRead }: { item: HomeNotificationItem; onRead: (id: string) => void }) {
+function NotificationItem({ item, onActivate }: { item: HomeNotificationItem; onActivate: (item: HomeNotificationItem) => void }) {
+  const hasDetailAction = item.actionType !== "none";
   return (
     <button
       className={item.isRead ? "notification-item is-read" : "notification-item unread"}
       type="button"
-      onClick={() => onRead(item.id)}
-      aria-label={item.title + ", " + (item.isRead ? "읽은 알림" : "안 읽은 알림")}
+      data-notification-id={item.id}
+      data-action-type={item.actionType}
+      onClick={() => onActivate(item)}
+      aria-label={`${item.title}, ${item.isRead ? "읽은 알림" : "안 읽은 알림"}${hasDetailAction ? ", 상세 확인" : ""}`}
     >
+      <span className="notification-type-icon"><NotificationTypeIcon type={item.type} /></span>
       <span className="notification-copy">
         <strong>{item.title}</strong>
         <span>{item.message}</span>
         <time>{item.createdAtLabel}</time>
       </span>
+      {hasDetailAction ? <span className="notification-action-icon"><ArrowIcon /></span> : null}
       {!item.isRead ? (
         <>
           <span className="notification-unread-dot" aria-hidden="true" />
@@ -86,12 +111,13 @@ function NotificationItem({ item, onRead }: { item: HomeNotificationItem; onRead
   );
 }
 
-function NotificationDrawer({ notifications, unreadCount, onRead, onMarkAllRead, onClose, isClosing }: {
+function NotificationDrawer({ notifications, unreadCount, onActivate, onMarkAllRead, onClose, actionError, isClosing }: {
   notifications: HomeNotificationItem[];
   unreadCount: number;
-  onRead: (id: string) => void;
+  onActivate: (item: HomeNotificationItem) => void;
   onMarkAllRead: () => void;
   onClose: () => void;
+  actionError: string;
   isClosing: boolean;
 }) {
   return (
@@ -104,8 +130,9 @@ function NotificationDrawer({ notifications, unreadCount, onRead, onMarkAllRead,
         </div>
       </div>
       <div className="notification-list">
-        {notifications.map((item) => <NotificationItem key={item.id} item={item} onRead={onRead} />)}
+        {notifications.map((item) => <NotificationItem key={item.id} item={item} onActivate={onActivate} />)}
       </div>
+      {actionError ? <p className="notification-action-error" role="alert">{actionError}</p> : null}
     </aside>
   );
 }
@@ -130,19 +157,45 @@ export function HomeScreen() {
   const [product, setProduct] = useState<ProductPreview | null>(null);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const productRegionRef = useRef<HTMLDivElement>(null);
+  const homePageRef = useRef<HTMLElement>(null);
   const [notifications, setNotifications] = useState<HomeNotificationItem[]>(HOME_NOTIFICATIONS);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [isDrawerClosing, setIsDrawerClosing] = useState(false);
+  const [openModal, setOpenModal] = useState<OpenHomeModal>(null);
+  const [notificationActionError, setNotificationActionError] = useState("");
   const unreadCount = notifications.filter((item) => !item.isRead).length;
+  const selectedAnalysis = openModal?.kind === "analysis"
+    ? getRecentAnalysisById(openModal.analysisId)
+    : null;
+  const selectedNotification = openModal?.kind === "notification"
+    ? notifications.find((item) => item.id === openModal.notificationId) ?? null
+    : null;
+  const hasOpenNotificationModal = Boolean(openPanel && openModal);
+  const hasOpenNotificationModalRef = useRef(hasOpenNotificationModal);
 
   const closeDrawer = useCallback(() => {
     if (!openPanel || isDrawerClosing) return;
+    setOpenModal(null);
+    setNotificationActionError("");
     setIsDrawerClosing(true);
     window.setTimeout(() => {
       setOpenPanel(null);
       setIsDrawerClosing(false);
     }, 300);
   }, [isDrawerClosing, openPanel]);
+  const closeDrawerRef = useRef(closeDrawer);
+
+  useEffect(() => {
+    closeDrawerRef.current = closeDrawer;
+  }, [closeDrawer]);
+
+  useEffect(() => {
+    hasOpenNotificationModalRef.current = hasOpenNotificationModal;
+  }, [hasOpenNotificationModal]);
+
+  useLayoutEffect(() => {
+    return () => setOpenModal(null);
+  }, []);
 
   useEffect(() => {
     if (!isProductPopoverOpen) return;
@@ -153,26 +206,47 @@ export function HomeScreen() {
     return () => document.removeEventListener("pointerdown", handleOutsidePointer);
   }, [isProductPopoverOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!openPanel) return;
-    const previousOverflow = document.body.style.overflow;
+    const scrollY = window.scrollY;
+    const frame = homePageRef.current;
+    const bodyWidth = document.body.getBoundingClientRect().width;
+    const previousBodyStyles = {
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+    };
+
+    frame?.style.setProperty("--home-panel-top", `${scrollY}px`);
     document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = `${bodyWidth}px`;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDrawer();
+      if (event.key === "Escape" && !hasOpenNotificationModalRef.current) closeDrawerRef.current();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      document.body.style.overflow = previousBodyStyles.overflow;
+      document.body.style.position = previousBodyStyles.position;
+      document.body.style.top = previousBodyStyles.top;
+      document.body.style.width = previousBodyStyles.width;
+      frame?.style.removeProperty("--home-panel-top");
+      window.scrollTo(0, scrollY);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [closeDrawer, openPanel]);
+  }, [openPanel]);
 
   function openDrawer(panel: Exclude<OpenPanel, null>) {
+    setOpenModal(null);
+    setNotificationActionError("");
     setIsDrawerClosing(false);
     setOpenPanel(panel);
   }
 
   function handleLogout() {
+    setOpenModal(null);
     clearMockAuthentication();
     setIsDrawerClosing(true);
     window.setTimeout(() => {
@@ -186,6 +260,32 @@ export function HomeScreen() {
     setNotifications((current) => current.map((item) => (
       item.id === id && !item.isRead ? { ...item, isRead: true } : item
     )));
+  }
+
+  function activateNotification(item: HomeNotificationItem) {
+    markNotificationAsRead(item.id);
+    setNotificationActionError("");
+    setOpenModal(null);
+
+    if (item.actionType === "none") return;
+    if (item.actionType === "navigate") {
+      setIsDrawerClosing(true);
+      window.setTimeout(() => {
+        setOpenPanel(null);
+        setIsDrawerClosing(false);
+        router.push(item.targetPath);
+      }, 300);
+      return;
+    }
+    if (item.analysisId) {
+      if (!getRecentAnalysisById(item.analysisId)) {
+        setNotificationActionError("연결된 이전 분석 결과를 불러오지 못했어요.");
+        return;
+      }
+      setOpenModal({ kind: "analysis", analysisId: item.analysisId });
+      return;
+    }
+    setOpenModal({ kind: "notification", notificationId: item.id });
   }
 
   function markAllNotificationsAsRead() {
@@ -207,7 +307,7 @@ export function HomeScreen() {
   }
 
   return (
-    <main className="home-page">
+    <main className="home-page" ref={homePageRef}>
       <div className="home-mobile-shell">
         <header className="home-header">
           <button className="home-icon-button" type="button" aria-label="메뉴 열기" onClick={() => openDrawer("menu")}><MenuIcon /></button>
@@ -254,30 +354,50 @@ export function HomeScreen() {
             <Link className="recent-more" href="/recent-analyses">더보기 <ArrowIcon /></Link>
           </div>
           <div className="recent-list">
-            {RECENT_ANALYSES.slice(0, 3).map((item) => <RecentAnalysisCard key={item.id} item={item} />)}
+            {RECENT_ANALYSES.slice(0, 3).map((item) => (
+              <RecentAnalysisCard
+                key={item.id}
+                item={item}
+                onSelect={(id) => setOpenModal({ kind: "analysis", analysisId: id })}
+              />
+            ))}
           </div>
         </section>
       </div>
 
       {openPanel ? (
-        <button
-          className={"drawer-overlay " + (isDrawerClosing ? "is-closing" : "is-open")}
-          type="button"
-          aria-label="열린 패널 닫기"
-          onClick={closeDrawer}
-        />
+        <div className={`home-panel-layer ${openModal ? "has-modal" : ""}`}>
+          <button
+            className={"drawer-overlay " + (isDrawerClosing ? "is-closing" : "is-open")}
+            type="button"
+            aria-label="열린 패널 닫기"
+            onClick={closeDrawer}
+          />
+          {openPanel === "notifications" ? (
+            <NotificationDrawer
+              notifications={notifications}
+              unreadCount={unreadCount}
+              onActivate={activateNotification}
+              onMarkAllRead={markAllNotificationsAsRead}
+              onClose={closeDrawer}
+              actionError={notificationActionError}
+              isClosing={isDrawerClosing}
+            />
+          ) : null}
+          {openPanel === "menu" ? (
+            <MenuDrawer onClose={closeDrawer} onLogout={handleLogout} isClosing={isDrawerClosing} />
+          ) : null}
+          {selectedAnalysis ? (
+            <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setOpenModal(null)} />
+          ) : null}
+          {selectedNotification ? (
+            <NotificationDetailDialog notification={selectedNotification} onClose={() => setOpenModal(null)} />
+          ) : null}
+        </div>
       ) : null}
-      {openPanel === "notifications" ? (
-        <NotificationDrawer
-          notifications={notifications}
-          unreadCount={unreadCount}
-          onRead={markNotificationAsRead}
-          onMarkAllRead={markAllNotificationsAsRead}
-          onClose={closeDrawer}
-          isClosing={isDrawerClosing}
-        />
+      {selectedAnalysis && !openPanel ? (
+        <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setOpenModal(null)} />
       ) : null}
-      {openPanel === "menu" ? <MenuDrawer onClose={closeDrawer} onLogout={handleLogout} isClosing={isDrawerClosing} /> : null}
     </main>
   );
 }
