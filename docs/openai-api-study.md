@@ -6,7 +6,8 @@ API 키는 브라우저가 아니라 서버의 `.env`에만 둔다. `.env.exampl
 
 `AiJudgmentService`는 OpenAI SDK의 `responses.parse()`와 `zodTextFormat()`을 사용한다. 모델 응답이 Zod 스키마를 따르더라도 서버는 다음 도메인 규칙을 다시 검사한다.
 
-- 결론이 `allowed_conclusions`에 포함되는가
+- `DECIDED` 결론이 `allowed_conclusions`에 포함되는가
+- 근거 부족 시 `INSUFFICIENT_EVIDENCE`, `conclusion: null`, 추천 없음이 함께 지켜지는가
 - 추천 ID가 `allowed_offer_ids`에 포함되는가
 - 근거 ID가 실제 입력 사실만 가리키는가
 

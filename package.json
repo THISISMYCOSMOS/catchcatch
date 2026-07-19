@@ -6,8 +6,9 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "test": "jest",
+    "test": "node scripts/run-tests.cjs",
     "test:watch": "jest --watch",
+    "eval:ai:live": "tsx scripts/run-judgment-bias-evals.ts",
     "openai:check": "tsx scripts/openai-check.ts"
   },
   "dependencies": {
