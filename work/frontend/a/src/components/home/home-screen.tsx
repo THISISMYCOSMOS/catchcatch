@@ -359,6 +359,7 @@ export function HomeScreen() {
                 key={item.id}
                 item={item}
                 onSelect={(id) => setOpenModal({ kind: "analysis", analysisId: id })}
+                variant="history"
               />
             ))}
           </div>

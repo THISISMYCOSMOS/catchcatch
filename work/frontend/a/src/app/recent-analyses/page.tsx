@@ -133,7 +133,7 @@ export default function RecentAnalysesPage() {
         {filteredAnalyses.length > 0 ? (
           <div className="recent-list">
             {filteredAnalyses.map((item) => (
-              <RecentAnalysisCard key={item.id} item={item} onSelect={openPreviousAnalysis} />
+              <RecentAnalysisCard key={item.id} item={item} onSelect={openPreviousAnalysis} variant="history" />
             ))}
           </div>
         ) : <p className="recent-empty">해당 기간의 분석 기록이 없어요.</p>}
