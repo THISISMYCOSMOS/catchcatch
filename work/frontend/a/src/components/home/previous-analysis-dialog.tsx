@@ -124,8 +124,9 @@ export function PreviousAnalysisDialog({ analysis, onClose }: PreviousAnalysisDi
       >
         <header className="previous-analysis-header">
           <div className="previous-analysis-heading">
+            <p className="previous-analysis-eyebrow">PRECIOUS ANALYSIS RESULTS</p>
             <h2 id="previous-analysis-title">이전 분석 결과</h2>
-            <p id="previous-analysis-description">저장된 분석 내용을 다시 확인할 수 있어요</p>
+            <p className="previous-analysis-description" id="previous-analysis-description">저장된 분석 내용을 다시 확인할 수 있어요</p>
           </div>
           <button
             className="previous-analysis-close"
@@ -152,8 +153,7 @@ export function PreviousAnalysisDialog({ analysis, onClose }: PreviousAnalysisDi
             </div>
           </section>
 
-          <section className="previous-analysis-section" aria-labelledby="stored-analysis-heading">
-            <h3 id="stored-analysis-heading">저장된 분석정보</h3>
+          <section className="previous-analysis-section" aria-label="저장된 분석 정보">
             <dl className="previous-analysis-details">
               <div>
                 <dt>분석일</dt>
@@ -169,6 +169,10 @@ export function PreviousAnalysisDialog({ analysis, onClose }: PreviousAnalysisDi
               </div>
             </dl>
           </section>
+
+          <button className="button button-primary previous-analysis-confirm" type="button" onClick={closeFromControl}>
+            확인
+          </button>
         </div>
       </div>
     </div>
