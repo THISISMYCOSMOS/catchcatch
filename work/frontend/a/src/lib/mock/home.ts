@@ -32,14 +32,14 @@ export type HomeNotificationItem = HomeNotificationBase & (
   | { actionType: "none" }
 );
 
-export const DEMO_PRODUCT_URL = "https://catchcatch.example/products/demo";
+export const DEMO_PRODUCT_URL = "https://www.coupang.com";
 
 export const DEMO_PRODUCT: ProductPreview = {
   id: "demo-product",
-  productName: "상품명",
-  sellerName: "플랫폼명",
-  price: 100000,
-  description: "상품에 대한 설명",
+  productName: "라운드랩 독도 선크림",
+  sellerName: "쿠팡",
+  price: 15000,
+  description: "연결 확인을 위한 데모 상품 정보예요. 실제 상품 분석 API 데이터가 아닙니다.",
   imageUrl: null,
   sourceUrl: DEMO_PRODUCT_URL,
 };

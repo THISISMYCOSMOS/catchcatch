@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   DEMO_PRODUCT,
   DEMO_PRODUCT_URL,
@@ -16,6 +16,7 @@ import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dial
 import { NotificationDetailDialog } from "@/components/home/notification-detail-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { clearMockAuthentication } from "@/lib/mock/session";
+import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
 
 type OpenPanel = "menu" | "notifications" | null;
 type OpenHomeModal =
@@ -24,6 +25,7 @@ type OpenHomeModal =
   | null;
 
 const MENU_ITEMS = ["마이페이지", "세일 캘린더", "관심 상품", "고객센터", "설정"];
+const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
 
 function MenuIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14" /></svg>;
@@ -66,9 +68,27 @@ function ImagePlaceholder({ compact = false }: { compact?: boolean }) {
   return <div className={compact ? "product-image-placeholder compact" : "product-image-placeholder"} aria-label="상품 이미지 없음" />;
 }
 
-function ProductPreviewCard({ product }: { product: ProductPreview }) {
+function ProductPreviewCard({ product, isSelecting, onSelect }: {
+  product: ProductPreview;
+  isSelecting: boolean;
+  onSelect: () => void;
+}) {
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect();
+  }
+
   return (
-    <article className="product-preview product-preview-popover" aria-live="polite">
+    <article
+      className={`product-preview product-preview-popover${isSelecting ? " is-selecting" : ""}`}
+      role="button"
+      tabIndex={0}
+      aria-label={`${product.productName} 상품 선택`}
+      aria-live="polite"
+      onClick={onSelect}
+      onKeyDown={handleKeyDown}
+    >
       <ImagePlaceholder />
       <div className="product-preview-main">
         <h2>{product.productName}</h2>
@@ -154,8 +174,13 @@ function MenuDrawer({ onClose, onLogout, isClosing }: { onClose: () => void; onL
 export function HomeScreen() {
   const router = useRouter();
   const [linkValue, setLinkValue] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const [isNavigatingToResult, setIsNavigatingToResult] = useState(false);
+  const isNavigatingToResultRef = useRef(false);
   const [product, setProduct] = useState<ProductPreview | null>(null);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
+  const [isProductSelecting, setIsProductSelecting] = useState(false);
+  const productSelectionTimerRef = useRef<number | null>(null);
   const productRegionRef = useRef<HTMLDivElement>(null);
   const homePageRef = useRef<HTMLElement>(null);
   const [notifications, setNotifications] = useState<HomeNotificationItem[]>(HOME_NOTIFICATIONS);
@@ -173,6 +198,20 @@ export function HomeScreen() {
   const hasOpenNotificationModal = Boolean(openPanel && openModal);
   const hasOpenNotificationModalRef = useRef(hasOpenNotificationModal);
 
+  useEffect(() => {
+    const savedLink = window.sessionStorage.getItem(ANALYSIS_LINK_STORAGE_KEY);
+    if (!savedLink) return;
+
+    const validation = validateCoupangProductUrl(savedLink);
+    if (!validation.ok) return;
+
+    const restoreLink = window.setTimeout(() => {
+      setLinkValue(validation.productUrl);
+      setProduct({ ...DEMO_PRODUCT, sourceUrl: validation.productUrl });
+    }, 0);
+    return () => window.clearTimeout(restoreLink);
+  }, []);
+
   const closeDrawer = useCallback(() => {
     if (!openPanel || isDrawerClosing) return;
     setOpenModal(null);
@@ -184,6 +223,15 @@ export function HomeScreen() {
     }, 300);
   }, [isDrawerClosing, openPanel]);
   const closeDrawerRef = useRef(closeDrawer);
+
+  const closeProductPopover = useCallback(() => {
+    if (productSelectionTimerRef.current !== null) {
+      window.clearTimeout(productSelectionTimerRef.current);
+      productSelectionTimerRef.current = null;
+    }
+    setIsProductSelecting(false);
+    setIsProductPopoverOpen(false);
+  }, []);
 
   useEffect(() => {
     closeDrawerRef.current = closeDrawer;
@@ -197,14 +245,20 @@ export function HomeScreen() {
     return () => setOpenModal(null);
   }, []);
 
+  useEffect(() => () => {
+    if (productSelectionTimerRef.current !== null) {
+      window.clearTimeout(productSelectionTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isProductPopoverOpen) return;
     const handleOutsidePointer = (event: PointerEvent) => {
-      if (!productRegionRef.current?.contains(event.target as Node)) setIsProductPopoverOpen(false);
+      if (!productRegionRef.current?.contains(event.target as Node)) closeProductPopover();
     };
     document.addEventListener("pointerdown", handleOutsidePointer);
     return () => document.removeEventListener("pointerdown", handleOutsidePointer);
-  }, [isProductPopoverOpen]);
+  }, [closeProductPopover, isProductPopoverOpen]);
 
   useLayoutEffect(() => {
     if (!openPanel) return;
@@ -295,15 +349,50 @@ export function HomeScreen() {
   }
 
   function handleLinkChange(value: string) {
+    closeProductPopover();
     setLinkValue(value);
-    const matchedProduct = value.trim() === DEMO_PRODUCT_URL ? DEMO_PRODUCT : null;
+    setLinkError("");
+    const validation = validateCoupangProductUrl(value);
+    const matchedProduct = validation.ok
+      ? { ...DEMO_PRODUCT, sourceUrl: validation.productUrl }
+      : null;
     setProduct(matchedProduct);
     setIsProductPopoverOpen(Boolean(matchedProduct));
   }
 
+  function handleSelectProduct() {
+    if (productSelectionTimerRef.current !== null) return;
+
+    setIsProductSelecting(true);
+    productSelectionTimerRef.current = window.setTimeout(() => {
+      productSelectionTimerRef.current = null;
+      setIsProductSelecting(false);
+      setIsProductPopoverOpen(false);
+    }, 160);
+  }
+
   function handleAnalyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!product) return;
+    if (isNavigatingToResultRef.current) return;
+
+    const validation = validateCoupangProductUrl(linkValue);
+    if (!validation.ok) {
+      setProduct(null);
+      setIsProductPopoverOpen(false);
+      setLinkError(validation.message);
+      return;
+    }
+
+    const query = new URLSearchParams({
+      url: validation.productUrl,
+      platform: validation.platform,
+    });
+
+    isNavigatingToResultRef.current = true;
+    setIsNavigatingToResult(true);
+    setLinkError("");
+    window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, validation.productUrl);
+    router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
   }
 
   return (
@@ -323,7 +412,7 @@ export function HomeScreen() {
           <p>상품 링크를 붙여넣으면 가격차트, 최저가 쇼핑몰까지<br className="wide-only-break" /> 한 번에 분석해드려요.</p>
         </section>
 
-        <form className="analysis-form" onSubmit={handleAnalyze}>
+        <form className="analysis-form" onSubmit={handleAnalyze} noValidate>
           <div className="analysis-input-region" ref={productRegionRef}>
             <label className="analysis-input-wrap">
               <span className="sr-only">상품 링크</span>
@@ -333,18 +422,27 @@ export function HomeScreen() {
                 value={linkValue}
                 onChange={(event) => handleLinkChange(event.target.value)}
                 onFocus={() => {
-                  if (linkValue.trim() === DEMO_PRODUCT_URL && product) setIsProductPopoverOpen(true);
+                  if (product) setIsProductPopoverOpen(true);
                 }}
                 onClick={() => {
-                  if (linkValue.trim() === DEMO_PRODUCT_URL && product) setIsProductPopoverOpen(true);
+                  if (product) setIsProductPopoverOpen(true);
                 }}
                 placeholder="링크 붙여넣기"
                 autoComplete="url"
+                aria-invalid={Boolean(linkError)}
+                aria-describedby={linkError ? "analysis-link-error" : undefined}
               />
             </label>
-            {product && isProductPopoverOpen ? <ProductPreviewCard product={product} /> : null}
+            {product && isProductPopoverOpen ? (
+              <ProductPreviewCard
+                product={product}
+                isSelecting={isProductSelecting}
+                onSelect={handleSelectProduct}
+              />
+            ) : null}
           </div>
-          <button className="analysis-submit" type="submit" disabled={!product}>분석하기</button>
+          {linkError ? <p className="analysis-link-error" id="analysis-link-error" role="alert">{linkError}</p> : null}
+          <button className="analysis-submit" type="submit" disabled={isNavigatingToResult}>분석하기</button>
           <p className="demo-link-hint">데모 링크: {DEMO_PRODUCT_URL}</p>
         </form>
 
