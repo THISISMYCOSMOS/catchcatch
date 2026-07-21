@@ -470,7 +470,7 @@ button, input, textarea, select { font: inherit; }
 }
 
 .login-card .stage-header h1,
-.signup-card .stage-header h1 { text-align: left; }
+.signup-card .stage-header h1 { text-align: center; }
 .login-card .brand { margin-bottom: clamp(48px, 9svh, 80px); }
 .stage-form { gap: 20px; }
 .field-group label { font-weight: 700; }
