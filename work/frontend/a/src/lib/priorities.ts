@@ -6,7 +6,7 @@ export const PRIORITIES = [
   { id: "needed_quantity", label: "필요한 만큼 구매" },
   { id: "simple_discount", label: "간편한 할인" },
   { id: "fast_delivery", label: "빠른 배송" },
-  { id: "rewards_membership", label: "적립·멤버십 혜택" },
+  { id: "rewards_membership", label: "적립금·멤버십 혜택" },
 ] as const;
 
 export type PriorityId = (typeof PRIORITIES)[number]["id"];

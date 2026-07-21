@@ -1,23 +1,23 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
 import { mockSignup } from "@/lib/mock/auth";
-import { setMockAuthenticated } from "@/lib/mock/session";
+import { clearMockAuthentication, initializeMockOnboarding } from "@/lib/mock/session";
 import { getSignupError, isSignupValid, SignupField, SignupValues } from "@/lib/validation/auth";
 
 const INITIAL_VALUES: SignupValues = { email: "", username: "", password: "", passwordConfirmation: "", agreedToTerms: false };
 
 export default function SignupPage() {
-  const router = useRouter();
   const [values, setValues] = useState(INITIAL_VALUES);
   const [touched, setTouched] = useState<Partial<Record<SignupField, boolean>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
+  const [isSignupComplete, setIsSignupComplete] = useState(false);
   const canSubmit = isSignupValid(values) && !isSubmitting;
   const errorFor = (field: SignupField) => touched[field] ? getSignupError(field, values) : undefined;
   const update = (field: SignupField, value: string | boolean) => {
@@ -32,16 +32,30 @@ export default function SignupPage() {
     if (!isSignupValid(values)) return;
     setIsSubmitting(true);
     try {
-      const result = await mockSignup();
+      const result = await mockSignup(values.username, values.password);
       if (result.ok) {
-        setMockAuthenticated();
-        router.push("/priorities");
+        initializeMockOnboarding(values.username);
+        clearMockAuthentication();
+        setIsSignupComplete(true);
+      } else {
+        setFormError("이미 사용 중인 아이디입니다.");
       }
     } catch {
       setFormError("회원가입 처리 중 예상하지 못한 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  if (isSignupComplete) {
+    return (
+      <AuthShell title="회원가입 완료" className="signup-complete-card">
+        <div className="signup-complete-content">
+          <p>회원가입이 완료되었어요.<br />로그인하고 캐치캐치를 시작해보세요.</p>
+          <Link className="button button-primary" href="/login">로그인하러 가기</Link>
+        </div>
+      </AuthShell>
+    );
   }
 
   return (

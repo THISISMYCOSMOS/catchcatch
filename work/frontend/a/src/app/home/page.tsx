@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HomeScreen } from "@/components/home/home-screen";
-import { isMockAuthenticated } from "@/lib/mock/session";
+import { getMockAuthenticatedRoute } from "@/lib/mock/session";
 
 export default function HomePage() {
   const router = useRouter();
@@ -11,8 +11,9 @@ export default function HomePage() {
 
   useEffect(() => {
     const authorizationCheck = window.setTimeout(() => {
-      if (!isMockAuthenticated()) {
-        router.replace("/login");
+      const authenticatedRoute = getMockAuthenticatedRoute();
+      if (authenticatedRoute !== "/home") {
+        router.replace(authenticatedRoute);
         return;
       }
       setIsAuthorized(true);

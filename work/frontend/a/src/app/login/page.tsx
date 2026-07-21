@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
 import { mockLogin } from "@/lib/mock/auth";
-import { isMockAuthenticated, setMockAuthenticated } from "@/lib/mock/session";
+import { getMockAuthenticatedRoute, setMockAuthenticated } from "@/lib/mock/session";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,7 +19,8 @@ export default function LoginPage() {
   const canSubmit = Boolean(username.trim() && password) && !isSubmitting;
 
   useEffect(() => {
-    if (isMockAuthenticated()) router.replace("/home");
+    const authenticatedRoute = getMockAuthenticatedRoute();
+    if (authenticatedRoute !== "/login") router.replace(authenticatedRoute);
   }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -33,13 +34,13 @@ export default function LoginPage() {
     if (nextErrors.username || nextErrors.password) return;
     setIsSubmitting(true);
     try {
-      const isValid = await mockLogin(username.trim(), password);
-      if (!isValid) {
+      const result = await mockLogin(username.trim(), password);
+      if (!result.ok) {
         setErrors({ form: "아이디 또는 비밀번호가 일치하지 않습니다." });
         return;
       }
-      setMockAuthenticated(rememberLogin);
-      router.replace("/home");
+      setMockAuthenticated(result.username, rememberLogin);
+      router.replace(getMockAuthenticatedRoute());
     } catch {
       setErrors({ form: "로그인 처리 중 예상하지 못한 오류가 발생했습니다." });
     } finally {

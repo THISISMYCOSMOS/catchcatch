@@ -49,15 +49,15 @@ function ArrowIcon() {
 
 function NotificationTypeIcon({ type }: { type: HomeNotificationItem["type"] }) {
   if (type === "analysis") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9m7 10V5m7 14v-7M3 19h18" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.5h7l3 3V20H7Z" /><path d="M14 3.5V7h3m-7.5 6 1.7 1.7 3.4-3.5" /></svg>;
   }
   if (type === "price") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 8 4-4h7l4 4v7l-4 4H9l-4-4Z" /><path d="M9 8h6m-3-2v4m-3 4h6" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 7 6 6 4-4 6 6" /><path d="M15 15h5v-5" /></svg>;
   }
   if (type === "promotion") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 12 8-8h7v7l-8 8Z" /><path d="M15.5 7.5h.01M8 14l2 2m0-4-2 4" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 12 8-8h7v7l-8 8Z" /><path d="M15.5 7.5h.01M8.5 13.5h.01m3 3h.01m-3.5.5 4-4" /></svg>;
   }
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 10v6m0-9h.01" /></svg>;
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 11v5m0-8h.01" /></svg>;
 }
 
 function formatPrice(price: number) {
