@@ -22,6 +22,12 @@ const STORE_SERIES: ReadonlyArray<{ key: StoreSeriesKey; label: string }> = [
   { key: "official", label: "공식몰" },
 ];
 
+const CONFIDENCE_GUIDE = [
+  { label: "높음", description: "가격과 구매 조건 등 주요 정보가 충분히 확인됐어요." },
+  { label: "보통", description: "핵심 정보는 확인됐지만 일부 조건은 추가 확인이 필요해요." },
+  { label: "낮음", description: "정보가 부족하거나 상품 매칭이 불확실해 참고가 필요해요." },
+] as const;
+
 function BackIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" /></svg>;
 }
@@ -122,7 +128,31 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
                 <p className={styles.eyebrow}>AI 구매 판단</p>
                 <h2>{analysisMock.verdict.title}</h2>
                 <p className={styles.verdictSummary}>{analysisMock.verdict.summary}</p>
-                <div className={styles.confidenceRow}><span>판단 신뢰도</span><strong>{analysisMock.confidence.label}</strong><small>{analysisMock.confidence.summary}</small></div>
+                <div className={styles.confidenceRow}>
+                  <span>판단 신뢰도</span>
+                  <div className={styles.confidenceControl}>
+                    <button
+                      className={styles.confidenceBadge}
+                      type="button"
+                      aria-describedby="confidence-guide"
+                      aria-label={`판단 신뢰도 ${analysisMock.confidence.label}. 신뢰도 기준 보기`}
+                    >
+                      {analysisMock.confidence.label}
+                    </button>
+                    <div className={styles.confidenceTooltip} id="confidence-guide" role="tooltip">
+                      <p>판단 신뢰도 기준</p>
+                      <ul>
+                        {CONFIDENCE_GUIDE.map((level) => (
+                          <li className={level.label === analysisMock.confidence.label ? styles.currentConfidence : undefined} key={level.label}>
+                            <b>{level.label}</b>
+                            <span>{level.description}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  <small>{analysisMock.confidence.summary}</small>
+                </div>
               </div>
             </div>
 

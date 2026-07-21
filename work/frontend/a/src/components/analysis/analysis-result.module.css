@@ -188,8 +188,38 @@
   border-top: 1px solid #e6dcae;
 }
 
-.confidenceRow span { font-size: 12px; font-weight: 650; }
-.confidenceRow strong { justify-self: end; padding: 3px 8px; border: 1px solid #b69a39; border-radius: 999px; color: #654f0d; background: #fff6a8; font-size: 12px; }
+.confidenceRow > span { font-size: 12px; font-weight: 650; }
+.confidenceControl { position: relative; justify-self: end; }
+.confidenceBadge { padding: 3px 8px; border: 1px solid #b69a39; border-radius: 999px; color: #654f0d; background: #fff6a8; font: inherit; font-size: 12px; font-weight: 700; cursor: help; }
+.confidenceBadge:focus-visible { outline: 3px solid var(--gold-text); outline-offset: 2px; }
+.confidenceTooltip {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(280px, calc(100vw - 72px));
+  padding: 14px;
+  visibility: hidden;
+  border: 1px solid #d8c575;
+  border-radius: 12px;
+  color: var(--text);
+  background: #fffef8;
+  box-shadow: 0 10px 28px rgba(62, 49, 14, .16);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .15s ease, transform .15s ease, visibility .15s;
+  pointer-events: none;
+}
+.confidenceTooltip::after { content: ""; position: absolute; right: 15px; bottom: -6px; width: 10px; height: 10px; border-right: 1px solid #d8c575; border-bottom: 1px solid #d8c575; background: #fffef8; transform: rotate(45deg); }
+.confidenceControl:hover .confidenceTooltip,
+.confidenceControl:focus-within .confidenceTooltip { visibility: visible; opacity: 1; transform: translateY(0); }
+.confidenceTooltip p { margin: 0 0 10px; font-size: 12px; font-weight: 750; }
+.confidenceTooltip ul { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; list-style: none; }
+.confidenceTooltip li { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: start; color: var(--muted); }
+.confidenceTooltip li b { padding: 2px 0; border-radius: 999px; color: #6b665d; background: var(--inactive); font-size: 10px; line-height: 1.4; text-align: center; }
+.confidenceTooltip li span { font-size: 10px; font-weight: 500; line-height: 1.5; }
+.confidenceTooltip li.currentConfidence { color: var(--text); }
+.confidenceTooltip li.currentConfidence b { color: #654f0d; background: #fff6a8; }
 .confidenceRow small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; line-height: 1.5; }
 
 .similarButton {
