@@ -2,7 +2,7 @@ export const DATA_MODE = "frontend_mock" as const;
 
 const DEMO_ACCOUNT = {
   username: "catchcatch",
-  password: "catch2026",
+  password: "catch1234",
 } as const;
 
 const MOCK_ACCOUNTS_STORAGE_KEY = "catchcatch:mock-accounts";
