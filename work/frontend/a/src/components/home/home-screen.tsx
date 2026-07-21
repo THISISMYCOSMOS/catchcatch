@@ -15,6 +15,7 @@ import {
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { NotificationDetailDialog } from "@/components/home/notification-detail-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
+import { AppLogo } from "@/components/app-logo";
 import { clearMockAuthentication } from "@/lib/mock/session";
 import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
 
@@ -396,15 +397,25 @@ export function HomeScreen() {
   }
 
   return (
-    <main className="home-page" ref={homePageRef}>
-      <div className="home-mobile-shell">
-        <header className="home-header">
+    <>
+      <AppLogo
+        className="home-logo"
+        leftAction={(
           <button className="home-icon-button" type="button" aria-label="메뉴 열기" onClick={() => openDrawer("menu")}><MenuIcon /></button>
-          <p className="home-logo" aria-label="캐치캐치">캐치캐치</p>
+        )}
+        rightAction={(
           <button className="home-icon-button notification-button" type="button" aria-label="알림 열기" onClick={() => openDrawer("notifications")}>
             <BellIcon />
             {unreadCount > 0 ? <span className="notification-dot" aria-label={`읽지 않은 알림 ${unreadCount}개`} /> : null}
           </button>
+        )}
+      />
+      <main className="home-page" ref={homePageRef}>
+      <div className="home-mobile-shell">
+        <header className="home-header">
+          <span aria-hidden="true" />
+          <p className="home-logo logo-layout-placeholder" aria-hidden="true">캐치캐치</p>
+          <span aria-hidden="true" />
         </header>
 
         <section className="home-intro" aria-labelledby="home-title">
@@ -497,6 +508,7 @@ export function HomeScreen() {
       {selectedAnalysis && !openPanel ? (
         <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setOpenModal(null)} />
       ) : null}
-    </main>
+      </main>
+    </>
   );
 }

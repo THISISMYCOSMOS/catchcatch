@@ -49,7 +49,7 @@ export default function SignupPage() {
 
   if (isSignupComplete) {
     return (
-      <AuthShell title="회원가입 완료" className="signup-complete-card">
+      <AuthShell title="회원가입 완료" className="signup-complete-card" detachedBrand>
         <div className="signup-complete-content">
           <p>회원가입이 완료되었어요.<br />로그인하고 캐치캐치를 시작해보세요.</p>
           <Link className="button button-primary" href="/login">로그인하러 가기</Link>

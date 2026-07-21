@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { DatePicker } from "@/components/home/date-picker";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
+import { AppLogo } from "@/components/app-logo";
 import { getRecentAnalysisById, RECENT_ANALYSES } from "@/lib/mock/home";
 import { isMockAuthenticated } from "@/lib/mock/session";
 
@@ -95,11 +96,18 @@ export default function RecentAnalysesPage() {
   if (!isAuthorized) return null;
 
   return (
-    <main className="recent-page">
+    <>
+      <AppLogo
+        className="home-logo"
+        leftAction={(
+          <Link className="recent-back" href="/home" aria-label="홈으로 돌아가기">‹</Link>
+        )}
+      />
+      <main className="recent-page">
       <div className="recent-page-shell">
         <header className="recent-page-header">
-          <Link className="recent-back" href="/home" aria-label="홈으로 돌아가기">‹</Link>
-          <p className="home-logo" aria-label="캐치캐치">캐치캐치</p>
+          <span aria-hidden="true" />
+          <p className="home-logo logo-layout-placeholder" aria-hidden="true">캐치캐치</p>
           <span aria-hidden="true" />
         </header>
 
@@ -142,6 +150,7 @@ export default function RecentAnalysesPage() {
       {selectedAnalysis ? (
         <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={closePreviousAnalysis} />
       ) : null}
-    </main>
+      </main>
+    </>
   );
 }
