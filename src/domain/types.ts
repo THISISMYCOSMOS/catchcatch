@@ -72,3 +72,28 @@ export type ProductComponent = {
   capacityUnit: CapacityUnit | null;
   quantity: number | null;
 };
+
+export type SellerOffer = {
+  id: string;
+  productKey: string;
+  userEffectivePrice: number | null;
+  components: readonly ProductComponent[];
+  officialSellerStatus: OfficialSellerStatus;
+  returnPolicyStatus: ReturnPolicyStatus;
+  deliveryDays: number | null;
+  packageType: PackageType;
+};
+
+export type OfferComparisonResult = {
+  offerId: string;
+  comparisonStatus: ComparisonStatus;
+};
+
+export type PriceHistoryPoint = {
+  observedAt: Date;
+  marketEffectivePrice: number | null;
+};
+
+export type AllowedConclusion = Verdict;
+
+export type DeliverySpeedStatus = 'FAST' | 'NORMAL' | 'SLOW' | 'UNKNOWN';
