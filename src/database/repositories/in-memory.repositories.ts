@@ -5,6 +5,7 @@ import {
   PriceAlertRepository,
   PriceHistoryRepository,
   ProductRepository,
+  ProductComponentRepository,
   SavedProductRepository,
   SellerOfferRepository,
   UserPreferenceRepository,
@@ -13,6 +14,7 @@ import {
 type Store = {
   userPreferences: Row<'user_preferences'>[];
   products: Row<'products'>[];
+  productComponents: Row<'product_components'>[];
   sellerOffers: Row<'seller_offers'>[];
   priceHistory: Row<'price_history'>[];
   analyses: Row<'analyses'>[];
@@ -25,6 +27,7 @@ export class InMemoryDatabase {
   readonly store: Store = {
     userPreferences: [],
     products: [],
+    productComponents: [],
     sellerOffers: [],
     priceHistory: [],
     analyses: [],
@@ -93,6 +96,35 @@ export class InMemoryProductRepository implements ProductRepository {
     };
     this.database.store.products.push(row);
     return row;
+  }
+}
+
+export class InMemoryProductComponentRepository implements ProductComponentRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findByProductId(productId: string): Promise<Row<'product_components'>[]> {
+    return this.database.store.productComponents.filter((row) => row.product_id === productId);
+  }
+
+  async createMany(inputs: Insert<'product_components'>[]): Promise<Row<'product_components'>[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+    const rows = inputs.map((input) => {
+      const row: Row<'product_components'> = {
+        id: input.id ?? this.database.nextId('product-component'),
+        product_id: input.product_id,
+        component_type: input.component_type,
+        name: input.name ?? null,
+        capacity_value: input.capacity_value ?? null,
+        capacity_unit: input.capacity_unit ?? null,
+        quantity: input.quantity ?? null,
+        created_at: input.created_at ?? nowIso(),
+      };
+      return row;
+    });
+    this.database.store.productComponents.push(...rows);
+    return rows;
   }
 }
 

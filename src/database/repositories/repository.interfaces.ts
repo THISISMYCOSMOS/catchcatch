@@ -11,6 +11,11 @@ export interface ProductRepository {
   create(input: Insert<'products'>): Promise<Row<'products'>>;
 }
 
+export interface ProductComponentRepository {
+  findByProductId(productId: string): Promise<Row<'product_components'>[]>;
+  createMany(inputs: Insert<'product_components'>[]): Promise<Row<'product_components'>[]>;
+}
+
 export interface SellerOfferRepository {
   findByProductId(productId: string): Promise<Row<'seller_offers'>[]>;
   createMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;

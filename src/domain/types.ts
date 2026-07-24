@@ -17,6 +17,8 @@ export type Verdict =
   | 'REASONABLE_BUY';
 
 export type AnalysisStatus =
+  | 'PENDING'
+  | 'FAILED'
   | 'COMPLETED'
   | 'NEEDS_MORE_DATA'
   | 'INVALID_LINK'

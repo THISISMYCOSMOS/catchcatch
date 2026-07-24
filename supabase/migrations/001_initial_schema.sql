@@ -130,6 +130,8 @@ create table public.analyses (
   updated_at timestamptz not null default now(),
   constraint analyses_status_chk
     check (status in (
+      'PENDING',
+      'FAILED',
       'COMPLETED',
       'NEEDS_MORE_DATA',
       'INVALID_LINK',

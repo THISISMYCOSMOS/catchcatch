@@ -4,6 +4,7 @@ import {
   ANALYSIS_REPOSITORY,
   PRICE_ALERT_REPOSITORY,
   PRICE_HISTORY_REPOSITORY,
+  PRODUCT_COMPONENT_REPOSITORY,
   PRODUCT_REPOSITORY,
   SAVED_PRODUCT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
@@ -12,6 +13,7 @@ import {
 import { SupabaseAnalysisRepository } from './repositories/supabase-analysis.repository';
 import { SupabasePriceAlertRepository } from './repositories/supabase-price-alert.repository';
 import { SupabasePriceHistoryRepository } from './repositories/supabase-price-history.repository';
+import { SupabaseProductComponentRepository } from './repositories/supabase-product-component.repository';
 import { SupabaseProductRepository } from './repositories/supabase-product.repository';
 import { SupabaseSavedProductRepository } from './repositories/supabase-saved-product.repository';
 import { SupabaseSellerOfferRepository } from './repositories/supabase-seller-offer.repository';
@@ -25,6 +27,7 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
     },
     SupabaseUserPreferenceRepository,
     SupabaseProductRepository,
+    SupabaseProductComponentRepository,
     SupabaseSellerOfferRepository,
     SupabasePriceHistoryRepository,
     SupabaseAnalysisRepository,
@@ -37,6 +40,10 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
     {
       provide: PRODUCT_REPOSITORY,
       useExisting: SupabaseProductRepository,
+    },
+    {
+      provide: PRODUCT_COMPONENT_REPOSITORY,
+      useExisting: SupabaseProductComponentRepository,
     },
     {
       provide: SELLER_OFFER_REPOSITORY,
@@ -63,6 +70,7 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
     SUPABASE_CLIENT,
     USER_PREFERENCE_REPOSITORY,
     PRODUCT_REPOSITORY,
+    PRODUCT_COMPONENT_REPOSITORY,
     SELLER_OFFER_REPOSITORY,
     PRICE_HISTORY_REPOSITORY,
     ANALYSIS_REPOSITORY,
