@@ -51,6 +51,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       products: {
         Row: {
@@ -80,6 +81,7 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       product_components: {
         Row: {
@@ -112,6 +114,15 @@ export type Database = {
           quantity?: number | null;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'product_components_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       seller_offers: {
         Row: {
@@ -159,6 +170,15 @@ export type Database = {
           observed_at?: string | null;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'seller_offers_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       price_history: {
         Row: {
@@ -185,6 +205,22 @@ export type Database = {
           observed_at?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'price_history_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'price_history_seller_offer_id_fkey';
+            columns: ['seller_offer_id'];
+            isOneToOne: false;
+            referencedRelation: 'seller_offers';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       analyses: {
         Row: {
@@ -229,6 +265,15 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'analyses_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       analysis_offers: {
         Row: {
@@ -252,6 +297,22 @@ export type Database = {
           offer_snapshot?: Json;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'analysis_offers_analysis_id_fkey';
+            columns: ['analysis_id'];
+            isOneToOne: false;
+            referencedRelation: 'analyses';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'analysis_offers_seller_offer_id_fkey';
+            columns: ['seller_offer_id'];
+            isOneToOne: false;
+            referencedRelation: 'seller_offers';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       saved_products: {
         Row: {
@@ -272,6 +333,15 @@ export type Database = {
           product_id?: string;
           created_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'saved_products_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       price_alerts: {
         Row: {
@@ -301,6 +371,15 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [
+          {
+            foreignKeyName: 'price_alerts_product_id_fkey';
+            columns: ['product_id'];
+            isOneToOne: false;
+            referencedRelation: 'products';
+            referencedColumns: ['id'];
+          },
+        ];
       };
     };
     Views: Record<string, never>;
