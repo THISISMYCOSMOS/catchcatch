@@ -99,3 +99,19 @@ export type PriceHistoryPoint = {
 export type AllowedConclusion = Verdict;
 
 export type DeliverySpeedStatus = 'FAST' | 'NORMAL' | 'SLOW' | 'UNKNOWN';
+
+export type UserMembership = {
+  provider: string;
+  membershipType: string;
+  enabled: boolean;
+};
+
+export type UserShoppingGrade = {
+  provider: string;
+  grade: string;
+};
+
+export type UserCardBenefit = {
+  issuer: string;
+  cardProductCode: string;
+};

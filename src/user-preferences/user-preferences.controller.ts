@@ -11,7 +11,7 @@ export class UserPreferencesController {
     @Param('userId') userId: string,
     @Body() body: UpdateUserPreferencesDto,
   ) {
-    return this.service.update(userId, body.selectedCriteria);
+    return this.service.update(userId, body);
   }
 
   @Get(':userId')

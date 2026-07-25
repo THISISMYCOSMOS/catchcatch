@@ -8,7 +8,10 @@ import {
   ProductComponentRepository,
   SavedProductRepository,
   SellerOfferRepository,
+  UserCardRepository,
+  UserMembershipRepository,
   UserPreferenceRepository,
+  UserShoppingGradeRepository,
 } from './repository.interfaces';
 
 type Store = {
@@ -20,6 +23,9 @@ type Store = {
   analyses: Row<'analyses'>[];
   savedProducts: Row<'saved_products'>[];
   priceAlerts: Row<'price_alerts'>[];
+  userMemberships: Row<'user_memberships'>[];
+  userShoppingGrades: Row<'user_shopping_grades'>[];
+  userCards: Row<'user_cards'>[];
 };
 
 export class InMemoryDatabase {
@@ -33,6 +39,9 @@ export class InMemoryDatabase {
     analyses: [],
     savedProducts: [],
     priceAlerts: [],
+    userMemberships: [],
+    userShoppingGrades: [],
+    userCards: [],
   };
 
   nextId(prefix: string): string {
@@ -295,6 +304,90 @@ export class InMemoryPriceAlertRepository implements PriceAlertRepository {
   }
 }
 
+export class InMemoryUserMembershipRepository implements UserMembershipRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findByUserId(userId: string): Promise<Row<'user_memberships'>[]> {
+    return this.database.store.userMemberships.filter((row) => row.user_id === userId);
+  }
+
+  async replaceForUser(
+    userId: string,
+    inputs: Insert<'user_memberships'>[],
+  ): Promise<Row<'user_memberships'>[]> {
+    this.database.store.userMemberships = this.database.store.userMemberships.filter((row) => (
+      row.user_id !== userId
+    ));
+    const now = nowIso();
+    const rows = uniqueBy(inputs, (input) => `${input.provider}:${input.membership_type}`)
+      .map((input) => ({
+        id: input.id ?? this.database.nextId('user-membership'),
+        user_id: userId,
+        provider: input.provider,
+        membership_type: input.membership_type,
+        enabled: input.enabled ?? true,
+        created_at: input.created_at ?? now,
+        updated_at: input.updated_at ?? now,
+      }));
+    this.database.store.userMemberships.push(...rows);
+    return rows;
+  }
+}
+
+export class InMemoryUserShoppingGradeRepository implements UserShoppingGradeRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findByUserId(userId: string): Promise<Row<'user_shopping_grades'>[]> {
+    return this.database.store.userShoppingGrades.filter((row) => row.user_id === userId);
+  }
+
+  async replaceForUser(
+    userId: string,
+    inputs: Insert<'user_shopping_grades'>[],
+  ): Promise<Row<'user_shopping_grades'>[]> {
+    this.database.store.userShoppingGrades = this.database.store.userShoppingGrades.filter((row) => (
+      row.user_id !== userId
+    ));
+    const now = nowIso();
+    const rows = uniqueBy(inputs, (input) => input.provider)
+      .map((input) => ({
+        id: input.id ?? this.database.nextId('user-shopping-grade'),
+        user_id: userId,
+        provider: input.provider,
+        grade: input.grade,
+        created_at: input.created_at ?? now,
+        updated_at: input.updated_at ?? now,
+      }));
+    this.database.store.userShoppingGrades.push(...rows);
+    return rows;
+  }
+}
+
+export class InMemoryUserCardRepository implements UserCardRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findByUserId(userId: string): Promise<Row<'user_cards'>[]> {
+    return this.database.store.userCards.filter((row) => row.user_id === userId);
+  }
+
+  async replaceForUser(
+    userId: string,
+    inputs: Insert<'user_cards'>[],
+  ): Promise<Row<'user_cards'>[]> {
+    this.database.store.userCards = this.database.store.userCards.filter((row) => row.user_id !== userId);
+    const rows = uniqueBy(inputs, (input) => `${input.issuer}:${input.card_product_code}`)
+      .map((input) => ({
+        id: input.id ?? this.database.nextId('user-card'),
+        user_id: userId,
+        issuer: input.issuer,
+        card_product_code: input.card_product_code,
+        created_at: input.created_at ?? nowIso(),
+      }));
+    this.database.store.userCards.push(...rows);
+    return rows;
+  }
+}
+
 function sellerOfferRow(
   input: Insert<'seller_offers'>,
   database: InMemoryDatabase,
@@ -326,4 +419,16 @@ function hasNegativeSellerOfferPrice(input: Insert<'seller_offers'>): boolean {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }

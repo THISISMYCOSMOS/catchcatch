@@ -4,12 +4,15 @@ import { SupabaseSellerOfferRepository } from './supabase-seller-offer.repositor
 import {
   InMemoryAnalysisRepository,
   InMemoryDatabase,
+  InMemoryUserCardRepository,
+  InMemoryUserMembershipRepository,
   InMemoryPriceAlertRepository,
   InMemoryPriceHistoryRepository,
   InMemoryProductRepository,
   InMemorySavedProductRepository,
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
+  InMemoryUserShoppingGradeRepository,
 } from './in-memory.repositories';
 
 describe('repository implementations', () => {
@@ -21,6 +24,9 @@ describe('repository implementations', () => {
   let analyses: InMemoryAnalysisRepository;
   let savedProducts: InMemorySavedProductRepository;
   let priceAlerts: InMemoryPriceAlertRepository;
+  let memberships: InMemoryUserMembershipRepository;
+  let shoppingGrades: InMemoryUserShoppingGradeRepository;
+  let cards: InMemoryUserCardRepository;
 
   beforeEach(() => {
     database = new InMemoryDatabase();
@@ -31,6 +37,9 @@ describe('repository implementations', () => {
     analyses = new InMemoryAnalysisRepository(database);
     savedProducts = new InMemorySavedProductRepository(database);
     priceAlerts = new InMemoryPriceAlertRepository(database);
+    memberships = new InMemoryUserMembershipRepository(database);
+    shoppingGrades = new InMemoryUserShoppingGradeRepository(database);
+    cards = new InMemoryUserCardRepository(database);
   });
 
   it('upserts exactly three user criteria', async () => {
@@ -237,6 +246,57 @@ describe('repository implementations', () => {
       target_price: -1,
     })).rejects.toThrow('negative');
     await expect(priceAlerts.updateEnabled('missing-alert', true)).rejects.toThrow('Price alert not found');
+  });
+
+  it('replaces user memberships and prevents duplicate membership rows', async () => {
+    const created = await memberships.replaceForUser('user-1', [
+      { user_id: 'user-1', provider: 'COUPANG', membership_type: 'WOW', enabled: true },
+      { user_id: 'user-1', provider: 'COUPANG', membership_type: 'WOW', enabled: false },
+    ]);
+
+    expect(created).toHaveLength(1);
+    expect(await memberships.findByUserId('user-1')).toMatchObject([
+      { provider: 'COUPANG', membership_type: 'WOW', enabled: true },
+    ]);
+
+    const replaced = await memberships.replaceForUser('user-1', [
+      { user_id: 'user-1', provider: 'NAVER', membership_type: 'NAVER_PLUS', enabled: false },
+    ]);
+    expect(replaced).toMatchObject([
+      { provider: 'NAVER', membership_type: 'NAVER_PLUS', enabled: false },
+    ]);
+    expect(await memberships.findByUserId('user-1')).toHaveLength(1);
+  });
+
+  it('replaces user shopping grades and prevents duplicate provider rows', async () => {
+    await shoppingGrades.replaceForUser('user-1', [
+      { user_id: 'user-1', provider: 'MUSINSA', grade: 'GOLD' },
+      { user_id: 'user-1', provider: 'MUSINSA', grade: 'SILVER' },
+    ]);
+
+    expect(await shoppingGrades.findByUserId('user-1')).toMatchObject([
+      { provider: 'MUSINSA', grade: 'GOLD' },
+    ]);
+
+    await shoppingGrades.replaceForUser('user-1', []);
+    expect(await shoppingGrades.findByUserId('user-1')).toEqual([]);
+  });
+
+  it('replaces user cards and stores only issuer and card product code', async () => {
+    await cards.replaceForUser('user-1', [
+      { user_id: 'user-1', issuer: 'SHINHAN', card_product_code: 'SHINHAN_EXAMPLE_CARD' },
+      { user_id: 'user-1', issuer: 'SHINHAN', card_product_code: 'SHINHAN_EXAMPLE_CARD' },
+    ]);
+
+    const found = await cards.findByUserId('user-1');
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      issuer: 'SHINHAN',
+      card_product_code: 'SHINHAN_EXAMPLE_CARD',
+    });
+    expect(found[0]).not.toHaveProperty('card_number');
+    expect(found[0]).not.toHaveProperty('cvc');
+    expect(found[0]).not.toHaveProperty('expires_at');
   });
 
   it('does not call Supabase for empty seller offer createMany input', async () => {

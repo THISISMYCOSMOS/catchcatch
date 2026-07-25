@@ -53,6 +53,87 @@ export type Database = {
         };
         Relationships: [];
       };
+      user_memberships: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: string;
+          membership_type: string;
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          provider: string;
+          membership_type: string;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          provider?: string;
+          membership_type?: string;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_shopping_grades: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: string;
+          grade: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          provider: string;
+          grade: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          provider?: string;
+          grade?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_cards: {
+        Row: {
+          id: string;
+          user_id: string;
+          issuer: string;
+          card_product_code: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          issuer: string;
+          card_product_code: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          issuer?: string;
+          card_product_code?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       products: {
         Row: {
           id: string;

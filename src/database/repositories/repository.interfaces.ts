@@ -49,3 +49,27 @@ export interface PriceAlertRepository {
   findByUserId(userId: string): Promise<Row<'price_alerts'>[]>;
   updateEnabled(id: string, enabled: boolean): Promise<Row<'price_alerts'>>;
 }
+
+export interface UserMembershipRepository {
+  findByUserId(userId: string): Promise<Row<'user_memberships'>[]>;
+  replaceForUser(
+    userId: string,
+    inputs: Insert<'user_memberships'>[],
+  ): Promise<Row<'user_memberships'>[]>;
+}
+
+export interface UserShoppingGradeRepository {
+  findByUserId(userId: string): Promise<Row<'user_shopping_grades'>[]>;
+  replaceForUser(
+    userId: string,
+    inputs: Insert<'user_shopping_grades'>[],
+  ): Promise<Row<'user_shopping_grades'>[]>;
+}
+
+export interface UserCardRepository {
+  findByUserId(userId: string): Promise<Row<'user_cards'>[]>;
+  replaceForUser(
+    userId: string,
+    inputs: Insert<'user_cards'>[],
+  ): Promise<Row<'user_cards'>[]>;
+}

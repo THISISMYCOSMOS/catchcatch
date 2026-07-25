@@ -29,6 +29,51 @@ create table public.user_preferences (
     )
 );
 
+create table public.user_memberships (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  provider text not null,
+  membership_type text not null,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint user_memberships_user_provider_type_unique
+    unique (user_id, provider, membership_type),
+  constraint user_memberships_provider_non_empty_chk
+    check (length(btrim(provider)) > 0),
+  constraint user_memberships_membership_type_non_empty_chk
+    check (length(btrim(membership_type)) > 0)
+);
+
+create table public.user_shopping_grades (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  provider text not null,
+  grade text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint user_shopping_grades_user_provider_unique
+    unique (user_id, provider),
+  constraint user_shopping_grades_provider_non_empty_chk
+    check (length(btrim(provider)) > 0),
+  constraint user_shopping_grades_grade_non_empty_chk
+    check (length(btrim(grade)) > 0)
+);
+
+create table public.user_cards (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  issuer text not null,
+  card_product_code text not null,
+  created_at timestamptz not null default now(),
+  constraint user_cards_user_issuer_product_unique
+    unique (user_id, issuer, card_product_code),
+  constraint user_cards_issuer_non_empty_chk
+    check (length(btrim(issuer)) > 0),
+  constraint user_cards_card_product_code_non_empty_chk
+    check (length(btrim(card_product_code)) > 0)
+);
+
 create table public.products (
   id uuid primary key default gen_random_uuid(),
   canonical_name text not null,
@@ -229,3 +274,6 @@ create index saved_products_user_id_idx on public.saved_products(user_id);
 create index saved_products_product_id_idx on public.saved_products(product_id);
 create index price_alerts_user_id_idx on public.price_alerts(user_id);
 create index price_alerts_product_id_idx on public.price_alerts(product_id);
+create index user_memberships_user_id_idx on public.user_memberships(user_id);
+create index user_shopping_grades_user_id_idx on public.user_shopping_grades(user_id);
+create index user_cards_user_id_idx on public.user_cards(user_id);

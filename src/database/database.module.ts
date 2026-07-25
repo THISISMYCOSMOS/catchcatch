@@ -8,7 +8,10 @@ import {
   PRODUCT_REPOSITORY,
   SAVED_PRODUCT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
+  USER_CARD_REPOSITORY,
+  USER_MEMBERSHIP_REPOSITORY,
   USER_PREFERENCE_REPOSITORY,
+  USER_SHOPPING_GRADE_REPOSITORY,
 } from './repositories/repository.tokens';
 import { SupabaseAnalysisRepository } from './repositories/supabase-analysis.repository';
 import { SupabasePriceAlertRepository } from './repositories/supabase-price-alert.repository';
@@ -17,7 +20,10 @@ import { SupabaseProductComponentRepository } from './repositories/supabase-prod
 import { SupabaseProductRepository } from './repositories/supabase-product.repository';
 import { SupabaseSavedProductRepository } from './repositories/supabase-saved-product.repository';
 import { SupabaseSellerOfferRepository } from './repositories/supabase-seller-offer.repository';
+import { SupabaseUserCardRepository } from './repositories/supabase-user-card.repository';
+import { SupabaseUserMembershipRepository } from './repositories/supabase-user-membership.repository';
 import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-preference.repository';
+import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-user-shopping-grade.repository';
 
 @Module({
   providers: [
@@ -33,6 +39,9 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
     SupabaseAnalysisRepository,
     SupabaseSavedProductRepository,
     SupabasePriceAlertRepository,
+    SupabaseUserMembershipRepository,
+    SupabaseUserShoppingGradeRepository,
+    SupabaseUserCardRepository,
     {
       provide: USER_PREFERENCE_REPOSITORY,
       useExisting: SupabaseUserPreferenceRepository,
@@ -65,6 +74,18 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
       provide: PRICE_ALERT_REPOSITORY,
       useExisting: SupabasePriceAlertRepository,
     },
+    {
+      provide: USER_MEMBERSHIP_REPOSITORY,
+      useExisting: SupabaseUserMembershipRepository,
+    },
+    {
+      provide: USER_SHOPPING_GRADE_REPOSITORY,
+      useExisting: SupabaseUserShoppingGradeRepository,
+    },
+    {
+      provide: USER_CARD_REPOSITORY,
+      useExisting: SupabaseUserCardRepository,
+    },
   ],
   exports: [
     SUPABASE_CLIENT,
@@ -76,6 +97,9 @@ import { SupabaseUserPreferenceRepository } from './repositories/supabase-user-p
     ANALYSIS_REPOSITORY,
     SAVED_PRODUCT_REPOSITORY,
     PRICE_ALERT_REPOSITORY,
+    USER_MEMBERSHIP_REPOSITORY,
+    USER_SHOPPING_GRADE_REPOSITORY,
+    USER_CARD_REPOSITORY,
   ],
 })
 export class DatabaseModule {}
