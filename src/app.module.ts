@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { AnalysesModule } from './analyses/analyses.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
@@ -8,6 +9,10 @@ import { UserPreferencesModule } from './user-preferences/user-preferences.modul
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
     DatabaseModule,
     UserPreferencesModule,
     AnalysesModule,

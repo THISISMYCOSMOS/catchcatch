@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { AnalysesService } from './analyses.service';
 import { CreateAnalysisDto } from './dto/create-analysis.dto';
 
@@ -12,7 +12,7 @@ export class AnalysesController {
   }
 
   @Get(':analysisId')
-  findById(@Param('analysisId') analysisId: string) {
+  findById(@Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string) {
     return this.service.findById(analysisId);
   }
 }

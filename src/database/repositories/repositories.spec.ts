@@ -1,4 +1,5 @@
 import { Insert } from '../database.types';
+import { SupabaseAnalysisRepository } from './supabase-analysis.repository';
 import { SupabaseProductRepository } from './supabase-product.repository';
 import { SupabaseSellerOfferRepository } from './supabase-seller-offer.repository';
 import {
@@ -322,6 +323,66 @@ describe('repository implementations', () => {
       product_key: 'duplicate',
     })).rejects.toThrow('create product failed (23505): duplicate key value violates unique constraint');
     expect(from).toHaveBeenCalledWith('products');
+  });
+
+  it('finds a Supabase analysis by id with json result and null verdict', async () => {
+    const analysisRow = {
+      id: 'analysis-1',
+      user_id: 'user-1',
+      source_url: 'https://example.com/product',
+      product_id: 'product-1',
+      status: 'COMPLETED',
+      verdict: null,
+      allowed_conclusions: ['REASONABLE_BUY'],
+      selected_criteria: [
+        'FINAL_PAYMENT_AMOUNT',
+        'PURCHASE_TIMING',
+        'UNIT_PRICE',
+      ],
+      result_json: {
+        lowestEffectivePriceOffer: null,
+        lowestUnitPriceOffer: null,
+        priceHistorySufficient: false,
+        offerCount: 0,
+      },
+      warning_codes: [],
+      created_at: '2026-07-26T00:00:00.000Z',
+      updated_at: '2026-07-26T00:00:00.000Z',
+    };
+    const maybeSingle = jest.fn().mockResolvedValue({ data: analysisRow, error: null });
+    const eq = jest.fn(() => ({ maybeSingle }));
+    const select = jest.fn(() => ({ eq }));
+    const from = jest.fn(() => ({ select }));
+    const repository = new SupabaseAnalysisRepository({ from } as never);
+
+    await expect(repository.findById('analysis-1')).resolves.toEqual(analysisRow);
+    expect(from).toHaveBeenCalledWith('analyses');
+    expect(eq).toHaveBeenCalledWith('id', 'analysis-1');
+  });
+
+  it('returns null for a missing Supabase analysis without throwing', async () => {
+    const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
+    const eq = jest.fn(() => ({ maybeSingle }));
+    const select = jest.fn(() => ({ eq }));
+    const from = jest.fn(() => ({ select }));
+    const repository = new SupabaseAnalysisRepository({ from } as never);
+
+    await expect(repository.findById('missing-analysis')).resolves.toBeNull();
+  });
+
+  it('converts Supabase analysis lookup errors into clear Error instances', async () => {
+    const maybeSingle = jest.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'TypeError: fetch failed' },
+    });
+    const eq = jest.fn(() => ({ maybeSingle }));
+    const select = jest.fn(() => ({ eq }));
+    const from = jest.fn(() => ({ select }));
+    const repository = new SupabaseAnalysisRepository({ from } as never);
+
+    await expect(repository.findById('analysis-1'))
+      .rejects
+      .toThrow('find analysis by id failed: TypeError: fetch failed');
   });
 });
 

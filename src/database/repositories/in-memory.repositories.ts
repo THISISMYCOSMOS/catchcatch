@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { validateSelectedCriteria } from '../../domain/calculations';
 import { Insert, Json, Row, Update } from '../database.types';
 import {
@@ -195,7 +196,7 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
   async create(input: Insert<'analyses'>): Promise<Row<'analyses'>> {
     const now = nowIso();
     const row: Row<'analyses'> = {
-      id: input.id ?? this.database.nextId('analysis'),
+      id: input.id ?? randomUUID(),
       user_id: input.user_id ?? null,
       source_url: input.source_url,
       product_id: input.product_id ?? null,

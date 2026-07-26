@@ -8,8 +8,14 @@ import {
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
 } from '../database/repositories/in-memory.repositories';
-import { SellerOfferRepository } from '../database/repositories/repository.interfaces';
+import { Row } from '../database/database.types';
+import {
+  AnalysisRepository,
+  SellerOfferRepository,
+} from '../database/repositories/repository.interfaces';
 import { AnalysesService } from './analyses.service';
+
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe('AnalysesService', () => {
   let database: InMemoryDatabase;
@@ -48,6 +54,8 @@ describe('AnalysesService', () => {
       status: 'COMPLETED',
       verdict: null,
     });
+    expect(result.id).toMatch(UUID_V4_PATTERN);
+    expect(result.id).toBe(database.store.analyses[0].id);
     expect(result.allowedConclusions).toContain('LOW_POINT_BUY');
     expect(result.result).toMatchObject({
       lowestEffectivePriceOffer: {
@@ -147,6 +155,67 @@ describe('AnalysesService', () => {
 
     await expect(service.findById(created.id)).resolves.toEqual(created);
     await expect(service.findById('missing-analysis')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('uses the analysis id returned by the repository create result', async () => {
+    await seedPreferences();
+    const product = await products.create({
+      canonical_name: 'Product',
+      product_key: 'product',
+    });
+    const generatedId = 'f902b912-c0aa-425d-8dc7-705277fffdc7';
+    const createdRow: Row<'analyses'> = {
+      id: generatedId,
+      user_id: 'user-1',
+      source_url: 'https://example.com/product/1',
+      product_id: product.id,
+      status: 'PENDING',
+      verdict: null,
+      allowed_conclusions: [],
+      selected_criteria: [
+        'FINAL_PAYMENT_AMOUNT',
+        'PURCHASE_TIMING',
+        'UNIT_PRICE',
+      ],
+      result_json: null,
+      warning_codes: [],
+      created_at: '2026-07-26T00:00:00.000Z',
+      updated_at: '2026-07-26T00:00:00.000Z',
+    };
+    const create = jest.fn().mockResolvedValue(createdRow);
+    const updateResult = jest.fn(async (id, input): Promise<Row<'analyses'>> => ({
+      id,
+      user_id: 'user-1',
+      source_url: 'https://example.com/product/1',
+      product_id: product.id,
+      status: input.status,
+      verdict: input.verdict ?? null,
+      allowed_conclusions: input.allowed_conclusions ?? [],
+      selected_criteria: [
+        'FINAL_PAYMENT_AMOUNT',
+        'PURCHASE_TIMING',
+        'UNIT_PRICE',
+      ],
+      result_json: input.result_json ?? null,
+      warning_codes: input.warning_codes ?? [],
+      created_at: '2026-07-26T00:00:00.000Z',
+      updated_at: '2026-07-26T00:00:00.000Z',
+    }));
+    const repository: AnalysisRepository = {
+      create,
+      findById: jest.fn(),
+      updateResult,
+    };
+    service = new AnalysesService(preferences, products, components, offers, history, repository);
+
+    const result = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/1',
+      productId: product.id,
+    });
+
+    expect(updateResult).toHaveBeenCalledWith(generatedId, expect.any(Object));
+    expect(result.id).toBe(generatedId);
   });
 
   it('stores FAILED status when calculation throws', async () => {
