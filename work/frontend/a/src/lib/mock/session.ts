@@ -1,3 +1,5 @@
+import { PRIORITY_STORAGE_KEY } from "@/lib/priorities";
+
 export const MOCK_AUTH_SESSION_KEY = "catchcatch:authenticated";
 const MOCK_AUTH_USER_KEY = "catchcatch:authenticated-user";
 const MOCK_ONBOARDING_STATUS_KEY = "catchcatch:onboarding-status";
@@ -36,6 +38,7 @@ export function setMockAuthenticated(username: string, rememberLogin = false) {
   localStorage.removeItem(MOCK_AUTH_SESSION_KEY);
   sessionStorage.removeItem(MOCK_AUTH_USER_KEY);
   localStorage.removeItem(MOCK_AUTH_USER_KEY);
+  sessionStorage.removeItem(PRIORITY_STORAGE_KEY);
   const storage = rememberLogin ? localStorage : sessionStorage;
   storage.setItem(MOCK_AUTH_SESSION_KEY, "true");
   storage.setItem(MOCK_AUTH_USER_KEY, normalizeUsername(username));

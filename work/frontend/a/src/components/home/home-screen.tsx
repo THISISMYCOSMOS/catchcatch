@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   DEMO_PRODUCT,
   DEMO_PRODUCT_URL,
@@ -16,8 +16,9 @@ import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dial
 import { NotificationDetailDialog } from "@/components/home/notification-detail-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { AppLogo } from "@/components/app-logo";
-import { clearMockAuthentication } from "@/lib/mock/session";
+import { clearMockAuthentication, getMockAuthenticatedUsername } from "@/lib/mock/session";
 import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
+import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
 
 type OpenPanel = "menu" | "notifications" | null;
 type OpenHomeModal =
@@ -25,7 +26,14 @@ type OpenHomeModal =
   | { kind: "notification"; notificationId: string }
   | null;
 
-const MENU_ITEMS = ["마이페이지", "세일 캘린더", "관심 상품", "고객센터", "설정"];
+const MENU_ITEMS = [
+  "마이페이지",
+  "혜택 등록",
+  "세일캘린더",
+  "관심상품",
+  "1:1문의",
+  "설정",
+] as const;
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
 
 function MenuIcon() {
@@ -158,13 +166,21 @@ function NotificationDrawer({ notifications, unreadCount, onActivate, onMarkAllR
   );
 }
 
-function MenuDrawer({ onClose, onLogout, isClosing }: { onClose: () => void; onLogout: () => void; isClosing: boolean }) {
+function MenuDrawer({ onClose, onBenefits, onLogout, isClosing }: { onClose: () => void; onBenefits: () => void; onLogout: () => void; isClosing: boolean }) {
   return (
     <aside className={"home-drawer menu-drawer " + (isClosing ? "is-closing" : "is-open")} role="dialog" aria-modal="true" aria-label="메뉴">
       <button className="drawer-close menu-close" type="button" aria-label="메뉴 닫기" onClick={onClose}><CloseIcon /></button>
       <nav aria-label="주요 메뉴">
         <ul>
-          {MENU_ITEMS.map((item) => <li key={item}><span aria-disabled="true">{item}</span></li>)}
+          {MENU_ITEMS.map((item) => (
+            <li key={item}>
+              {item === "혜택 등록" ? (
+                <button className="menu-navigation" type="button" onClick={onBenefits}>{item}</button>
+              ) : (
+                <span aria-disabled="true">{item}</span>
+              )}
+            </li>
+          ))}
           <li><button className="menu-logout" type="button" onClick={onLogout}>로그아웃</button></li>
         </ul>
       </nav>
@@ -189,6 +205,7 @@ export function HomeScreen() {
   const [isDrawerClosing, setIsDrawerClosing] = useState(false);
   const [openModal, setOpenModal] = useState<OpenHomeModal>(null);
   const [notificationActionError, setNotificationActionError] = useState("");
+  const [isBenefitPromptVisible, setIsBenefitPromptVisible] = useState(false);
   const unreadCount = notifications.filter((item) => !item.isRead).length;
   const selectedAnalysis = openModal?.kind === "analysis"
     ? getRecentAnalysisById(openModal.analysisId)
@@ -198,6 +215,16 @@ export function HomeScreen() {
     : null;
   const hasOpenNotificationModal = Boolean(openPanel && openModal);
   const hasOpenNotificationModalRef = useRef(hasOpenNotificationModal);
+
+  useEffect(() => {
+    const promptCheck = window.setTimeout(() => {
+      const username = getMockAuthenticatedUsername();
+      if (!username) return;
+      const profile = getBenefitProfile(username);
+      setIsBenefitPromptVisible(!profile.completed && !isBenefitPromptDismissed(username));
+    }, 0);
+    return () => window.clearTimeout(promptCheck);
+  }, []);
 
   useEffect(() => {
     const savedLink = window.sessionStorage.getItem(ANALYSIS_LINK_STORAGE_KEY);
@@ -309,6 +336,26 @@ export function HomeScreen() {
       setIsDrawerClosing(false);
       router.replace("/login");
     }, 300);
+  }
+
+  function handleBenefitsNavigation() {
+    if (isDrawerClosing) return;
+    setOpenModal(null);
+    setNotificationActionError("");
+    setIsDrawerClosing(true);
+    window.setTimeout(() => {
+      setOpenPanel(null);
+      setIsDrawerClosing(false);
+      router.push("/benefits");
+    }, 300);
+  }
+
+  function dismissBenefitsCard(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const username = getMockAuthenticatedUsername();
+    if (username) dismissBenefitPrompt(username);
+    setIsBenefitPromptVisible(false);
   }
 
   function markNotificationAsRead(id: string) {
@@ -423,6 +470,25 @@ export function HomeScreen() {
           <p>상품 링크를 붙여넣으면 가격차트, 최저가 쇼핑몰까지<br className="wide-only-break" /> 한 번에 분석해드려요.</p>
         </section>
 
+        {isBenefitPromptVisible ? (
+          <section className="benefit-prompt" aria-labelledby="benefit-prompt-title">
+            <button
+              className="benefit-prompt-close"
+              type="button"
+              aria-label="혜택 등록 안내 닫기"
+              onClick={dismissBenefitsCard}
+            >
+              <CloseIcon />
+            </button>
+            <h2 id="benefit-prompt-title">내 혜택까지 반영할까요?</h2>
+            <p className="benefit-prompt-description">
+              이용 중인 멤버십과 보유 혜택을 등록하면<br />
+              실제 결제금액에 더 가까운 결과를 알려드려요.
+            </p>
+            <Link className="benefit-prompt-link" href="/benefits">내 혜택 등록하러 가기</Link>
+          </section>
+        ) : null}
+
         <form className="analysis-form" onSubmit={handleAnalyze} noValidate>
           <div className="analysis-input-region" ref={productRegionRef}>
             <label className="analysis-input-wrap">
@@ -495,7 +561,7 @@ export function HomeScreen() {
             />
           ) : null}
           {openPanel === "menu" ? (
-            <MenuDrawer onClose={closeDrawer} onLogout={handleLogout} isClosing={isDrawerClosing} />
+            <MenuDrawer onClose={closeDrawer} onBenefits={handleBenefitsNavigation} onLogout={handleLogout} isClosing={isDrawerClosing} />
           ) : null}
           {selectedAnalysis ? (
             <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setOpenModal(null)} />
