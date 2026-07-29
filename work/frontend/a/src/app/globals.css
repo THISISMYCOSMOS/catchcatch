@@ -1434,6 +1434,7 @@ button, input, textarea, select { font: inherit; }
 .profile-save-notice { margin: 12px 2px -8px; color: var(--gold-text); font-size: 12px; font-weight: 600; line-height: 1.5; }
 .profile-action-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--card-radius); background: var(--surface); }
 .profile-action-card button { width: 100%; min-height: 64px; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 0; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.profile-action-card button + button { border-top: 1px solid var(--divider); }
 .profile-action-card button > span { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .profile-action-card strong { font-size: 14px; font-weight: 650; line-height: 1.4; }
 .profile-action-card small { color: var(--muted); font-size: 11px; font-weight: var(--type-body-weight); line-height: 1.45; }
@@ -1441,7 +1442,9 @@ button, input, textarea, select { font: inherit; }
 .profile-action-card button:focus-visible { outline: 3px solid var(--gold-text); outline-offset: -3px; }
 .profile-account-section { margin-top: 28px; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
 .profile-danger-card button { color: #9c4c42; }
+.profile-action-card .profile-danger-action { color: #9c4c42; }
 .profile-danger-card small { color: var(--muted); }
+.profile-logout-area { margin-top: 32px; }
 
 .profile-error-state { padding: 24px 18px; border: 1px solid var(--border); border-radius: var(--card-radius); background: var(--surface); text-align: center; }
 .profile-error-state h2 { margin: 0; font-size: 16px; line-height: 1.4; }
@@ -1462,6 +1465,8 @@ button, input, textarea, select { font: inherit; }
 .profile-dialog-close { top: 10px; right: 10px; }
 .profile-dialog-close svg { width: 20px; height: 20px; }
 .profile-dialog-content { min-height: 0; padding: 20px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.profile-password-form { display: flex; flex-direction: column; gap: 16px; }
+.profile-password-form .profile-dialog-actions { margin-top: 4px; }
 .profile-dialog-actions { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .profile-dialog-actions .button { min-width: 0; min-height: 48px; padding: 0 12px; font-size: 14px; }
 .profile-support-notice { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); background: var(--app-background); font-size: 12px; line-height: 1.55; }

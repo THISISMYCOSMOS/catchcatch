@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
 import {
-  clearMockAuthentication,
   getMockAuthenticatedRoute,
   getMockAuthenticatedUsername,
 } from "@/lib/mock/session";
@@ -44,11 +43,6 @@ export function MyPageScreen() {
     return () => window.clearTimeout(authorizationCheck);
   }, [router]);
 
-  function handleLogout() {
-    clearMockAuthentication();
-    router.replace("/login");
-  }
-
   if (!isAuthorized) return null;
 
   return (
@@ -80,10 +74,6 @@ export function MyPageScreen() {
           ))}
         </ul>
       </nav>
-
-      <div className="mypage-logout-area">
-        <button className="mypage-logout" type="button" onClick={handleLogout}>로그아웃</button>
-      </div>
     </AuthenticatedAppFrame>
   );
 }

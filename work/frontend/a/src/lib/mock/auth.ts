@@ -38,16 +38,45 @@ const wait = (milliseconds = 350) =>
 export async function mockLogin(username: string, password: string) {
   await wait();
   const normalizedUsername = username.trim().toLowerCase();
-  if (normalizedUsername === DEMO_ACCOUNT.username && password === DEMO_ACCOUNT.password) {
-    return { ok: true as const, username: DEMO_ACCOUNT.username };
-  }
-
   const account = readMockAccounts().find(
     (storedAccount) => storedAccount.username === normalizedUsername,
   );
-  return account?.password === password
-    ? { ok: true as const, username: account.username }
+  const expectedPassword = account?.password
+    ?? (normalizedUsername === DEMO_ACCOUNT.username ? DEMO_ACCOUNT.password : null);
+  return expectedPassword === password
+    ? { ok: true as const, username: normalizedUsername }
     : { ok: false as const };
+}
+
+export async function mockChangePassword(username: string, currentPassword: string, newPassword: string) {
+  await wait(420);
+  const normalizedUsername = username.trim().toLowerCase();
+  const accounts = readMockAccounts();
+  const account = accounts.find((storedAccount) => storedAccount.username === normalizedUsername);
+  const expectedPassword = account?.password
+    ?? (normalizedUsername === DEMO_ACCOUNT.username ? DEMO_ACCOUNT.password : null);
+
+  if (expectedPassword === null) {
+    return { ok: false as const, reason: "account_not_found" as const };
+  }
+  if (expectedPassword !== currentPassword) {
+    return { ok: false as const, reason: "invalid_current_password" as const };
+  }
+
+  const updatedAccount: StoredMockAccount = {
+    ...account,
+    username: normalizedUsername,
+    password: newPassword,
+  };
+
+  try {
+    localStorage.setItem(MOCK_ACCOUNTS_STORAGE_KEY, JSON.stringify(account
+      ? accounts.map((storedAccount) => storedAccount.username === normalizedUsername ? updatedAccount : storedAccount)
+      : [...accounts, updatedAccount]));
+    return { ok: true as const };
+  } catch {
+    return { ok: false as const, reason: "storage_error" as const };
+  }
 }
 
 export function getMockAccountEmail(username: string) {

@@ -1,5 +1,5 @@
-import { MyPageScreen } from "@/components/mypage/mypage-screen";
+import { redirect } from "next/navigation";
 
 export default function MyPage() {
-  return <MyPageScreen />;
+  redirect("/mypage/profile");
 }

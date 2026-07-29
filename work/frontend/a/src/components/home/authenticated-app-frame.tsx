@@ -27,7 +27,7 @@ type AuthenticatedAppFrameProps = {
 };
 
 const MENU_ITEMS = [
-  { label: "마이페이지", href: "/mypage" },
+  { label: "마이페이지", href: "/mypage/profile" },
   { label: "혜택 등록", href: "/benefits" },
   { label: "세일캘린더", href: "/sale-calendar" },
   { label: "관심상품", href: null },

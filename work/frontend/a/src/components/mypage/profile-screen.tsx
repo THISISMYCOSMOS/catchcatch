@@ -5,15 +5,16 @@ import type { FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppLogo } from "@/components/app-logo";
-import { FormField } from "@/components/auth/form-field";
+import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
+import { mockChangePassword } from "@/lib/mock/auth";
 import {
   getMockUserProfile,
   type MockUserProfile,
   type MockUserProfileUpdate,
   updateMockUserProfile,
 } from "@/lib/mock/profile";
-import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
-import { getEmailError } from "@/lib/validation/auth";
+import { clearMockAuthentication, getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
+import { getEmailError, getPasswordError } from "@/lib/validation/auth";
 
 type ProfileLoadState = "loading" | "ready" | "error";
 type EditableProfileValues = {
@@ -21,6 +22,18 @@ type EditableProfileValues = {
   email: string;
 };
 type EditableProfileField = keyof EditableProfileValues;
+type PasswordChangeValues = {
+  currentPassword: string;
+  newPassword: string;
+  newPasswordConfirmation: string;
+};
+type PasswordChangeField = keyof PasswordChangeValues;
+
+const INITIAL_PASSWORD_VALUES: PasswordChangeValues = {
+  currentPassword: "",
+  newPassword: "",
+  newPasswordConfirmation: "",
+};
 
 function ChevronIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>;
@@ -172,6 +185,145 @@ function WithdrawalDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function PasswordChangeDialog({
+  username,
+  onClose,
+  onSuccess,
+}: {
+  username: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [values, setValues] = useState<PasswordChangeValues>(INITIAL_PASSWORD_VALUES);
+  const [touched, setTouched] = useState<Partial<Record<PasswordChangeField, boolean>>>({});
+  const [currentPasswordError, setCurrentPasswordError] = useState("");
+  const [formError, setFormError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [visibleFields, setVisibleFields] = useState<Partial<Record<PasswordChangeField, boolean>>>({});
+
+  const requiredCurrentPasswordError = values.currentPassword ? undefined : "현재 비밀번호를 입력해주세요.";
+  const newPasswordFormatError = getPasswordError(values.newPassword);
+  const reusedPasswordError = values.currentPassword && values.newPassword === values.currentPassword
+    ? "현재 비밀번호와 다른 비밀번호를 입력해주세요."
+    : undefined;
+  const newPasswordError = reusedPasswordError ?? newPasswordFormatError;
+  const confirmationError = !values.newPasswordConfirmation
+    ? "새 비밀번호를 다시 입력해주세요."
+    : values.newPasswordConfirmation !== values.newPassword
+      ? "비밀번호가 일치하지 않습니다."
+      : undefined;
+  const canSubmit = !requiredCurrentPasswordError
+    && !newPasswordError
+    && !confirmationError
+    && !isSubmitting;
+
+  function resetAndClose() {
+    if (isSubmitting) return;
+    setValues(INITIAL_PASSWORD_VALUES);
+    setTouched({});
+    setCurrentPasswordError("");
+    setFormError("");
+    setVisibleFields({});
+    onClose();
+  }
+
+  function updateValue(field: PasswordChangeField, value: string) {
+    setValues((current) => ({ ...current, [field]: value }));
+    if (field === "currentPassword") setCurrentPasswordError("");
+    setFormError("");
+  }
+
+  function toggleVisibility(field: PasswordChangeField, inputId: string) {
+    setVisibleFields((current) => ({ ...current, [field]: !current[field] }));
+    window.requestAnimationFrame(() => document.getElementById(inputId)?.focus());
+  }
+
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSubmitting) return;
+    setTouched({ currentPassword: true, newPassword: true, newPasswordConfirmation: true });
+    if (!canSubmit) return;
+
+    setIsSubmitting(true);
+    setCurrentPasswordError("");
+    setFormError("");
+    try {
+      const result = await mockChangePassword(username, values.currentPassword, values.newPassword);
+      if (!result.ok) {
+        if (result.reason === "invalid_current_password") {
+          setCurrentPasswordError("현재 비밀번호가 일치하지 않습니다.");
+        } else {
+          setFormError("비밀번호를 변경하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        }
+        return;
+      }
+
+      setValues(INITIAL_PASSWORD_VALUES);
+      setTouched({});
+      setVisibleFields({});
+      onSuccess();
+    } catch {
+      setFormError("비밀번호를 변경하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <ProfileDialog
+      title="비밀번호 변경"
+      description="현재 비밀번호를 확인한 뒤 새 비밀번호로 변경합니다."
+      initialFocusSelector="#profile-current-password"
+      onClose={resetAndClose}
+    >
+      <form className="profile-password-form" onSubmit={changePassword} noValidate>
+        <FormField
+          id="profile-current-password"
+          label="현재 비밀번호"
+          type={visibleFields.currentPassword ? "text" : "password"}
+          homeLinkFocus
+          autoComplete="current-password"
+          value={values.currentPassword}
+          onChange={(event) => updateValue("currentPassword", event.target.value)}
+          onBlur={() => setTouched((current) => ({ ...current, currentPassword: true }))}
+          error={touched.currentPassword ? requiredCurrentPasswordError ?? currentPasswordError : currentPasswordError || undefined}
+          trailingControl={<PasswordVisibilityButton visible={Boolean(visibleFields.currentPassword)} onToggle={() => toggleVisibility("currentPassword", "profile-current-password")} />}
+        />
+        <FormField
+          id="profile-new-password"
+          label="새 비밀번호"
+          type={visibleFields.newPassword ? "text" : "password"}
+          homeLinkFocus
+          placeholder="영문, 숫자, 특수문자 조합 8~16자"
+          autoComplete="new-password"
+          value={values.newPassword}
+          onChange={(event) => updateValue("newPassword", event.target.value)}
+          onBlur={() => setTouched((current) => ({ ...current, newPassword: true }))}
+          error={touched.newPassword ? newPasswordError : undefined}
+          trailingControl={<PasswordVisibilityButton visible={Boolean(visibleFields.newPassword)} onToggle={() => toggleVisibility("newPassword", "profile-new-password")} />}
+        />
+        <FormField
+          id="profile-new-password-confirmation"
+          label="새 비밀번호 확인"
+          type={visibleFields.newPasswordConfirmation ? "text" : "password"}
+          homeLinkFocus
+          autoComplete="new-password"
+          value={values.newPasswordConfirmation}
+          onChange={(event) => updateValue("newPasswordConfirmation", event.target.value)}
+          onBlur={() => setTouched((current) => ({ ...current, newPasswordConfirmation: true }))}
+          error={touched.newPasswordConfirmation ? confirmationError : undefined}
+          trailingControl={<PasswordVisibilityButton visible={Boolean(visibleFields.newPasswordConfirmation)} onToggle={() => toggleVisibility("newPasswordConfirmation", "profile-new-password-confirmation")} />}
+        />
+        {formError ? <p className="profile-save-error" role="alert">{formError}</p> : null}
+        <div className="profile-dialog-actions">
+          <button className="button button-secondary profile-dialog-cancel" type="button" disabled={isSubmitting} onClick={resetAndClose}>취소</button>
+          <button className="button button-primary" type="submit" disabled={!canSubmit}>{isSubmitting ? "변경 중..." : "변경하기"}</button>
+        </div>
+      </form>
+    </ProfileDialog>
+  );
+}
+
 function ProfileSkeleton() {
   return (
     <div className="profile-skeleton" aria-label="계정 정보를 불러오는 중" aria-busy="true">
@@ -209,6 +361,7 @@ export function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
+  const [isPasswordChangeOpen, setIsPasswordChangeOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
 
   const loadProfile = useCallback(async () => {
@@ -298,6 +451,16 @@ export function ProfileScreen() {
     setSaveNotice("");
   }
 
+  function handleLogout() {
+    clearMockAuthentication();
+    router.replace("/login");
+  }
+
+  function completePasswordChange() {
+    setIsPasswordChangeOpen(false);
+    setSaveNotice("비밀번호가 변경되었어요.");
+  }
+
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile || isSaving) return;
@@ -341,7 +504,7 @@ export function ProfileScreen() {
     <>
       <AppLogo
         className="home-logo"
-        leftAction={<Link className="recent-back" href="/mypage" aria-label="마이페이지로 돌아가기">‹</Link>}
+        leftAction={<Link className="recent-back" href="/home" aria-label="홈으로 돌아가기">‹</Link>}
       />
       <main className="home-page feature-page profile-page">
         <div className="home-mobile-shell feature-shell profile-shell">
@@ -352,7 +515,7 @@ export function ProfileScreen() {
           </header>
 
           <section className="feature-heading profile-heading" aria-labelledby="profile-title">
-            <h1 className="section-page-title" id="profile-title">내 정보</h1>
+            <h1 className="section-page-title" id="profile-title">마이페이지</h1>
             <p>계정 정보를 확인하고 변경할 수 있어요.</p>
           </section>
 
@@ -439,17 +602,31 @@ export function ProfileScreen() {
 
               <section className="profile-section profile-account-section" aria-labelledby="profile-account-title">
                 <h2 id="profile-account-title">계정 관리</h2>
-                <div className="profile-action-card profile-danger-card">
-                  <button type="button" onClick={() => setIsWithdrawalOpen(true)} aria-label="회원 탈퇴 안내 열기">
+                <div className="profile-action-card">
+                  <button type="button" onClick={() => setIsPasswordChangeOpen(true)} aria-label="비밀번호 변경 창 열기">
+                    <span><strong>비밀번호 변경</strong></span>
+                    <ChevronIcon />
+                  </button>
+                  <button className="profile-danger-action" type="button" onClick={() => setIsWithdrawalOpen(true)} aria-label="회원 탈퇴 안내 열기">
                     <span><strong>회원 탈퇴</strong><small>탈퇴 전 유의사항을 확인합니다.</small></span>
                     <ChevronIcon />
                   </button>
+                </div>
+                <div className="profile-logout-area">
+                  <button className="mypage-logout" type="button" onClick={handleLogout}>로그아웃</button>
                 </div>
               </section>
             </div>
           ) : null}
         </div>
 
+        {isPasswordChangeOpen && profile ? (
+          <PasswordChangeDialog
+            username={profile.username}
+            onClose={() => setIsPasswordChangeOpen(false)}
+            onSuccess={completePasswordChange}
+          />
+        ) : null}
         {isWithdrawalOpen ? <WithdrawalDialog onClose={() => setIsWithdrawalOpen(false)} /> : null}
       </main>
     </>
