@@ -111,7 +111,9 @@ export default function RecentAnalysesPage() {
           <span aria-hidden="true" />
         </header>
 
-        <h1>최근 분석</h1>
+        <div className="recent-page-heading">
+          <h1 className="section-page-title">최근 분석</h1>
+        </div>
 
         <form className="date-filter" onSubmit={applyDateRange} noValidate>
           <div className="date-fields">

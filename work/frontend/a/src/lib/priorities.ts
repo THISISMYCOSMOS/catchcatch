@@ -1,11 +1,11 @@
 export const PRIORITIES = [
+  { id: "finalPriceWithShipping", label: "배송비 포함 최종가" },
+  { id: "reviews", label: "리뷰" },
+  { id: "pricePerVolume", label: "용량 대비 가성비" },
+  { id: "fastDelivery", label: "빠른 배송" },
+  { id: "giftSet", label: "기획세트·증정품" },
   { id: "lowestPrice", label: "최저가" },
   { id: "discount", label: "할인 여부" },
-  { id: "finalPriceWithShipping", label: "배송비 포함 최종가" },
-  { id: "fastDelivery", label: "빠른 배송" },
-  { id: "pricePerVolume", label: "용량 대비 가성비" },
-  { id: "reviews", label: "리뷰" },
-  { id: "giftSet", label: "기획세트·증정품" },
 ] as const;
 
 export type PriorityId = (typeof PRIORITIES)[number]["id"];

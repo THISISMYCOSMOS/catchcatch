@@ -1,8 +1,10 @@
 import type { InputHTMLAttributes, ReactNode } from "react";
+import styles from "./form-field.module.css";
 
 type FormFieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   error?: string;
+  homeLinkFocus?: boolean;
   trailingControl?: ReactNode;
 };
 
@@ -31,12 +33,12 @@ export function PasswordVisibilityButton({ visible, onToggle }: { visible: boole
   );
 }
 
-export function FormField({ label, error, id, className, trailingControl, ...props }: FormFieldProps) {
+export function FormField({ label, error, id, className, homeLinkFocus = false, trailingControl, ...props }: FormFieldProps) {
   const errorId = `${id}-error`;
   return (
     <div className="field-group">
       <label htmlFor={id}>{label}</label>
-      <div className="input-wrap">
+      <div className={["input-wrap", homeLinkFocus ? styles.homeLinkFocusShell : ""].filter(Boolean).join(" ")}>
         <input
           {...props}
           id={id}

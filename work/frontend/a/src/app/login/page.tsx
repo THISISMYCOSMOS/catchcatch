@@ -51,9 +51,9 @@ export default function LoginPage() {
   return (
     <AuthShell title="로그인" className="login-card">
       <form className="stage-form" onSubmit={handleSubmit} noValidate>
-        <FormField id="username" label="아이디" type="text" placeholder="아이디 입력" autoComplete="username" value={username} onChange={(e) => { setUsername(e.target.value); setErrors({}); }} onBlur={() => { if (!username.trim()) setErrors((current) => ({ ...current, username: "아이디를 입력해주세요." })); }} error={errors.username} />
+        <FormField id="username" label="아이디" type="text" homeLinkFocus placeholder="아이디 입력" autoComplete="username" value={username} onChange={(e) => { setUsername(e.target.value); setErrors({}); }} onBlur={() => { if (!username.trim()) setErrors((current) => ({ ...current, username: "아이디를 입력해주세요." })); }} error={errors.username} />
         <div className="login-password-options">
-          <FormField id="password" label="비밀번호" type={showPassword ? "text" : "password"} placeholder="비밀번호 입력" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErrors({}); }} onBlur={() => { if (!password) setErrors((current) => ({ ...current, password: "비밀번호를 입력해주세요." })); }} error={errors.password} trailingControl={<PasswordVisibilityButton visible={showPassword} onToggle={() => setShowPassword((value) => !value)} />} />
+          <FormField id="password" label="비밀번호" type={showPassword ? "text" : "password"} homeLinkFocus placeholder="비밀번호 입력" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErrors({}); }} onBlur={() => { if (!password) setErrors((current) => ({ ...current, password: "비밀번호를 입력해주세요." })); }} error={errors.password} trailingControl={<PasswordVisibilityButton visible={showPassword} onToggle={() => { setShowPassword((value) => !value); window.requestAnimationFrame(() => document.getElementById("password")?.focus()); }} />} />
           <label className="checkbox-label login-persistence">
             <input type="checkbox" checked={rememberLogin} onChange={(event) => setRememberLogin(event.target.checked)} />
             <span>로그인 유지</span>

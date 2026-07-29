@@ -6,6 +6,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { mockSavePriorities } from "@/lib/mock/auth";
 import { completeMockOnboarding, getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
 import { getStoredPriorities, PRIORITIES, PriorityId, savePriorities } from "@/lib/priorities";
+import styles from "./priorities.module.css";
 
 export default function PrioritiesPage() {
   const router = useRouter();
@@ -118,7 +119,13 @@ export default function PrioritiesPage() {
 
   return (
     <AuthShell
-      title="구매할 때 중요하게 보는 기준을 선택해주세요"
+      title={(
+        <>
+          <span className={styles.headlineLine}>구매할 때 중요하게 보는 기준을</span>
+          <br />
+          선택해주세요
+        </>
+      )}
       eyebrow="캐치캐치에 오신 것을 환영해요!"
       description={"선택한 기준은 AI 구매 판단에 반영돼요.\n최대 3개까지 선택할 수 있어요."}
       backHref="/signup"
@@ -128,9 +135,9 @@ export default function PrioritiesPage() {
         <p className="selection-count">
           <strong>{selected.length} / 3</strong>
         </p>
-        <div className="pill-list" aria-label="구매 우선순위">
+        <div className={`pill-list ${styles.priorityList}`} aria-label="구매 우선순위">
           {Array.from({ length: 4 }, (_, rowIndex) => (
-            <div className="pill-row" key={rowIndex}>
+            <div className={`pill-row ${styles.priorityRow}`} key={rowIndex}>
               {PRIORITIES.slice(rowIndex * 2, rowIndex * 2 + 2).map((priority) => {
                 const isSelected = selected.includes(priority.id);
                 const selectionLimitReached = selected.length === 3 && !isSelected;
@@ -139,7 +146,7 @@ export default function PrioritiesPage() {
                 return (
                   <button
                     key={priority.id}
-                    className={`pill ${isSelected ? "pill-selected" : ""} ${wasRejected ? "pill-rejected" : ""}`}
+                    className={`pill ${styles.priorityPill} ${isSelected ? "pill-selected" : ""} ${wasRejected ? "pill-rejected" : ""}`}
                     type="button"
                     aria-pressed={isSelected}
                     aria-disabled={selectionLimitReached}

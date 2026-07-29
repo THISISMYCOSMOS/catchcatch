@@ -4,7 +4,7 @@ import { AppLogo } from "@/components/app-logo";
 
 type AuthShellProps = {
   children: ReactNode;
-  title: string;
+  title: ReactNode;
   description?: string;
   backHref?: string;
   eyebrow?: string;

@@ -16,11 +16,16 @@ const PASSWORD_SPECIAL_PATTERN = /[^A-Za-z0-9\s]/;
 const DUPLICATE_EMAILS = new Set(["used@example.com"]);
 const DUPLICATE_USERNAMES = new Set(["catchcatch"]);
 
+export function getEmailError(email: string): string | undefined {
+  if (!email.trim()) return "이메일을 입력해주세요.";
+  if (!EMAIL_PATTERN.test(email.trim())) return "올바른 이메일 형식이 아닙니다.";
+  return undefined;
+}
+
 export function getSignupError(field: SignupField, values: SignupValues): string | undefined {
   switch (field) {
     case "email":
-      if (!values.email.trim()) return "이메일을 입력해주세요.";
-      if (!EMAIL_PATTERN.test(values.email.trim())) return "올바른 이메일 형식이 아닙니다.";
+      if (getEmailError(values.email)) return getEmailError(values.email);
       if (DUPLICATE_EMAILS.has(values.email.trim().toLowerCase())) return "이미 사용 중인 이메일입니다.";
       return undefined;
     case "username":

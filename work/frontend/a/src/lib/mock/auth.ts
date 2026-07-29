@@ -10,6 +10,7 @@ const MOCK_ACCOUNTS_STORAGE_KEY = "catchcatch:mock-accounts";
 type StoredMockAccount = {
   username: string;
   password: string;
+  email?: string;
 };
 
 function readMockAccounts(): StoredMockAccount[] {
@@ -23,6 +24,7 @@ function readMockAccounts(): StoredMockAccount[] {
           && typeof account === "object"
           && typeof account.username === "string"
           && typeof account.password === "string"
+          && (account.email === undefined || typeof account.email === "string")
         ))
       : [];
   } catch {
@@ -48,9 +50,26 @@ export async function mockLogin(username: string, password: string) {
     : { ok: false as const };
 }
 
-export async function mockSignup(username: string, password: string) {
+export function getMockAccountEmail(username: string) {
+  const normalizedUsername = username.trim().toLowerCase();
+  return readMockAccounts().find(
+    (storedAccount) => storedAccount.username === normalizedUsername,
+  )?.email ?? null;
+}
+
+export function isMockAccountEmailInUse(email: string, excludedUsername: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedExcludedUsername = excludedUsername.trim().toLowerCase();
+  return readMockAccounts().some((storedAccount) => (
+    storedAccount.username !== normalizedExcludedUsername
+    && storedAccount.email?.toLowerCase() === normalizedEmail
+  ));
+}
+
+export async function mockSignup(username: string, password: string, email: string) {
   await wait();
   const normalizedUsername = username.trim().toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
   const accounts = readMockAccounts();
   if (
     normalizedUsername === DEMO_ACCOUNT.username
@@ -61,7 +80,7 @@ export async function mockSignup(username: string, password: string) {
 
   localStorage.setItem(MOCK_ACCOUNTS_STORAGE_KEY, JSON.stringify([
     ...accounts,
-    { username: normalizedUsername, password },
+    { username: normalizedUsername, password, email: normalizedEmail },
   ]));
   return { ok: true as const };
 }
