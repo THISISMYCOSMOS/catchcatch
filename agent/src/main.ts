@@ -4,7 +4,8 @@ import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
-  const port = Number(process.env.PORT ?? 3000);
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+  const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);
 }
 

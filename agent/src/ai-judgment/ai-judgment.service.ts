@@ -20,7 +20,7 @@ export class AiJudgmentService {
 
   constructor(private readonly config: ConfigService) {}
 
-  async judge(rawInput: JudgmentInput): Promise<AiJudgment> {
+  async judge(rawInput: unknown): Promise<AiJudgment> {
     const input = judgmentInputSchema.parse(rawInput);
     const mode = this.config.get<string>('AI_JUDGMENT_MODE', 'real');
 

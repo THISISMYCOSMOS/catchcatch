@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import {
-  ProductSearchInput,
   ProductSearchResult,
   productSearchAiResultSchema,
   productSearchInputSchema,
@@ -36,7 +35,7 @@ export class ProductSearchService {
 
   constructor(private readonly config: ConfigService) {}
 
-  async searchSameProduct(rawInput: ProductSearchInput): Promise<ProductSearchResult> {
+  async searchSameProduct(rawInput: unknown): Promise<ProductSearchResult> {
     const input = productSearchInputSchema.parse(rawInput);
     if (this.config.get<string>('PRODUCT_DATA_MODE', 'sample') !== 'web_search') {
       throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be web_search');
