@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
@@ -235,6 +236,17 @@ export class AnalysesService {
     const row = await this.analyses.findById(id);
     if (!row) {
       throw new NotFoundException(`Analysis not found: ${id}`);
+    }
+    return toAnalysisResponse(row);
+  }
+
+  async findByIdForUser(id: string, userId: string): Promise<AnalysisResponse> {
+    const row = await this.analyses.findById(id);
+    if (!row) {
+      throw new NotFoundException(`Analysis not found: ${id}`);
+    }
+    if (row.user_id !== userId) {
+      throw new ForbiddenException('Cannot access another user analysis');
     }
     return toAnalysisResponse(row);
   }

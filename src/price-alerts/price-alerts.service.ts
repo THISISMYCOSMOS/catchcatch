@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -86,6 +87,18 @@ export class PriceAlertsService {
       }
       throw new InternalServerErrorException('Failed to update price alert');
     }
+  }
+
+  async updateEnabledForUser(
+    userId: string,
+    alertId: string,
+    enabled: boolean,
+  ): Promise<PriceAlertResponse> {
+    const userAlerts = await this.priceAlerts.findByUserId(userId);
+    if (!userAlerts.some((alert) => alert.id === alertId)) {
+      throw new ForbiddenException('Cannot access another user price alert');
+    }
+    return this.updateEnabled(alertId, enabled);
   }
 
   private async findProductOrThrow(productId: string): Promise<Row<'products'>> {

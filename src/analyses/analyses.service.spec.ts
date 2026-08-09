@@ -1,4 +1,4 @@
-import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import * as calculations from '../domain/calculations';
 import {
   InMemoryAnalysisRepository,
@@ -265,6 +265,22 @@ describe('AnalysesService', () => {
 
     await expect(service.findById(created.id)).resolves.toEqual(created);
     await expect(service.findById('missing-analysis')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('blocks another user from reading an analysis', async () => {
+    const product = await seedAnalysisReadyProduct();
+    const created = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/1',
+      productId: product.id,
+    });
+
+    await expect(service.findByIdForUser(created.id, 'user-2'))
+      .rejects
+      .toBeInstanceOf(ForbiddenException);
+    await expect(service.findByIdForUser(created.id, 'user-1')).resolves.toMatchObject({
+      id: created.id,
+    });
   });
 
   it('uses the analysis id returned by atomic persistence', async () => {

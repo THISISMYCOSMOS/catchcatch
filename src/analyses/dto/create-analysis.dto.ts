@@ -2,8 +2,9 @@ import { IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
 
 export class CreateAnalysisDto {
   @IsString()
+  @IsOptional()
   @IsNotEmpty()
-  userId!: string;
+  userId?: string;
 
   @IsString()
   @IsNotEmpty()

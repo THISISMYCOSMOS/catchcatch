@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { validate } from 'class-validator';
 import {
   InMemoryDatabase,
@@ -80,6 +80,15 @@ describe('PriceAlertsService', () => {
 
     expect(disabled.enabled).toBe(false);
     expect(enabled.enabled).toBe(true);
+  });
+
+  it('blocks updating another user price alert through owner-aware method', async () => {
+    const product = await createProduct();
+    const alert = await service.create('user-2', product.id, 1000);
+
+    await expect(service.updateEnabledForUser('user-1', alert.id, false))
+      .rejects
+      .toBeInstanceOf(ForbiddenException);
   });
 
   it('returns 404 when updating a missing alert', async () => {
