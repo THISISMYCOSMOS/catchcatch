@@ -16,20 +16,45 @@ const COSMETIC_COMPONENT_TYPES = new Set<ProductComponent['type']>([
 
 export type MarketEffectivePriceInput = {
   listedSalePrice: number | null;
-  publicCouponAmount: number | null;
-  automaticDiscountAmount: number | null;
+  discounts: readonly PriceDiscount[];
   shippingFee: number | null;
 };
 
-export type EligibleInstantDiscount = {
-  eligibilityStatus: EligibilityStatus;
+export type DiscountApplicationStatus =
+  | 'APPLICABLE'
+  | 'NOT_APPLICABLE'
+  | 'UNKNOWN';
+
+export type PriceDiscount = {
+  id: string;
   amount: number | null;
+  applicationStatus: DiscountApplicationStatus;
+  exclusiveGroup: string | null;
+  includedInBasePrice: boolean;
+};
+
+export type EligibleInstantDiscount = PriceDiscount & {
+  eligibilityStatus: EligibilityStatus;
 };
 
 export type UserEffectivePriceInput = {
-  marketEffectivePrice: number | null;
+  marketPrice: EffectivePriceBreakdown;
   instantDiscounts: readonly EligibleInstantDiscount[];
   rewardPoints?: number | null;
+};
+
+export type AppliedDiscount = {
+  id: string;
+  amount: number | null;
+  exclusiveGroup: string | null;
+};
+
+export type EffectivePriceBreakdown = {
+  price: number | null;
+  appliedDiscountIds: string[];
+  appliedDiscounts: AppliedDiscount[];
+  occupiedExclusiveGroups: string[];
+  unresolvedDiscountIds: string[];
 };
 
 export type CosmeticCapacityTotals = {
@@ -61,42 +86,120 @@ export function validateSelectedCriteria(
 export function calculateMarketEffectivePrice(
   input: MarketEffectivePriceInput,
 ): number | null {
-  const values = [
-    input.listedSalePrice,
-    input.publicCouponAmount,
-    input.automaticDiscountAmount,
-    input.shippingFee,
-  ];
-  if (values.some((value) => value === null)) {
-    return null;
-  }
+  return calculateMarketEffectivePriceBreakdown(input).price;
+}
 
-  const price = input.listedSalePrice!
-    - input.publicCouponAmount!
-    - input.automaticDiscountAmount!
-    + input.shippingFee!;
-  return assertNonnegativePrice(price);
+export function calculateMarketEffectivePriceBreakdown(
+  input: MarketEffectivePriceInput,
+): EffectivePriceBreakdown {
+  const replaceableIncludedDiscounts = input.discounts.filter(
+    (discount) => (
+      discount.includedInBasePrice
+      && discount.amount !== null
+    ),
+  );
+  const replaceableIncludedDiscountIds = new Set(
+    replaceableIncludedDiscounts.map((discount) => discount.id),
+  );
+  const discountCandidates = input.discounts.map((discount) => (
+    replaceableIncludedDiscountIds.has(discount.id)
+      ? {
+        ...discount,
+        applicationStatus: 'APPLICABLE' as const,
+        includedInBasePrice: false,
+      }
+      : discount
+  ));
+  const discountResolution = resolveDiscounts(
+    discountCandidates,
+    () => 'ELIGIBLE',
+  );
+  const restoredIncludedDiscountAmount = replaceableIncludedDiscounts.reduce(
+    (total, discount) => total + discount.amount!,
+    0,
+  );
+
+  return calculateEffectivePriceBreakdown(
+    input.listedSalePrice === null
+      ? null
+      : input.listedSalePrice + restoredIncludedDiscountAmount,
+    input.shippingFee,
+    discountResolution,
+  );
 }
 
 export function calculateUserEffectivePrice(
   input: UserEffectivePriceInput,
 ): number | null {
-  if (input.marketEffectivePrice === null) {
-    return null;
-  }
+  return calculateUserEffectivePriceBreakdown(input).price;
+}
 
-  let totalDiscount = 0;
-  for (const discount of input.instantDiscounts) {
-    if (discount.eligibilityStatus !== 'ELIGIBLE') {
-      continue;
-    }
-    if (discount.amount === null) {
-      return null;
-    }
-    totalDiscount += discount.amount;
-  }
+export function calculateUserEffectivePriceBreakdown(
+  input: UserEffectivePriceInput,
+): EffectivePriceBreakdown {
+  const replaceableMarketDiscounts = input.marketPrice.appliedDiscounts.filter(
+    (discount) => (
+      discount.exclusiveGroup !== null
+      && discount.amount !== null
+    ),
+  );
+  const replaceableMarketDiscountIds = new Set(
+    replaceableMarketDiscounts.map((discount) => discount.id),
+  );
+  const replaceableExclusiveGroups = new Set(
+    replaceableMarketDiscounts.map((discount) => discount.exclusiveGroup!),
+  );
+  const fixedMarketDiscounts = input.marketPrice.appliedDiscounts.filter(
+    (discount) => !replaceableMarketDiscountIds.has(discount.id),
+  );
+  const discountCandidates: EligibleInstantDiscount[] = [
+    ...replaceableMarketDiscounts.map((discount) => ({
+      ...discount,
+      amount: discount.amount!,
+      applicationStatus: 'APPLICABLE' as const,
+      includedInBasePrice: false,
+      eligibilityStatus: 'ELIGIBLE' as const,
+    })),
+    ...input.instantDiscounts,
+  ];
 
-  return assertNonnegativePrice(input.marketEffectivePrice - totalDiscount);
+  const discountResolution = resolveDiscounts(
+    discountCandidates,
+    (discount) => discount.eligibilityStatus,
+    input.marketPrice.occupiedExclusiveGroups.filter(
+      (group) => !replaceableExclusiveGroups.has(group),
+    ),
+    [
+      ...fixedMarketDiscounts.map((discount) => discount.id),
+      ...input.marketPrice.unresolvedDiscountIds,
+    ],
+  );
+
+  const restoredMarketDiscountAmount = replaceableMarketDiscounts.reduce(
+    (total, discount) => total + discount.amount!,
+    0,
+  );
+  const userPrice = calculateEffectivePriceBreakdown(
+    input.marketPrice.price === null
+      ? null
+      : input.marketPrice.price + restoredMarketDiscountAmount,
+    0,
+    discountResolution,
+  );
+  const appliedDiscounts = [
+    ...fixedMarketDiscounts,
+    ...userPrice.appliedDiscounts,
+  ];
+
+  return {
+    ...userPrice,
+    appliedDiscountIds: appliedDiscounts.map((discount) => discount.id),
+    appliedDiscounts,
+    unresolvedDiscountIds: [
+      ...input.marketPrice.unresolvedDiscountIds,
+      ...userPrice.unresolvedDiscountIds,
+    ],
+  };
 }
 
 export function calculateDiscountRateFromRecentAverage(
@@ -179,4 +282,212 @@ function assertNonnegativePrice(price: number): number {
     throw new Error('Effective price cannot be negative');
   }
   return price;
+}
+
+type DiscountResolution = {
+  totalDiscount: number | null;
+  appliedDiscountIds: string[];
+  appliedDiscounts: AppliedDiscount[];
+  occupiedExclusiveGroups: string[];
+  unresolvedDiscountIds: string[];
+};
+
+function resolveDiscounts<T extends PriceDiscount>(
+  discounts: readonly T[],
+  getEligibilityStatus: (discount: T) => EligibilityStatus,
+  initiallyOccupiedExclusiveGroups: readonly string[] = [],
+  previouslySeenDiscountIds: readonly string[] = [],
+): DiscountResolution {
+  assertUniqueDiscountIds(discounts, previouslySeenDiscountIds);
+
+  const occupiedExclusiveGroups = new Set(initiallyOccupiedExclusiveGroups);
+  const includedDiscounts: AppliedDiscount[] = [];
+  const unresolvedDiscountIds: string[] = [];
+
+  for (const discount of discounts) {
+    if (!discount.includedInBasePrice) {
+      continue;
+    }
+
+    includedDiscounts.push(toAppliedDiscount(discount));
+    if (discount.exclusiveGroup === null) {
+      continue;
+    }
+    if (occupiedExclusiveGroups.has(discount.exclusiveGroup)) {
+      throw new Error(
+        `Multiple included discounts occupy exclusive group: ${discount.exclusiveGroup}`,
+      );
+    }
+    occupiedExclusiveGroups.add(discount.exclusiveGroup);
+  }
+
+  const ungroupedDiscounts: T[] = [];
+  const groupedDiscounts = new Map<string, T[]>();
+  const unresolvedAmountGroups = new Set<string>();
+  let hasUnresolvedUngroupedAmount = false;
+
+  for (const discount of discounts) {
+    if (discount.includedInBasePrice) {
+      continue;
+    }
+    if (
+      discount.exclusiveGroup !== null
+      && occupiedExclusiveGroups.has(discount.exclusiveGroup)
+    ) {
+      continue;
+    }
+
+    const eligibilityStatus = getEligibilityStatus(discount);
+    if (eligibilityStatus === 'UNKNOWN') {
+      unresolvedDiscountIds.push(discount.id);
+      continue;
+    }
+    if (eligibilityStatus !== 'ELIGIBLE') {
+      continue;
+    }
+    if (discount.applicationStatus === 'UNKNOWN') {
+      unresolvedDiscountIds.push(discount.id);
+      continue;
+    }
+    if (discount.applicationStatus !== 'APPLICABLE') {
+      continue;
+    }
+
+    if (discount.amount === null) {
+      unresolvedDiscountIds.push(discount.id);
+      if (discount.exclusiveGroup === null) {
+        hasUnresolvedUngroupedAmount = true;
+      } else {
+        unresolvedAmountGroups.add(discount.exclusiveGroup);
+      }
+      continue;
+    }
+
+    assertNonnegativeDiscount(discount);
+    if (discount.exclusiveGroup === null) {
+      ungroupedDiscounts.push(discount);
+      continue;
+    }
+
+    const group = groupedDiscounts.get(discount.exclusiveGroup) ?? [];
+    group.push(discount);
+    groupedDiscounts.set(discount.exclusiveGroup, group);
+  }
+
+  const selectedDiscountIds = new Set(
+    ungroupedDiscounts.map((discount) => discount.id),
+  );
+
+  for (const [exclusiveGroup, group] of groupedDiscounts) {
+    if (unresolvedAmountGroups.has(exclusiveGroup)) {
+      continue;
+    }
+
+    const selectedDiscount = group.reduce((best, candidate) => (
+      candidate.amount! > best.amount! ? candidate : best
+    ));
+    selectedDiscountIds.add(selectedDiscount.id);
+    occupiedExclusiveGroups.add(exclusiveGroup);
+  }
+
+  let totalDiscount = 0;
+  const newlyAppliedDiscounts: AppliedDiscount[] = [];
+  for (const discount of discounts) {
+    if (!selectedDiscountIds.has(discount.id)) {
+      continue;
+    }
+    totalDiscount += discount.amount!;
+    newlyAppliedDiscounts.push(toAppliedDiscount(discount));
+  }
+
+  const appliedDiscounts = [
+    ...includedDiscounts,
+    ...newlyAppliedDiscounts,
+  ];
+  if (hasUnresolvedUngroupedAmount || unresolvedAmountGroups.size > 0) {
+    return {
+      totalDiscount: null,
+      appliedDiscountIds: appliedDiscounts.map((discount) => discount.id),
+      appliedDiscounts,
+      occupiedExclusiveGroups: [...occupiedExclusiveGroups],
+      unresolvedDiscountIds,
+    };
+  }
+
+  return {
+    totalDiscount,
+    appliedDiscountIds: appliedDiscounts.map((discount) => discount.id),
+    appliedDiscounts,
+    occupiedExclusiveGroups: [...occupiedExclusiveGroups],
+    unresolvedDiscountIds,
+  };
+}
+
+function calculateEffectivePriceBreakdown(
+  basePrice: number | null,
+  shippingFee: number | null,
+  discountResolution: DiscountResolution,
+): EffectivePriceBreakdown {
+  const {
+    totalDiscount,
+    appliedDiscountIds,
+    appliedDiscounts,
+    occupiedExclusiveGroups,
+    unresolvedDiscountIds,
+  } = discountResolution;
+
+  if (
+    basePrice === null
+    || shippingFee === null
+    || totalDiscount === null
+  ) {
+    return {
+      price: null,
+      appliedDiscountIds,
+      appliedDiscounts,
+      occupiedExclusiveGroups,
+      unresolvedDiscountIds,
+    };
+  }
+
+  return {
+    price: assertNonnegativePrice(basePrice + shippingFee - totalDiscount),
+    appliedDiscountIds,
+    appliedDiscounts,
+    occupiedExclusiveGroups,
+    unresolvedDiscountIds,
+  };
+}
+
+function assertUniqueDiscountIds(
+  discounts: readonly PriceDiscount[],
+  previouslySeenDiscountIds: readonly string[] = [],
+): void {
+  const ids = new Set<string>();
+  for (const id of previouslySeenDiscountIds) {
+    if (ids.has(id)) {
+      throw new Error(`Duplicate discount ID: ${id}`);
+    }
+    ids.add(id);
+  }
+  for (const discount of discounts) {
+    if (ids.has(discount.id)) {
+      throw new Error(`Duplicate discount ID: ${discount.id}`);
+    }
+    ids.add(discount.id);
+  }
+}
+
+function assertNonnegativeDiscount(discount: PriceDiscount): void {
+  if (discount.amount! < 0) {
+    throw new Error(`Discount amount cannot be negative: ${discount.id}`);
+  }
+}
+
+function toAppliedDiscount(discount: PriceDiscount): AppliedDiscount {
+  return {
+    id: discount.id,
+    amount: discount.amount,
+    exclusiveGroup: discount.exclusiveGroup,
+  };
 }

@@ -1,0 +1,24 @@
+.homeLinkFocusShell {
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  transition: none;
+}
+
+.homeLinkFocusShell :global(.text-input) {
+  transition: none;
+}
+
+.homeLinkFocusShell:focus-within :global(.text-input) {
+  border-color: var(--strong-border);
+  background: var(--surface);
+  outline: none;
+  box-shadow: none;
+}
+
+.homeLinkFocusShell :global(.password-visibility:focus-visible) {
+  outline: none;
+}
+
+.homeLinkFocusShell:focus-within :global(.text-input.input-error) {
+  border-color: var(--error);
+}
