@@ -16,6 +16,11 @@ export class SavedProductsController {
     return this.service.findByUserId(userId);
   }
 
+  @Get(':userId/cards')
+  findCardsByUserId(@Param('userId') userId: string) {
+    return this.service.findCardsByUserId(userId);
+  }
+
   @Delete(':userId/:productId')
   remove(
     @Param('userId') userId: string,

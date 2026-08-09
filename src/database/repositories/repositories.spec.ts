@@ -1,9 +1,15 @@
 import { Insert } from '../database.types';
+import { AnalysisPersistencePayload } from './repository.interfaces';
+import { SupabaseAnalysisOfferRepository } from './supabase-analysis-offer.repository';
+import { SupabaseAnalysisPersistenceRepository } from './supabase-analysis-persistence.repository';
 import { SupabaseAnalysisRepository } from './supabase-analysis.repository';
 import { SupabaseProductRepository } from './supabase-product.repository';
+import { SupabaseSellerOfferBenefitRepository } from './supabase-seller-offer-benefit.repository';
 import { SupabaseSellerOfferRepository } from './supabase-seller-offer.repository';
 import {
   InMemoryAnalysisRepository,
+  InMemoryAnalysisOfferRepository,
+  InMemoryAnalysisPersistenceRepository,
   InMemoryDatabase,
   InMemoryUserCardRepository,
   InMemoryUserMembershipRepository,
@@ -11,6 +17,7 @@ import {
   InMemoryPriceHistoryRepository,
   InMemoryProductRepository,
   InMemorySavedProductRepository,
+  InMemorySellerOfferBenefitRepository,
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
   InMemoryUserShoppingGradeRepository,
@@ -21,8 +28,11 @@ describe('repository implementations', () => {
   let userPreferences: InMemoryUserPreferenceRepository;
   let products: InMemoryProductRepository;
   let sellerOffers: InMemorySellerOfferRepository;
+  let sellerOfferBenefits: InMemorySellerOfferBenefitRepository;
   let priceHistory: InMemoryPriceHistoryRepository;
   let analyses: InMemoryAnalysisRepository;
+  let analysisPersistence: InMemoryAnalysisPersistenceRepository;
+  let analysisOffers: InMemoryAnalysisOfferRepository;
   let savedProducts: InMemorySavedProductRepository;
   let priceAlerts: InMemoryPriceAlertRepository;
   let memberships: InMemoryUserMembershipRepository;
@@ -34,8 +44,11 @@ describe('repository implementations', () => {
     userPreferences = new InMemoryUserPreferenceRepository(database);
     products = new InMemoryProductRepository(database);
     sellerOffers = new InMemorySellerOfferRepository(database);
+    sellerOfferBenefits = new InMemorySellerOfferBenefitRepository(database);
     priceHistory = new InMemoryPriceHistoryRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
+    analysisPersistence = new InMemoryAnalysisPersistenceRepository(database);
+    analysisOffers = new InMemoryAnalysisOfferRepository(database);
     savedProducts = new InMemorySavedProductRepository(database);
     priceAlerts = new InMemoryPriceAlertRepository(database);
     memberships = new InMemoryUserMembershipRepository(database);
@@ -217,6 +230,161 @@ describe('repository implementations', () => {
     })).rejects.toThrow('Analysis not found');
   });
 
+  it('stores seller offer benefit rules and prevents duplicates', async () => {
+    const created = await sellerOfferBenefits.createMany([
+      sellerOfferBenefitInput({ id: 'benefit-1' }),
+      sellerOfferBenefitInput({ id: 'benefit-2' }),
+    ]);
+
+    expect(created).toHaveLength(1);
+    await expect(sellerOfferBenefits.findBySellerOfferIds(['offer-1'])).resolves.toMatchObject([
+      {
+        benefit_type: 'MEMBERSHIP',
+        provider: 'COUPANG',
+        required_membership_type: 'WOW',
+        discount_amount: 1000,
+      },
+    ]);
+    await expect(sellerOfferBenefits.findBySellerOfferIds([])).resolves.toEqual([]);
+  });
+
+  it('rejects negative seller offer benefit discounts', async () => {
+    await expect(sellerOfferBenefits.createMany([
+      sellerOfferBenefitInput({ discount_amount: -1 }),
+    ])).rejects.toThrow('negative');
+  });
+
+  it('finds recent analyses by user in newest-first order', async () => {
+    const first = await analyses.create(analysisInput({
+      user_id: 'user-1',
+      source_url: 'https://example.com/first',
+      created_at: '2026-07-01T00:00:00.000Z',
+    }));
+    const second = await analyses.create(analysisInput({
+      user_id: 'user-1',
+      source_url: 'https://example.com/second',
+      created_at: '2026-07-02T00:00:00.000Z',
+    }));
+    await analyses.create(analysisInput({
+      user_id: 'user-2',
+      source_url: 'https://example.com/other',
+      created_at: '2026-07-03T00:00:00.000Z',
+    }));
+
+    await expect(analyses.findRecentByUserId('user-1', 2)).resolves.toEqual([second, first]);
+  });
+
+  it('stores analysis offer snapshots and prevents duplicate analysis seller rows', async () => {
+    const created = await analysisOffers.createMany([
+      analysisOfferInput({ seller_identifier: 'offer-1', seller_name: 'Seller A' }),
+      analysisOfferInput({ seller_identifier: 'offer-1', seller_name: 'Seller A Changed' }),
+    ]);
+
+    expect(created).toHaveLength(1);
+    expect(await analysisOffers.findByAnalysisId('analysis-1')).toMatchObject([
+      {
+        analysis_id: 'analysis-1',
+        seller_identifier: 'offer-1',
+        seller_name: 'Seller A',
+        user_effective_price: 10000,
+      },
+    ]);
+
+    const repeated = await analysisOffers.createMany([
+      analysisOfferInput({ seller_identifier: 'offer-1', seller_name: 'Seller A Later' }),
+    ]);
+    expect(repeated[0].seller_name).toBe('Seller A');
+    expect(await analysisOffers.findByAnalysisId('analysis-1')).toHaveLength(1);
+  });
+
+  it('atomically persists analysis, snapshots, and price history', async () => {
+    const result = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'request-1',
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-1', seller_name: 'Seller A' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+      ],
+    }));
+
+    expect(result).toMatchObject({
+      user_id: 'user-1',
+      idempotency_key: 'request-1',
+      status: 'COMPLETED',
+    });
+    expect(await analysisOffers.findByAnalysisId(result.id)).toHaveLength(1);
+    expect(database.store.priceHistory).toMatchObject([
+      {
+        analysis_id: result.id,
+        product_id: 'product-1',
+        seller_offer_id: 'offer-1',
+      },
+    ]);
+  });
+
+  it('rolls back all in-memory writes when snapshot persistence fails', async () => {
+    analysisPersistence.failAfterOfferSnapshots = true;
+
+    await expect(analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-1' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+      ],
+    }))).rejects.toThrow('Injected failure');
+
+    expect(database.store.analyses).toEqual([]);
+    expect(database.store.analysisOffers).toEqual([]);
+    expect(database.store.priceHistory).toEqual([]);
+  });
+
+  it('rolls back all in-memory writes when price history persistence fails', async () => {
+    analysisPersistence.failAfterPriceHistory = true;
+
+    await expect(analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-1' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+      ],
+    }))).rejects.toThrow('Injected failure');
+
+    expect(database.store.analyses).toEqual([]);
+    expect(database.store.analysisOffers).toEqual([]);
+    expect(database.store.priceHistory).toEqual([]);
+  });
+
+  it('returns existing analysis for duplicate idempotency keys without duplicate children', async () => {
+    const first = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'request-1',
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-1' }),
+        analysisOfferInput({ seller_identifier: 'offer-1' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+      ],
+    }));
+    const second = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'request-1',
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-2' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-2' }),
+      ],
+    }));
+
+    expect(second.id).toBe(first.id);
+    expect(database.store.analyses).toHaveLength(1);
+    expect(await analysisOffers.findByAnalysisId(first.id)).toHaveLength(1);
+    expect(database.store.priceHistory).toHaveLength(1);
+  });
+
   it('prevents duplicate saved products and removes saved products safely', async () => {
     const first = await savedProducts.save({ user_id: 'user-1', product_id: 'product-1' });
     const second = await savedProducts.save({ user_id: 'user-1', product_id: 'product-1' });
@@ -308,6 +476,47 @@ describe('repository implementations', () => {
     expect(client.from).not.toHaveBeenCalled();
   });
 
+  it('does not call Supabase for empty seller offer benefit createMany and find input', async () => {
+    const client = { from: jest.fn() };
+    const repository = new SupabaseSellerOfferBenefitRepository(client as never);
+
+    await expect(repository.createMany([])).resolves.toEqual([]);
+    await expect(repository.findBySellerOfferIds([])).resolves.toEqual([]);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it('does not call Supabase for empty analysis offer createMany input', async () => {
+    const client = { from: jest.fn() };
+    const repository = new SupabaseAnalysisOfferRepository(client as never);
+
+    await expect(repository.createMany([])).resolves.toEqual([]);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it('persists analysis through Supabase RPC and converts RPC errors', async () => {
+    const rpc = jest.fn().mockResolvedValueOnce({
+      data: analysisRow({ id: 'analysis-1', idempotency_key: 'request-1' }),
+      error: null,
+    }).mockResolvedValueOnce({
+      data: null,
+      error: { message: 'duplicate key value violates unique constraint', code: '23505' },
+    });
+    const repository = new SupabaseAnalysisPersistenceRepository({ rpc } as never);
+
+    await expect(repository.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'request-1',
+    }))).resolves.toMatchObject({
+      id: 'analysis-1',
+      idempotency_key: 'request-1',
+    });
+    expect(rpc).toHaveBeenCalledWith('persist_analysis_atomically', {
+      payload: expect.objectContaining({ idempotencyKey: 'request-1' }),
+    });
+    await expect(repository.persistAnalysisAtomically(analysisPersistencePayload()))
+      .rejects
+      .toThrow('persist analysis atomically failed (23505): duplicate key value violates unique constraint');
+  });
+
   it('converts Supabase errors into clear Error instances without network access', async () => {
     const single = jest.fn().mockResolvedValue({
       data: null,
@@ -393,6 +602,137 @@ function sellerOfferInput(
     product_id: 'product-1',
     seller_name: 'Seller',
     seller_url: 'https://example.com/product',
+    ...overrides,
+  };
+}
+
+function analysisInput(
+  overrides: Partial<Insert<'analyses'>> = {},
+): Insert<'analyses'> {
+  return {
+    source_url: 'https://example.com/product',
+    status: 'COMPLETED',
+    selected_criteria: [
+      'FINAL_PAYMENT_AMOUNT',
+      'PURCHASE_TIMING',
+      'UNIT_PRICE',
+    ],
+    ...overrides,
+  };
+}
+
+function analysisRow(
+  overrides: Partial<ReturnType<typeof analysisInput> & { id: string; created_at: string; updated_at: string }> = {},
+) {
+  return {
+    id: 'analysis-1',
+    user_id: 'user-1',
+    idempotency_key: null,
+    source_url: 'https://example.com/product',
+    product_id: 'product-1',
+    status: 'COMPLETED',
+    verdict: null,
+    allowed_conclusions: ['REASONABLE_BUY'],
+    selected_criteria: [
+      'FINAL_PAYMENT_AMOUNT',
+      'PURCHASE_TIMING',
+      'UNIT_PRICE',
+    ],
+    result_json: { summary: 'saved snapshot' },
+    warning_codes: [],
+    created_at: '2026-07-01T00:00:00.000Z',
+    updated_at: '2026-07-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function analysisPersistencePayload(overrides: {
+  idempotencyKey?: string | null;
+  offerSnapshots?: ReturnType<typeof analysisOfferInput>[];
+  priceHistoryEntries?: ReturnType<typeof priceHistoryInput>[];
+} = {}): AnalysisPersistencePayload {
+  return {
+    userId: 'user-1',
+    productId: 'product-1',
+    sourceUrl: 'https://example.com/product',
+    idempotencyKey: overrides.idempotencyKey ?? null,
+    status: 'COMPLETED' as const,
+    verdict: null,
+    allowedConclusions: ['REASONABLE_BUY' as const],
+    selectedCriteria: [
+      'FINAL_PAYMENT_AMOUNT' as const,
+      'PURCHASE_TIMING' as const,
+      'UNIT_PRICE' as const,
+    ],
+    warningCodes: [],
+    resultJson: { summary: 'saved snapshot' },
+    offerSnapshots: (overrides.offerSnapshots ?? []).map(toPersistenceOfferSnapshot),
+    priceHistoryEntries: (overrides.priceHistoryEntries ?? []).map(toPersistencePriceHistory),
+  };
+}
+
+function toPersistenceOfferSnapshot(
+  input: Insert<'analysis_offers'>,
+): AnalysisPersistencePayload['offerSnapshots'][number] {
+  return {
+    seller_offer_id: input.seller_offer_id ?? null,
+    seller_identifier: input.seller_identifier,
+    seller_name: input.seller_name,
+    original_list_price: input.original_list_price ?? null,
+    sale_price: input.sale_price ?? null,
+    market_effective_price: input.market_effective_price ?? null,
+    user_effective_price: input.user_effective_price ?? null,
+    shipping_fee: input.shipping_fee ?? null,
+    public_discount: input.public_discount ?? null,
+    user_discount: input.user_discount ?? null,
+    quantity: input.quantity ?? null,
+    total_amount: input.total_amount ?? null,
+    unit: input.unit ?? null,
+    calculated_unit_price: input.calculated_unit_price ?? null,
+    offer_snapshot: input.offer_snapshot,
+  };
+}
+
+function toPersistencePriceHistory(
+  input: Insert<'price_history'>,
+): AnalysisPersistencePayload['priceHistoryEntries'][number] {
+  return {
+    product_id: input.product_id,
+    seller_offer_id: input.seller_offer_id ?? null,
+    market_effective_price: input.market_effective_price ?? null,
+    observed_at: input.observed_at,
+  };
+}
+
+function analysisOfferInput(
+  overrides: Partial<Insert<'analysis_offers'>> = {},
+): Insert<'analysis_offers'> {
+  return {
+    analysis_id: 'analysis-1',
+    seller_identifier: 'offer-1',
+    seller_name: 'Seller',
+    seller_offer_id: 'offer-1',
+    original_list_price: 12000,
+    market_effective_price: 11000,
+    user_effective_price: 10000,
+    quantity: 1,
+    total_amount: 50,
+    unit: 'ML',
+    calculated_unit_price: 200,
+    offer_snapshot: { sellerName: 'Seller' },
+    ...overrides,
+  };
+}
+
+function sellerOfferBenefitInput(
+  overrides: Partial<Insert<'seller_offer_benefits'>> = {},
+): Insert<'seller_offer_benefits'> {
+  return {
+    seller_offer_id: 'offer-1',
+    benefit_type: 'MEMBERSHIP',
+    provider: 'COUPANG',
+    required_membership_type: 'WOW',
+    discount_amount: 1000,
     ...overrides,
   };
 }

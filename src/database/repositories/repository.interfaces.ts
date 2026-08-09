@@ -1,4 +1,4 @@
-import { Insert, Row, Update } from '../database.types';
+import { Insert, Json, Row, Update } from '../database.types';
 
 export interface UserPreferenceRepository {
   findByUserId(userId: string): Promise<Row<'user_preferences'> | null>;
@@ -21,14 +21,46 @@ export interface SellerOfferRepository {
   createMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
 }
 
+export interface SellerOfferBenefitRepository {
+  findBySellerOfferIds(sellerOfferIds: string[]): Promise<Row<'seller_offer_benefits'>[]>;
+  createMany(inputs: Insert<'seller_offer_benefits'>[]): Promise<Row<'seller_offer_benefits'>[]>;
+}
+
 export interface PriceHistoryRepository {
   findByProductId(productId: string): Promise<Row<'price_history'>[]>;
   createMany(inputs: Insert<'price_history'>[]): Promise<Row<'price_history'>[]>;
 }
 
+export interface SaleCalendarRepository {
+  findActive(now: Date): Promise<Row<'sale_calendar'>[]>;
+  findUpcoming(now: Date, limit: number): Promise<Row<'sale_calendar'>[]>;
+  findAll(): Promise<Row<'sale_calendar'>[]>;
+  findById(id: string): Promise<Row<'sale_calendar'> | null>;
+}
+
+export type AnalysisPersistencePayload = {
+  userId: string;
+  productId: string;
+  sourceUrl: string;
+  idempotencyKey: string | null;
+  status: Row<'analyses'>['status'];
+  verdict: Row<'analyses'>['verdict'];
+  allowedConclusions: Row<'analyses'>['allowed_conclusions'];
+  selectedCriteria: Row<'analyses'>['selected_criteria'];
+  warningCodes: Row<'analyses'>['warning_codes'];
+  resultJson: Json | null;
+  offerSnapshots: Omit<Row<'analysis_offers'>, 'id' | 'analysis_id' | 'created_at'>[];
+  priceHistoryEntries: Omit<Row<'price_history'>, 'id' | 'analysis_id' | 'created_at'>[];
+};
+
+export interface AnalysisPersistenceRepository {
+  persistAnalysisAtomically(payload: AnalysisPersistencePayload): Promise<Row<'analyses'>>;
+}
+
 export interface AnalysisRepository {
   create(input: Insert<'analyses'>): Promise<Row<'analyses'>>;
   findById(id: string): Promise<Row<'analyses'> | null>;
+  findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]>;
   updateResult(
     id: string,
     input: Pick<
@@ -36,6 +68,11 @@ export interface AnalysisRepository {
       'status' | 'verdict' | 'allowed_conclusions' | 'result_json' | 'warning_codes'
     >,
   ): Promise<Row<'analyses'>>;
+}
+
+export interface AnalysisOfferRepository {
+  createMany(inputs: Insert<'analysis_offers'>[]): Promise<Row<'analysis_offers'>[]>;
+  findByAnalysisId(analysisId: string): Promise<Row<'analysis_offers'>[]>;
 }
 
 export interface SavedProductRepository {

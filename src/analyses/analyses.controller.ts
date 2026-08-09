@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { AnalysesService } from './analyses.service';
 import { CreateAnalysisDto } from './dto/create-analysis.dto';
 
@@ -9,6 +9,14 @@ export class AnalysesController {
   @Post()
   create(@Body() body: CreateAnalysisDto) {
     return this.service.create(body);
+  }
+
+  @Get('recent/:userId')
+  findRecentByUserId(
+    @Param('userId') userId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findRecentByUserId(userId, limit);
   }
 
   @Get(':analysisId')

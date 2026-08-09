@@ -2,12 +2,17 @@ import { randomUUID } from 'crypto';
 import { validateSelectedCriteria } from '../../domain/calculations';
 import { Insert, Json, Row, Update } from '../database.types';
 import {
+  AnalysisPersistencePayload,
+  AnalysisPersistenceRepository,
   AnalysisRepository,
+  AnalysisOfferRepository,
   PriceAlertRepository,
   PriceHistoryRepository,
   ProductRepository,
   ProductComponentRepository,
+  SaleCalendarRepository,
   SavedProductRepository,
+  SellerOfferBenefitRepository,
   SellerOfferRepository,
   UserCardRepository,
   UserMembershipRepository,
@@ -19,9 +24,12 @@ type Store = {
   userPreferences: Row<'user_preferences'>[];
   products: Row<'products'>[];
   productComponents: Row<'product_components'>[];
+  saleCalendar: Row<'sale_calendar'>[];
   sellerOffers: Row<'seller_offers'>[];
+  sellerOfferBenefits: Row<'seller_offer_benefits'>[];
   priceHistory: Row<'price_history'>[];
   analyses: Row<'analyses'>[];
+  analysisOffers: Row<'analysis_offers'>[];
   savedProducts: Row<'saved_products'>[];
   priceAlerts: Row<'price_alerts'>[];
   userMemberships: Row<'user_memberships'>[];
@@ -35,9 +43,12 @@ export class InMemoryDatabase {
     userPreferences: [],
     products: [],
     productComponents: [],
+    saleCalendar: [],
     sellerOffers: [],
+    sellerOfferBenefits: [],
     priceHistory: [],
     analyses: [],
+    analysisOffers: [],
     savedProducts: [],
     priceAlerts: [],
     userMemberships: [],
@@ -99,12 +110,62 @@ export class InMemoryProductRepository implements ProductRepository {
       id: input.id ?? this.database.nextId('product'),
       canonical_name: input.canonical_name,
       brand: input.brand ?? null,
+      image_url: input.image_url ?? null,
       product_key: input.product_key,
       package_type: input.package_type ?? null,
       created_at: input.created_at ?? now,
       updated_at: input.updated_at ?? now,
     };
     this.database.store.products.push(row);
+    return row;
+  }
+}
+
+export class InMemorySaleCalendarRepository implements SaleCalendarRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findActive(now: Date): Promise<Row<'sale_calendar'>[]> {
+    return sortSaleRows(this.database.store.saleCalendar.filter((row) => (
+      row.is_active &&
+      new Date(row.starts_at) <= now &&
+      new Date(row.ends_at) >= now
+    )));
+  }
+
+  async findUpcoming(now: Date, limit: number): Promise<Row<'sale_calendar'>[]> {
+    return sortSaleRows(this.database.store.saleCalendar.filter((row) => (
+      row.is_active &&
+      new Date(row.starts_at) > now
+    ))).slice(0, limit);
+  }
+
+  async findAll(): Promise<Row<'sale_calendar'>[]> {
+    return sortSaleRows(this.database.store.saleCalendar);
+  }
+
+  async findById(id: string): Promise<Row<'sale_calendar'> | null> {
+    return this.database.store.saleCalendar.find((row) => row.id === id) ?? null;
+  }
+
+  create(input: Insert<'sale_calendar'>): Row<'sale_calendar'> {
+    const now = nowIso();
+    const row: Row<'sale_calendar'> = {
+      id: input.id ?? this.database.nextId('sale-calendar'),
+      seller_code: input.seller_code,
+      seller_name: input.seller_name,
+      title: input.title,
+      description: input.description ?? null,
+      sale_type: input.sale_type,
+      starts_at: input.starts_at,
+      ends_at: input.ends_at,
+      banner_image_url: input.banner_image_url ?? null,
+      landing_url: input.landing_url ?? null,
+      is_active: input.is_active ?? true,
+      priority: input.priority ?? 0,
+      created_at: input.created_at ?? now,
+      updated_at: input.updated_at ?? now,
+    };
+    this.database.store.saleCalendar.push(row);
     return row;
   }
 }
@@ -158,6 +219,56 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
   }
 }
 
+export class InMemorySellerOfferBenefitRepository implements SellerOfferBenefitRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findBySellerOfferIds(sellerOfferIds: string[]): Promise<Row<'seller_offer_benefits'>[]> {
+    if (sellerOfferIds.length === 0) {
+      return [];
+    }
+    const ids = new Set(sellerOfferIds);
+    return this.database.store.sellerOfferBenefits.filter((row) => ids.has(row.seller_offer_id));
+  }
+
+  async createMany(inputs: Insert<'seller_offer_benefits'>[]): Promise<Row<'seller_offer_benefits'>[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+    if (inputs.some((input) => input.discount_amount < 0)) {
+      throw new Error('Seller offer benefit discount_amount cannot be negative');
+    }
+
+    const created: Row<'seller_offer_benefits'>[] = [];
+    for (const input of uniqueBy(inputs, sellerOfferBenefitInputKey)) {
+      const existing = this.database.store.sellerOfferBenefits.find((row) => (
+        sellerOfferBenefitRowKey(row) === sellerOfferBenefitInputKey(input)
+      ));
+      if (existing) {
+        created.push(existing);
+        continue;
+      }
+
+      const row: Row<'seller_offer_benefits'> = {
+        id: input.id ?? this.database.nextId('seller-offer-benefit'),
+        seller_offer_id: input.seller_offer_id,
+        benefit_type: input.benefit_type,
+        provider: input.provider ?? null,
+        required_membership_type: input.required_membership_type ?? null,
+        required_grade: input.required_grade ?? null,
+        required_card_issuer: input.required_card_issuer ?? null,
+        required_card_product_code: input.required_card_product_code ?? null,
+        discount_amount: input.discount_amount,
+        exclusive_group: input.exclusive_group ?? null,
+        enabled: input.enabled ?? true,
+        created_at: input.created_at ?? nowIso(),
+      };
+      this.database.store.sellerOfferBenefits.push(row);
+      created.push(row);
+    }
+    return created;
+  }
+}
+
 export class InMemoryPriceHistoryRepository implements PriceHistoryRepository {
   constructor(private readonly database = new InMemoryDatabase()) {}
 
@@ -178,6 +289,7 @@ export class InMemoryPriceHistoryRepository implements PriceHistoryRepository {
       const row: Row<'price_history'> = {
         id: input.id ?? this.database.nextId('price-history'),
         product_id: input.product_id,
+        analysis_id: input.analysis_id ?? null,
         seller_offer_id: input.seller_offer_id ?? null,
         market_effective_price: input.market_effective_price ?? null,
         observed_at: input.observed_at,
@@ -190,6 +302,84 @@ export class InMemoryPriceHistoryRepository implements PriceHistoryRepository {
   }
 }
 
+export class InMemoryAnalysisPersistenceRepository implements AnalysisPersistenceRepository {
+  failAfterAnalysisInsert = false;
+  failAfterOfferSnapshots = false;
+  failAfterPriceHistory = false;
+
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async persistAnalysisAtomically(payload: AnalysisPersistencePayload): Promise<Row<'analyses'>> {
+    const snapshot = cloneStore(this.database.store);
+    try {
+      const existing = payload.idempotencyKey === null
+        ? null
+        : this.database.store.analyses.find((row) => (
+          row.user_id === payload.userId &&
+          row.idempotency_key === payload.idempotencyKey
+        )) ?? null;
+      if (existing) {
+        return existing;
+      }
+
+      const now = nowIso();
+      const analysis: Row<'analyses'> = {
+        id: randomUUID(),
+        user_id: payload.userId,
+        idempotency_key: payload.idempotencyKey,
+        source_url: payload.sourceUrl,
+        product_id: payload.productId,
+        status: 'PENDING',
+        verdict: null,
+        allowed_conclusions: [],
+        selected_criteria: validateSelectedCriteria(payload.selectedCriteria),
+        result_json: null,
+        warning_codes: [],
+        created_at: now,
+        updated_at: now,
+      };
+      this.database.store.analyses.push(analysis);
+      if (this.failAfterAnalysisInsert) {
+        throw new Error('Injected failure after analysis insert');
+      }
+
+      const analysisOfferRepository = new InMemoryAnalysisOfferRepository(this.database);
+      await analysisOfferRepository.createMany(payload.offerSnapshots.map((snapshot) => ({
+        ...snapshot,
+        analysis_id: analysis.id,
+      })));
+      if (this.failAfterOfferSnapshots) {
+        throw new Error('Injected failure after analysis offer snapshots');
+      }
+
+      const priceHistoryRepository = new InMemoryPriceHistoryRepository(this.database);
+      await priceHistoryRepository.createMany(
+        uniqueBy(
+          payload.priceHistoryEntries.map((entry) => ({
+            ...entry,
+            analysis_id: analysis.id,
+          })),
+          priceHistoryRunKey,
+        ),
+      );
+      if (this.failAfterPriceHistory) {
+        throw new Error('Injected failure after price history');
+      }
+
+      analysis.status = payload.status;
+      analysis.verdict = payload.verdict;
+      analysis.allowed_conclusions = payload.allowedConclusions;
+      analysis.warning_codes = payload.warningCodes;
+      analysis.result_json = payload.resultJson;
+      analysis.updated_at = nowIso();
+      return analysis;
+    } catch (error) {
+      restoreStore(this.database.store, snapshot);
+      throw error;
+    }
+  }
+}
+
 export class InMemoryAnalysisRepository implements AnalysisRepository {
   constructor(private readonly database = new InMemoryDatabase()) {}
 
@@ -198,6 +388,7 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
     const row: Row<'analyses'> = {
       id: input.id ?? randomUUID(),
       user_id: input.user_id ?? null,
+      idempotency_key: input.idempotency_key ?? null,
       source_url: input.source_url,
       product_id: input.product_id ?? null,
       status: input.status,
@@ -215,6 +406,13 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
 
   async findById(id: string): Promise<Row<'analyses'> | null> {
     return this.database.store.analyses.find((row) => row.id === id) ?? null;
+  }
+
+  async findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]> {
+    return this.database.store.analyses
+      .filter((row) => row.user_id === userId)
+      .sort((left, right) => right.created_at.localeCompare(left.created_at))
+      .slice(0, limit);
   }
 
   async updateResult(
@@ -235,6 +433,57 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
     row.warning_codes = input.warning_codes ?? row.warning_codes;
     row.updated_at = nowIso();
     return row;
+  }
+}
+
+export class InMemoryAnalysisOfferRepository implements AnalysisOfferRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async createMany(inputs: Insert<'analysis_offers'>[]): Promise<Row<'analysis_offers'>[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const now = nowIso();
+    const created: Row<'analysis_offers'>[] = [];
+    for (const input of uniqueBy(inputs, analysisOfferKey)) {
+      const existing = this.database.store.analysisOffers.find((row) => (
+        row.analysis_id === input.analysis_id &&
+        row.seller_identifier === input.seller_identifier
+      ));
+      if (existing) {
+        created.push(existing);
+        continue;
+      }
+
+      const row: Row<'analysis_offers'> = {
+        id: input.id ?? this.database.nextId('analysis-offer'),
+        analysis_id: input.analysis_id,
+        seller_offer_id: input.seller_offer_id ?? null,
+        seller_identifier: input.seller_identifier,
+        seller_name: input.seller_name,
+        original_list_price: input.original_list_price ?? null,
+        sale_price: input.sale_price ?? null,
+        market_effective_price: input.market_effective_price ?? null,
+        user_effective_price: input.user_effective_price ?? null,
+        shipping_fee: input.shipping_fee ?? null,
+        public_discount: input.public_discount ?? null,
+        user_discount: input.user_discount ?? null,
+        quantity: input.quantity ?? null,
+        total_amount: input.total_amount ?? null,
+        unit: input.unit ?? null,
+        calculated_unit_price: input.calculated_unit_price ?? null,
+        offer_snapshot: input.offer_snapshot,
+        created_at: input.created_at ?? now,
+      };
+      this.database.store.analysisOffers.push(row);
+      created.push(row);
+    }
+    return created;
+  }
+
+  async findByAnalysisId(analysisId: string): Promise<Row<'analysis_offers'>[]> {
+    return this.database.store.analysisOffers.filter((row) => row.analysis_id === analysisId);
   }
 }
 
@@ -399,8 +648,13 @@ function sellerOfferRow(
     seller_name: input.seller_name,
     seller_url: input.seller_url,
     listed_price: input.listed_price ?? null,
+    listed_sale_price: input.listed_sale_price ?? null,
     market_effective_price: input.market_effective_price ?? null,
     user_effective_price: input.user_effective_price ?? null,
+    shipping_fee: input.shipping_fee ?? null,
+    public_discount_amount: input.public_discount_amount ?? null,
+    automatic_discount_amount: input.automatic_discount_amount ?? null,
+    reward_value: input.reward_value ?? null,
     official_seller_status: input.official_seller_status ?? null,
     return_policy_status: input.return_policy_status ?? null,
     delivery_days: input.delivery_days ?? null,
@@ -413,9 +667,42 @@ function sellerOfferRow(
 function hasNegativeSellerOfferPrice(input: Insert<'seller_offers'>): boolean {
   return (
     (input.listed_price ?? 0) < 0 ||
+    (input.listed_sale_price ?? 0) < 0 ||
     (input.market_effective_price ?? 0) < 0 ||
-    (input.user_effective_price ?? 0) < 0
+    (input.user_effective_price ?? 0) < 0 ||
+    (input.shipping_fee ?? 0) < 0 ||
+    (input.public_discount_amount ?? 0) < 0 ||
+    (input.automatic_discount_amount ?? 0) < 0 ||
+    (input.reward_value ?? 0) < 0
   );
+}
+
+function cloneStore(store: Store): Store {
+  return JSON.parse(JSON.stringify(store)) as Store;
+}
+
+function restoreStore(target: Store, source: Store): void {
+  target.userPreferences = source.userPreferences;
+  target.products = source.products;
+  target.productComponents = source.productComponents;
+  target.saleCalendar = source.saleCalendar;
+  target.sellerOffers = source.sellerOffers;
+  target.sellerOfferBenefits = source.sellerOfferBenefits;
+  target.priceHistory = source.priceHistory;
+  target.analyses = source.analyses;
+  target.analysisOffers = source.analysisOffers;
+  target.savedProducts = source.savedProducts;
+  target.priceAlerts = source.priceAlerts;
+  target.userMemberships = source.userMemberships;
+  target.userShoppingGrades = source.userShoppingGrades;
+  target.userCards = source.userCards;
+}
+
+function sortSaleRows(rows: readonly Row<'sale_calendar'>[]): Row<'sale_calendar'>[] {
+  return [...rows].sort((left, right) => (
+    left.priority - right.priority ||
+    left.starts_at.localeCompare(right.starts_at)
+  ));
 }
 
 function nowIso(): string {
@@ -432,4 +719,40 @@ function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
     seen.add(key);
     return true;
   });
+}
+
+function analysisOfferKey(input: Insert<'analysis_offers'>): string {
+  return `${input.analysis_id}:${input.seller_identifier}`;
+}
+
+function priceHistoryRunKey(input: Insert<'price_history'>): string {
+  return `${input.analysis_id ?? ''}:${input.product_id}:${input.seller_offer_id ?? ''}`;
+}
+
+function sellerOfferBenefitInputKey(input: Insert<'seller_offer_benefits'>): string {
+  return [
+    input.seller_offer_id,
+    input.benefit_type,
+    input.provider ?? '',
+    input.required_membership_type ?? '',
+    input.required_grade ?? '',
+    input.required_card_issuer ?? '',
+    input.required_card_product_code ?? '',
+    input.discount_amount,
+    input.exclusive_group ?? '',
+  ].join(':');
+}
+
+function sellerOfferBenefitRowKey(row: Row<'seller_offer_benefits'>): string {
+  return [
+    row.seller_offer_id,
+    row.benefit_type,
+    row.provider ?? '',
+    row.required_membership_type ?? '',
+    row.required_grade ?? '',
+    row.required_card_issuer ?? '',
+    row.required_card_product_code ?? '',
+    row.discount_amount,
+    row.exclusive_group ?? '',
+  ].join(':');
 }

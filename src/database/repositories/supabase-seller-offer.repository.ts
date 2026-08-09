@@ -36,8 +36,13 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
 function assertNoNegativeOfferPrices(inputs: Insert<'seller_offers'>[]): void {
   const hasNegativePrice = inputs.some((input) => (
     (input.listed_price ?? 0) < 0 ||
+    (input.listed_sale_price ?? 0) < 0 ||
     (input.market_effective_price ?? 0) < 0 ||
-    (input.user_effective_price ?? 0) < 0
+    (input.user_effective_price ?? 0) < 0 ||
+    (input.shipping_fee ?? 0) < 0 ||
+    (input.public_discount_amount ?? 0) < 0 ||
+    (input.automatic_discount_amount ?? 0) < 0 ||
+    (input.reward_value ?? 0) < 0
   ));
   if (hasNegativePrice) {
     throw new Error('Seller offer prices cannot be negative');

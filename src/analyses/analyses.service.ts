@@ -1,9 +1,21 @@
 import {
   Inject,
   Injectable,
+  BadRequestException,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  calculateDiscountRateFromRecentAverage,
+  calculateCosmeticCapacityTotals,
+  calculateMarketEffectivePriceBreakdown,
+  calculateSavingFromPreviousSale,
+  calculateUnitPrice,
+  calculateUserEffectivePriceBreakdown,
+  EffectivePriceBreakdown,
+  EligibleInstantDiscount,
+  PriceDiscount,
+} from '../domain/calculations';
 import {
   calculateAllowedConclusions,
   compareOfferToAnchor,
@@ -14,26 +26,39 @@ import {
 import { PriceHistoryPoint, ProductComponent, SellerOffer } from '../domain/types';
 import { Json, Row } from '../database/database.types';
 import {
+  AnalysisPersistenceRepository,
   AnalysisRepository,
+  AnalysisOfferRepository,
   PriceHistoryRepository,
   ProductComponentRepository,
   ProductRepository,
+  SellerOfferBenefitRepository,
   SellerOfferRepository,
+  UserCardRepository,
+  UserMembershipRepository,
   UserPreferenceRepository,
+  UserShoppingGradeRepository,
 } from '../database/repositories/repository.interfaces';
 import {
   ANALYSIS_REPOSITORY,
+  ANALYSIS_OFFER_REPOSITORY,
+  ANALYSIS_PERSISTENCE_REPOSITORY,
   PRICE_HISTORY_REPOSITORY,
   PRODUCT_COMPONENT_REPOSITORY,
   PRODUCT_REPOSITORY,
+  SELLER_OFFER_BENEFIT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
+  USER_CARD_REPOSITORY,
+  USER_MEMBERSHIP_REPOSITORY,
   USER_PREFERENCE_REPOSITORY,
+  USER_SHOPPING_GRADE_REPOSITORY,
 } from '../database/repositories/repository.tokens';
 
 export type CreateAnalysisInput = {
   userId: string;
   sourceUrl: string;
   productId: string;
+  idempotencyKey?: string | null;
 };
 
 export type AnalysisCalculationResult = {
@@ -44,6 +69,11 @@ export type AnalysisCalculationResult = {
     g: { id: string; unitPrice: number } | null;
   };
   priceHistorySufficient: boolean;
+  recentAveragePrice: number | null;
+  discountRateFromRecentAverage: number | null;
+  previousSalePrice: number | null;
+  savingFromPreviousSale: number | null;
+  savingRateFromPreviousSale: number | null;
   offerCount: number;
 };
 
@@ -60,6 +90,65 @@ export type AnalysisResponse = {
   result: Json | null;
 };
 
+export type RecentAnalysisResponse = AnalysisResponse & {
+  product: ProductSummary | null;
+  analysisOffers: AnalysisOfferSnapshotResponse[];
+};
+
+export type ProductSummary = {
+  id: string;
+  canonicalName: string;
+  brand: string | null;
+  productKey: string;
+  packageType: string | null;
+};
+
+export type AnalysisOfferSnapshotResponse = {
+  id: string;
+  analysisId: string;
+  sellerOfferId: string | null;
+  sellerIdentifier: string;
+  sellerName: string;
+  originalListPrice: number | null;
+  salePrice: number | null;
+  marketEffectivePrice: number | null;
+  userEffectivePrice: number | null;
+  shippingFee: number | null;
+  publicDiscount: number | null;
+  userDiscount: number | null;
+  quantity: number | null;
+  totalAmount: number | null;
+  unit: string | null;
+  calculatedUnitPrice: number | null;
+  offerSnapshot: Json;
+  createdAt: string;
+};
+
+type UserBenefitContext = {
+  memberships: readonly Row<'user_memberships'>[];
+  shoppingGrades: readonly Row<'user_shopping_grades'>[];
+  cards: readonly Row<'user_cards'>[];
+};
+
+type AppliedUserBenefit = {
+  benefitId: string;
+  benefitType: Row<'seller_offer_benefits'>['benefit_type'];
+  provider: string | null;
+  discountAmount: number;
+  exclusiveGroup: string | null;
+};
+
+type CalculatedOffer = {
+  source: Row<'seller_offers'>;
+  marketPrice: EffectivePriceBreakdown;
+  userPrice: EffectivePriceBreakdown;
+  publicDiscount: number | null;
+  automaticDiscount: number | null;
+  userDiscount: number | null;
+  rewardValue: number | null;
+  appliedBenefits: AppliedUserBenefit[];
+};
+
 @Injectable()
 export class AnalysesService {
   constructor(
@@ -71,10 +160,22 @@ export class AnalysesService {
     private readonly productComponents: ProductComponentRepository,
     @Inject(SELLER_OFFER_REPOSITORY)
     private readonly sellerOffers: SellerOfferRepository,
+    @Inject(SELLER_OFFER_BENEFIT_REPOSITORY)
+    private readonly sellerOfferBenefits: SellerOfferBenefitRepository,
     @Inject(PRICE_HISTORY_REPOSITORY)
     private readonly priceHistory: PriceHistoryRepository,
     @Inject(ANALYSIS_REPOSITORY)
     private readonly analyses: AnalysisRepository,
+    @Inject(ANALYSIS_PERSISTENCE_REPOSITORY)
+    private readonly analysisPersistence: AnalysisPersistenceRepository,
+    @Inject(ANALYSIS_OFFER_REPOSITORY)
+    private readonly analysisOffers: AnalysisOfferRepository,
+    @Inject(USER_MEMBERSHIP_REPOSITORY)
+    private readonly memberships: UserMembershipRepository,
+    @Inject(USER_SHOPPING_GRADE_REPOSITORY)
+    private readonly shoppingGrades: UserShoppingGradeRepository,
+    @Inject(USER_CARD_REPOSITORY)
+    private readonly cards: UserCardRepository,
   ) {}
 
   async create(input: CreateAnalysisInput): Promise<AnalysisResponse> {
@@ -88,37 +189,45 @@ export class AnalysesService {
       throw new NotFoundException(`Product not found: ${input.productId}`);
     }
 
-    const pending = await this.analyses.create({
-      user_id: input.userId,
-      source_url: input.sourceUrl,
-      product_id: input.productId,
-      status: 'PENDING',
-      verdict: null,
-      allowed_conclusions: [],
-      selected_criteria: preferences.selected_criteria,
-      warning_codes: [],
-      result_json: null,
-    });
+    let result: Awaited<ReturnType<AnalysesService['calculateResult']>>;
+    try {
+      result = await this.calculateResult(product, input.userId);
+    } catch (error) {
+      await this.analysisPersistence.persistAnalysisAtomically({
+        userId: input.userId,
+        productId: input.productId,
+        sourceUrl: input.sourceUrl,
+        idempotencyKey: input.idempotencyKey ?? null,
+        status: 'FAILED',
+        verdict: null,
+        allowedConclusions: [],
+        selectedCriteria: preferences.selected_criteria,
+        warningCodes: ['OTHER'],
+        resultJson: null,
+        offerSnapshots: [],
+        priceHistoryEntries: [],
+      });
+      throw new InternalServerErrorException('Analysis calculation failed');
+    }
 
     try {
-      const result = await this.calculateResult(product);
-      const completed = await this.analyses.updateResult(pending.id, {
+      const completed = await this.analysisPersistence.persistAnalysisAtomically({
+        userId: input.userId,
+        productId: input.productId,
+        sourceUrl: input.sourceUrl,
+        idempotencyKey: input.idempotencyKey ?? null,
         status: 'COMPLETED',
         verdict: null,
-        allowed_conclusions: result.allowedConclusions,
-        warning_codes: result.warningCodes,
-        result_json: result.resultJson,
+        allowedConclusions: result.allowedConclusions,
+        selectedCriteria: preferences.selected_criteria,
+        warningCodes: result.warningCodes,
+        resultJson: result.resultJson,
+        offerSnapshots: result.analysisOfferSnapshots,
+        priceHistoryEntries: result.priceHistoryEntries,
       });
       return toAnalysisResponse(completed);
     } catch (error) {
-      await this.analyses.updateResult(pending.id, {
-        status: 'FAILED',
-        verdict: null,
-        allowed_conclusions: [],
-        warning_codes: ['OTHER'],
-        result_json: null,
-      });
-      throw new InternalServerErrorException('Analysis calculation failed');
+      throw new InternalServerErrorException('Analysis persistence failed');
     }
   }
 
@@ -130,18 +239,49 @@ export class AnalysesService {
     return toAnalysisResponse(row);
   }
 
-  private async calculateResult(product: Row<'products'>): Promise<{
+  async findRecentByUserId(
+    userId: string,
+    rawLimit?: string,
+  ): Promise<RecentAnalysisResponse[]> {
+    const limit = parseRecentLimit(rawLimit);
+    const rows = await this.analyses.findRecentByUserId(userId, limit);
+    return Promise.all(rows.map(async (row) => {
+      const [product, offerSnapshots] = await Promise.all([
+        row.product_id ? this.products.findById(row.product_id) : Promise.resolve(null),
+        this.analysisOffers.findByAnalysisId(row.id),
+      ]);
+      return {
+        ...toAnalysisResponse(row),
+        product: product ? toProductSummary(product) : null,
+        analysisOffers: offerSnapshots.map(toAnalysisOfferSnapshotResponse),
+      };
+    }));
+  }
+
+  private async calculateResult(product: Row<'products'>, userId: string): Promise<{
     allowedConclusions: Row<'analyses'>['allowed_conclusions'];
     warningCodes: Row<'analyses'>['warning_codes'];
     resultJson: Json;
+    analysisOfferSnapshots: Omit<Row<'analysis_offers'>, 'id' | 'analysis_id' | 'created_at'>[];
+    priceHistoryEntries: Omit<Row<'price_history'>, 'id' | 'analysis_id' | 'created_at'>[];
   }> {
-    const [componentRows, offerRows, historyRows] = await Promise.all([
+    const [componentRows, offerRows, historyRows, membershipRows, shoppingGradeRows, cardRows] = await Promise.all([
       this.productComponents.findByProductId(product.id),
       this.sellerOffers.findByProductId(product.id),
       this.priceHistory.findByProductId(product.id),
+      this.memberships.findByUserId(userId),
+      this.shoppingGrades.findByUserId(userId),
+      this.cards.findByUserId(userId),
     ]);
     const components = componentRows.map(toProductComponent);
-    const domainOffers = offerRows.map((offer) => toDomainOffer(product, offer, components));
+    const benefitRows = await this.sellerOfferBenefits.findBySellerOfferIds(offerRows.map((offer) => offer.id));
+    const benefitContext: UserBenefitContext = {
+      memberships: membershipRows,
+      shoppingGrades: shoppingGradeRows,
+      cards: cardRows,
+    };
+    const calculatedOffers = offerRows.map((offer) => calculateOfferForUser(offer, components, benefitRows, benefitContext));
+    const domainOffers = calculatedOffers.map((offer) => toDomainOffer(product, offer.source, components, offer.userPrice.price));
     const anchorOffer = domainOffers[0] ?? toAnchorOffer(product, components);
     const comparisonResults = domainOffers.map((offer) => compareOfferToAnchor(anchorOffer, offer));
     const lowestEffectivePriceOffer = findLowestEffectivePriceOffer(domainOffers, comparisonResults);
@@ -151,9 +291,21 @@ export class AnalysesService {
     const priceHistoryPoints = historyRows.map(toPriceHistoryPoint);
     const analysisDate = new Date();
     const priceHistorySufficient = isPriceHistorySufficient(priceHistoryPoints, analysisDate);
-    const recentAveragePrice = averagePrice(historyRows);
-    const previousSalePrice = historyRows.at(-1)?.market_effective_price ?? null;
-    const currentMarketEffectivePrice = lowestEffectivePriceOffer?.userEffectivePrice ?? null;
+    const recentAveragePrice = averagePriceBefore(historyRows, analysisDate, 90);
+    const previousSalePrice = previousSalePriceBefore(historyRows, analysisDate);
+    const currentMarketEffectivePrice = lowestMarketEffectivePrice(calculatedOffers);
+    const discountRateFromRecentAverage = calculateDiscountRateFromRecentAverage(
+      currentMarketEffectivePrice,
+      recentAveragePrice,
+    );
+    const savingFromPreviousSale = calculateSavingFromPreviousSale(
+      currentMarketEffectivePrice,
+      previousSalePrice,
+    );
+    const savingRateFromPreviousSale = calculateDiscountRateFromRecentAverage(
+      currentMarketEffectivePrice,
+      previousSalePrice,
+    );
     const allowedConclusions = calculateAllowedConclusions({
       offers: domainOffers,
       anchorOffer,
@@ -190,6 +342,11 @@ export class AnalysesService {
           : null,
       },
       priceHistorySufficient,
+      recentAveragePrice,
+      discountRateFromRecentAverage,
+      previousSalePrice,
+      savingFromPreviousSale,
+      savingRateFromPreviousSale,
       offerCount: offerRows.length,
     };
 
@@ -197,8 +354,26 @@ export class AnalysesService {
       allowedConclusions,
       warningCodes,
       resultJson: result as unknown as Json,
+      analysisOfferSnapshots: calculatedOffers.map((offer) => toAnalysisOfferSnapshot(offer, components)),
+      priceHistoryEntries: calculatedOffers.map((offer) => ({
+        product_id: product.id,
+        seller_offer_id: offer.source.id,
+        market_effective_price: offer.marketPrice.price,
+        observed_at: analysisDate.toISOString(),
+      })),
     };
   }
+}
+
+function parseRecentLimit(rawLimit?: string): number {
+  if (rawLimit === undefined || rawLimit === '') {
+    return 1;
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+    throw new BadRequestException('limit must be an integer between 1 and 20');
+  }
+  return limit;
 }
 
 function toAnalysisResponse(row: Row<'analyses'>): AnalysisResponse {
@@ -216,15 +391,285 @@ function toAnalysisResponse(row: Row<'analyses'>): AnalysisResponse {
   };
 }
 
+function toProductSummary(product: Row<'products'>): ProductSummary {
+  return {
+    id: product.id,
+    canonicalName: product.canonical_name,
+    brand: product.brand,
+    productKey: product.product_key,
+    packageType: product.package_type,
+  };
+}
+
+function toAnalysisOfferSnapshotResponse(
+  row: Row<'analysis_offers'>,
+): AnalysisOfferSnapshotResponse {
+  return {
+    id: row.id,
+    analysisId: row.analysis_id,
+    sellerOfferId: row.seller_offer_id,
+    sellerIdentifier: row.seller_identifier,
+    sellerName: row.seller_name,
+    originalListPrice: row.original_list_price,
+    salePrice: row.sale_price,
+    marketEffectivePrice: row.market_effective_price,
+    userEffectivePrice: row.user_effective_price,
+    shippingFee: row.shipping_fee,
+    publicDiscount: row.public_discount,
+    userDiscount: row.user_discount,
+    quantity: row.quantity,
+    totalAmount: row.total_amount,
+    unit: row.unit,
+    calculatedUnitPrice: row.calculated_unit_price,
+    offerSnapshot: row.offer_snapshot,
+    createdAt: row.created_at,
+  };
+}
+
+function calculateOfferForUser(
+  offer: Row<'seller_offers'>,
+  components: readonly ProductComponent[],
+  benefitRows: readonly Row<'seller_offer_benefits'>[],
+  userBenefits: UserBenefitContext,
+): CalculatedOffer {
+  const marketPrice = calculateMarketPriceForOffer(offer);
+  const offerBenefits = benefitRows.filter((benefit) => benefit.seller_offer_id === offer.id);
+  const userDiscounts = offerBenefits.map((benefit) => toEligibleInstantDiscount(benefit, userBenefits));
+  const userPrice = calculateUserEffectivePriceBreakdown({
+    marketPrice,
+    instantDiscounts: userDiscounts,
+    rewardPoints: offer.reward_value,
+  });
+  const appliedBenefits = toAppliedBenefits(offerBenefits, userPrice);
+
+  return {
+    source: offer,
+    marketPrice,
+    userPrice,
+    publicDiscount: sumAppliedDiscounts(marketPrice, (id) => id.startsWith('public-discount:')),
+    automaticDiscount: sumAppliedDiscounts(marketPrice, (id) => id.startsWith('automatic-discount:')),
+    userDiscount: sumAppliedDiscounts(userPrice, (id) => id.startsWith('seller-offer-benefit:')),
+    rewardValue: offer.reward_value,
+    appliedBenefits,
+  };
+}
+
+function calculateMarketPriceForOffer(offer: Row<'seller_offers'>): EffectivePriceBreakdown {
+  const listedSalePrice = offer.listed_sale_price ?? offer.listed_price;
+  const discounts: PriceDiscount[] = [];
+  if (offer.public_discount_amount !== null) {
+    discounts.push({
+      id: `public-discount:${offer.id}`,
+      amount: offer.public_discount_amount,
+      applicationStatus: 'APPLICABLE',
+      exclusiveGroup: null,
+      includedInBasePrice: false,
+    });
+  }
+  if (offer.automatic_discount_amount !== null) {
+    discounts.push({
+      id: `automatic-discount:${offer.id}`,
+      amount: offer.automatic_discount_amount,
+      applicationStatus: 'APPLICABLE',
+      exclusiveGroup: null,
+      includedInBasePrice: false,
+    });
+  }
+
+  const calculated = calculateMarketEffectivePriceBreakdown({
+    listedSalePrice,
+    discounts,
+    shippingFee: offer.shipping_fee,
+  });
+
+  if (calculated.price !== null || offer.market_effective_price === null) {
+    return calculated;
+  }
+
+  return {
+    price: offer.market_effective_price,
+    appliedDiscountIds: [],
+    appliedDiscounts: [],
+    occupiedExclusiveGroups: [],
+    unresolvedDiscountIds: [],
+  };
+}
+
+function toEligibleInstantDiscount(
+  benefit: Row<'seller_offer_benefits'>,
+  userBenefits: UserBenefitContext,
+): EligibleInstantDiscount {
+  return {
+    id: `seller-offer-benefit:${benefit.id}`,
+    amount: benefit.discount_amount,
+    applicationStatus: benefit.enabled ? 'APPLICABLE' : 'NOT_APPLICABLE',
+    eligibilityStatus: benefit.enabled ? getBenefitEligibilityStatus(benefit, userBenefits) : 'NOT_ELIGIBLE',
+    exclusiveGroup: benefit.exclusive_group,
+    includedInBasePrice: false,
+  };
+}
+
+function getBenefitEligibilityStatus(
+  benefit: Row<'seller_offer_benefits'>,
+  userBenefits: UserBenefitContext,
+): EligibleInstantDiscount['eligibilityStatus'] {
+  if (benefit.benefit_type === 'MEMBERSHIP') {
+    if (!benefit.provider || !benefit.required_membership_type) {
+      return 'UNKNOWN';
+    }
+    return userBenefits.memberships.some((membership) => (
+      membership.provider === benefit.provider &&
+      membership.membership_type === benefit.required_membership_type &&
+      membership.enabled
+    )) ? 'ELIGIBLE' : 'NOT_ELIGIBLE';
+  }
+
+  if (benefit.benefit_type === 'SHOPPING_GRADE') {
+    if (!benefit.provider || !benefit.required_grade) {
+      return 'UNKNOWN';
+    }
+    return userBenefits.shoppingGrades.some((grade) => (
+      grade.provider === benefit.provider &&
+      grade.grade === benefit.required_grade
+    )) ? 'ELIGIBLE' : 'NOT_ELIGIBLE';
+  }
+
+  const hasIssuerCondition = benefit.required_card_issuer !== null;
+  const hasProductCondition = benefit.required_card_product_code !== null;
+  if (!hasIssuerCondition && !hasProductCondition) {
+    return 'UNKNOWN';
+  }
+  return userBenefits.cards.some((card) => (
+    (!hasIssuerCondition || card.issuer === benefit.required_card_issuer) &&
+    (!hasProductCondition || card.card_product_code === benefit.required_card_product_code)
+  )) ? 'ELIGIBLE' : 'NOT_ELIGIBLE';
+}
+
+function toAppliedBenefits(
+  benefits: readonly Row<'seller_offer_benefits'>[],
+  userPrice: EffectivePriceBreakdown,
+): AppliedUserBenefit[] {
+  const appliedIds = new Set(userPrice.appliedDiscountIds);
+  return benefits
+    .filter((benefit) => appliedIds.has(`seller-offer-benefit:${benefit.id}`))
+    .map((benefit) => ({
+      benefitId: benefit.id,
+      benefitType: benefit.benefit_type,
+      provider: benefit.provider,
+      discountAmount: benefit.discount_amount,
+      exclusiveGroup: benefit.exclusive_group,
+    }));
+}
+
+function sumAppliedDiscounts(
+  breakdown: EffectivePriceBreakdown,
+  shouldInclude: (id: string) => boolean,
+): number | null {
+  const total = breakdown.appliedDiscounts
+    .filter((discount) => shouldInclude(discount.id) && discount.amount !== null)
+    .reduce((sum, discount) => sum + discount.amount!, 0);
+  return total === 0 ? null : total;
+}
+
+function toAnalysisOfferSnapshot(
+  calculatedOffer: CalculatedOffer,
+  components: readonly ProductComponent[],
+): Omit<Row<'analysis_offers'>, 'id' | 'analysis_id' | 'created_at'> {
+  const offer = calculatedOffer.source;
+  const unitSnapshot = calculatePrimaryUnitSnapshot(calculatedOffer, components);
+  const knownQuantity = calculateTotalKnownQuantity(components);
+  return {
+    seller_offer_id: offer.id,
+    seller_identifier: offer.id,
+    seller_name: offer.seller_name,
+    original_list_price: offer.listed_price,
+    sale_price: offer.listed_sale_price,
+    market_effective_price: calculatedOffer.marketPrice.price,
+    user_effective_price: calculatedOffer.userPrice.price,
+    shipping_fee: offer.shipping_fee,
+    public_discount: calculatedOffer.publicDiscount,
+    user_discount: calculatedOffer.userDiscount,
+    quantity: knownQuantity,
+    total_amount: unitSnapshot.totalAmount,
+    unit: unitSnapshot.unit,
+    calculated_unit_price: unitSnapshot.calculatedUnitPrice,
+    offer_snapshot: {
+      sellerOfferId: offer.id,
+      sellerName: offer.seller_name,
+      sellerUrl: offer.seller_url,
+      originalListPrice: offer.listed_price,
+      salePrice: offer.listed_sale_price,
+      marketEffectivePrice: calculatedOffer.marketPrice.price,
+      userEffectivePrice: calculatedOffer.userPrice.price,
+      shippingFee: offer.shipping_fee,
+      publicDiscount: calculatedOffer.publicDiscount,
+      automaticDiscount: calculatedOffer.automaticDiscount,
+      userDiscount: calculatedOffer.userDiscount,
+      rewardValue: calculatedOffer.rewardValue,
+      appliedBenefits: calculatedOffer.appliedBenefits,
+      quantity: knownQuantity,
+      totalAmount: unitSnapshot.totalAmount,
+      unit: unitSnapshot.unit,
+      calculatedUnitPrice: unitSnapshot.calculatedUnitPrice,
+      officialSellerStatus: offer.official_seller_status,
+      returnPolicyStatus: offer.return_policy_status,
+      deliveryDays: offer.delivery_days,
+      comparisonStatus: offer.comparison_status,
+      observedAt: offer.observed_at,
+      sourceUrl: offer.seller_url,
+      createdAt: offer.created_at,
+      calculatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function calculatePrimaryUnitSnapshot(
+  calculatedOffer: CalculatedOffer,
+  components: readonly ProductComponent[],
+): {
+  unit: Row<'analysis_offers'>['unit'];
+  totalAmount: number | null;
+  calculatedUnitPrice: number | null;
+} {
+  const totals = calculateCosmeticCapacityTotals(components);
+  if (totals.ml !== null && totals.ml > 0) {
+    return {
+      unit: 'ML',
+      totalAmount: totals.ml,
+      calculatedUnitPrice: calculateUnitPrice(calculatedOffer.userPrice.price, totals.ml),
+    };
+  }
+  if (totals.g !== null && totals.g > 0) {
+    return {
+      unit: 'G',
+      totalAmount: totals.g,
+      calculatedUnitPrice: calculateUnitPrice(calculatedOffer.userPrice.price, totals.g),
+    };
+  }
+  return { unit: null, totalAmount: null, calculatedUnitPrice: null };
+}
+
+function calculateTotalKnownQuantity(components: readonly ProductComponent[]): number | null {
+  let total = 0;
+  for (const component of components) {
+    if (component.quantity === null) {
+      return null;
+    }
+    total += component.quantity;
+  }
+  return total;
+}
+
 function toDomainOffer(
   product: Row<'products'>,
   offer: Row<'seller_offers'>,
   components: readonly ProductComponent[],
+  userEffectivePrice: number | null,
 ): SellerOffer {
   return {
     id: offer.id,
     productKey: product.product_key,
-    userEffectivePrice: offer.user_effective_price,
+    userEffectivePrice,
     components,
     officialSellerStatus: offer.official_seller_status ?? 'unconfirmed',
     returnPolicyStatus: offer.return_policy_status ?? 'unconfirmed',
@@ -265,12 +710,43 @@ function toPriceHistoryPoint(row: Row<'price_history'>): PriceHistoryPoint {
   };
 }
 
-function averagePrice(rows: readonly Row<'price_history'>[]): number | null {
+function lowestMarketEffectivePrice(offers: readonly CalculatedOffer[]): number | null {
+  const prices = offers
+    .map((offer) => offer.marketPrice.price)
+    .filter((price): price is number => price !== null);
+  if (prices.length === 0) {
+    return null;
+  }
+  return Math.min(...prices);
+}
+
+function averagePriceBefore(
+  rows: readonly Row<'price_history'>[],
+  analysisDate: Date,
+  recentDays: number,
+): number | null {
+  const cutoff = new Date(analysisDate);
+  cutoff.setDate(cutoff.getDate() - recentDays);
   const prices = rows
+    .filter((row) => {
+      const observedAt = new Date(row.observed_at);
+      return observedAt < analysisDate && observedAt >= cutoff;
+    })
     .map((row) => row.market_effective_price)
     .filter((price): price is number => price !== null);
   if (prices.length === 0) {
     return null;
   }
   return prices.reduce((sum, price) => sum + price, 0) / prices.length;
+}
+
+function previousSalePriceBefore(
+  rows: readonly Row<'price_history'>[],
+  analysisDate: Date,
+): number | null {
+  const previousRows = rows
+    .filter((row) => new Date(row.observed_at) < analysisDate)
+    .filter((row) => row.market_effective_price !== null)
+    .sort((left, right) => right.observed_at.localeCompare(left.observed_at));
+  return previousRows[0]?.market_effective_price ?? null;
 }

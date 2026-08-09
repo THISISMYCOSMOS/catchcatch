@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUrl } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsUrl } from 'class-validator';
 
 export class CreateAnalysisDto {
   @IsString()
@@ -13,4 +13,9 @@ export class CreateAnalysisDto {
   @IsString()
   @IsNotEmpty()
   productId!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  idempotencyKey?: string;
 }

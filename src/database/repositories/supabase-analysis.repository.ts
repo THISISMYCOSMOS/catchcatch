@@ -30,6 +30,17 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
     return data;
   }
 
+  async findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]> {
+    const { data, error } = await this.client
+      .from('analyses')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    throwOnSupabaseError('find recent analyses by user_id', error);
+    return data ?? [];
+  }
+
   async updateResult(
     id: string,
     input: Pick<

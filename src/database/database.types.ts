@@ -25,6 +25,7 @@ export type TableName = keyof Tables;
 export type Row<TName extends TableName> = Tables[TName]['Row'];
 export type Insert<TName extends TableName> = Tables[TName]['Insert'];
 export type Update<TName extends TableName> = Tables[TName]['Update'];
+export type SellerOfferBenefitType = 'MEMBERSHIP' | 'SHOPPING_GRADE' | 'CARD';
 
 export type Database = {
   public: {
@@ -139,6 +140,7 @@ export type Database = {
           id: string;
           canonical_name: string;
           brand: string | null;
+          image_url: string | null;
           product_key: string;
           package_type: PackageType | null;
           created_at: string;
@@ -148,6 +150,7 @@ export type Database = {
           id?: string;
           canonical_name: string;
           brand?: string | null;
+          image_url?: string | null;
           product_key: string;
           package_type?: PackageType | null;
           created_at?: string;
@@ -157,6 +160,7 @@ export type Database = {
           id?: string;
           canonical_name?: string;
           brand?: string | null;
+          image_url?: string | null;
           product_key?: string;
           package_type?: PackageType | null;
           created_at?: string;
@@ -205,6 +209,57 @@ export type Database = {
           },
         ];
       };
+      sale_calendar: {
+        Row: {
+          id: string;
+          seller_code: string;
+          seller_name: string;
+          title: string;
+          description: string | null;
+          sale_type: string;
+          starts_at: string;
+          ends_at: string;
+          banner_image_url: string | null;
+          landing_url: string | null;
+          is_active: boolean;
+          priority: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          seller_code: string;
+          seller_name: string;
+          title: string;
+          description?: string | null;
+          sale_type: string;
+          starts_at: string;
+          ends_at: string;
+          banner_image_url?: string | null;
+          landing_url?: string | null;
+          is_active?: boolean;
+          priority?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          seller_code?: string;
+          seller_name?: string;
+          title?: string;
+          description?: string | null;
+          sale_type?: string;
+          starts_at?: string;
+          ends_at?: string;
+          banner_image_url?: string | null;
+          landing_url?: string | null;
+          is_active?: boolean;
+          priority?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       seller_offers: {
         Row: {
           id: string;
@@ -212,8 +267,13 @@ export type Database = {
           seller_name: string;
           seller_url: string;
           listed_price: number | null;
+          listed_sale_price: number | null;
           market_effective_price: number | null;
           user_effective_price: number | null;
+          shipping_fee: number | null;
+          public_discount_amount: number | null;
+          automatic_discount_amount: number | null;
+          reward_value: number | null;
           official_seller_status: OfficialSellerStatus | null;
           return_policy_status: ReturnPolicyStatus | null;
           delivery_days: number | null;
@@ -227,8 +287,13 @@ export type Database = {
           seller_name: string;
           seller_url: string;
           listed_price?: number | null;
+          listed_sale_price?: number | null;
           market_effective_price?: number | null;
           user_effective_price?: number | null;
+          shipping_fee?: number | null;
+          public_discount_amount?: number | null;
+          automatic_discount_amount?: number | null;
+          reward_value?: number | null;
           official_seller_status?: OfficialSellerStatus | null;
           return_policy_status?: ReturnPolicyStatus | null;
           delivery_days?: number | null;
@@ -242,8 +307,13 @@ export type Database = {
           seller_name?: string;
           seller_url?: string;
           listed_price?: number | null;
+          listed_sale_price?: number | null;
           market_effective_price?: number | null;
           user_effective_price?: number | null;
+          shipping_fee?: number | null;
+          public_discount_amount?: number | null;
+          automatic_discount_amount?: number | null;
+          reward_value?: number | null;
           official_seller_status?: OfficialSellerStatus | null;
           return_policy_status?: ReturnPolicyStatus | null;
           delivery_days?: number | null;
@@ -261,10 +331,64 @@ export type Database = {
           },
         ];
       };
+      seller_offer_benefits: {
+        Row: {
+          id: string;
+          seller_offer_id: string;
+          benefit_type: SellerOfferBenefitType;
+          provider: string | null;
+          required_membership_type: string | null;
+          required_grade: string | null;
+          required_card_issuer: string | null;
+          required_card_product_code: string | null;
+          discount_amount: number;
+          exclusive_group: string | null;
+          enabled: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          seller_offer_id: string;
+          benefit_type: SellerOfferBenefitType;
+          provider?: string | null;
+          required_membership_type?: string | null;
+          required_grade?: string | null;
+          required_card_issuer?: string | null;
+          required_card_product_code?: string | null;
+          discount_amount: number;
+          exclusive_group?: string | null;
+          enabled?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          seller_offer_id?: string;
+          benefit_type?: SellerOfferBenefitType;
+          provider?: string | null;
+          required_membership_type?: string | null;
+          required_grade?: string | null;
+          required_card_issuer?: string | null;
+          required_card_product_code?: string | null;
+          discount_amount?: number;
+          exclusive_group?: string | null;
+          enabled?: boolean;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'seller_offer_benefits_seller_offer_id_fkey';
+            columns: ['seller_offer_id'];
+            isOneToOne: false;
+            referencedRelation: 'seller_offers';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       price_history: {
         Row: {
           id: string;
           product_id: string;
+          analysis_id: string | null;
           seller_offer_id: string | null;
           market_effective_price: number | null;
           observed_at: string;
@@ -273,6 +397,7 @@ export type Database = {
         Insert: {
           id?: string;
           product_id: string;
+          analysis_id?: string | null;
           seller_offer_id?: string | null;
           market_effective_price?: number | null;
           observed_at: string;
@@ -281,12 +406,20 @@ export type Database = {
         Update: {
           id?: string;
           product_id?: string;
+          analysis_id?: string | null;
           seller_offer_id?: string | null;
           market_effective_price?: number | null;
           observed_at?: string;
           created_at?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: 'price_history_analysis_id_fkey';
+            columns: ['analysis_id'];
+            isOneToOne: false;
+            referencedRelation: 'analyses';
+            referencedColumns: ['id'];
+          },
           {
             foreignKeyName: 'price_history_product_id_fkey';
             columns: ['product_id'];
@@ -307,6 +440,7 @@ export type Database = {
         Row: {
           id: string;
           user_id: string | null;
+          idempotency_key: string | null;
           source_url: string;
           product_id: string | null;
           status: AnalysisStatus;
@@ -321,6 +455,7 @@ export type Database = {
         Insert: {
           id?: string;
           user_id?: string | null;
+          idempotency_key?: string | null;
           source_url: string;
           product_id?: string | null;
           status: AnalysisStatus;
@@ -335,6 +470,7 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string | null;
+          idempotency_key?: string | null;
           source_url?: string;
           product_id?: string | null;
           status?: AnalysisStatus;
@@ -361,6 +497,19 @@ export type Database = {
           id: string;
           analysis_id: string;
           seller_offer_id: string | null;
+          seller_identifier: string;
+          seller_name: string;
+          original_list_price: number | null;
+          sale_price: number | null;
+          market_effective_price: number | null;
+          user_effective_price: number | null;
+          shipping_fee: number | null;
+          public_discount: number | null;
+          user_discount: number | null;
+          quantity: number | null;
+          total_amount: number | null;
+          unit: CapacityUnit | null;
+          calculated_unit_price: number | null;
           offer_snapshot: Json;
           created_at: string;
         };
@@ -368,6 +517,19 @@ export type Database = {
           id?: string;
           analysis_id: string;
           seller_offer_id?: string | null;
+          seller_identifier: string;
+          seller_name: string;
+          original_list_price?: number | null;
+          sale_price?: number | null;
+          market_effective_price?: number | null;
+          user_effective_price?: number | null;
+          shipping_fee?: number | null;
+          public_discount?: number | null;
+          user_discount?: number | null;
+          quantity?: number | null;
+          total_amount?: number | null;
+          unit?: CapacityUnit | null;
+          calculated_unit_price?: number | null;
           offer_snapshot: Json;
           created_at?: string;
         };
@@ -375,6 +537,19 @@ export type Database = {
           id?: string;
           analysis_id?: string;
           seller_offer_id?: string | null;
+          seller_identifier?: string;
+          seller_name?: string;
+          original_list_price?: number | null;
+          sale_price?: number | null;
+          market_effective_price?: number | null;
+          user_effective_price?: number | null;
+          shipping_fee?: number | null;
+          public_discount?: number | null;
+          user_discount?: number | null;
+          quantity?: number | null;
+          total_amount?: number | null;
+          unit?: CapacityUnit | null;
+          calculated_unit_price?: number | null;
           offer_snapshot?: Json;
           created_at?: string;
         };
@@ -464,7 +639,14 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      persist_analysis_atomically: {
+        Args: {
+          payload: Json;
+        };
+        Returns: Row<'analyses'>;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

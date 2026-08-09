@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { PriceAlertsModule } from './price-alerts/price-alerts.module';
 import { SavedProductsModule } from './saved-products/saved-products.module';
+import { SaleCalendarModule } from './sale-calendar/sale-calendar.module';
 import { UserPreferencesModule } from './user-preferences/user-preferences.module';
 
 @Module({
@@ -17,6 +18,7 @@ import { UserPreferencesModule } from './user-preferences/user-preferences.modul
     UserPreferencesModule,
     AnalysesModule,
     SavedProductsModule,
+    SaleCalendarModule,
     PriceAlertsModule,
   ],
   controllers: [HealthController],
