@@ -1,0 +1,32 @@
+.headlineLine {
+  white-space: nowrap;
+}
+
+.priorityList {
+  gap: 26px;
+}
+
+.priorityRow {
+  gap: 22px;
+}
+
+.priorityPill {
+  min-height: 64px;
+  padding: 12px 52px;
+}
+
+@media (max-width: 359px) {
+  .priorityList {
+    gap: 22px;
+  }
+
+  .priorityRow {
+    gap: 16px;
+  }
+
+  .priorityPill {
+    min-height: 62px;
+    padding-right: 32px;
+    padding-left: 32px;
+  }
+}
