@@ -1,8 +1,9 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   InMemoryAnalysisOfferRepository,
   InMemoryAnalysisRepository,
   InMemoryDatabase,
+  InMemoryPriceHistoryRepository,
   InMemoryProductComponentRepository,
   InMemoryProductRepository,
   InMemorySellerOfferRepository,
@@ -17,6 +18,7 @@ describe('CoreIntegrationService', () => {
   let products: InMemoryProductRepository;
   let components: InMemoryProductComponentRepository;
   let sellerOffers: InMemorySellerOfferRepository;
+  let priceHistory: InMemoryPriceHistoryRepository;
   let preferences: InMemoryUserPreferenceRepository;
   let analyses: InMemoryAnalysisRepository;
   let analysisOffers: InMemoryAnalysisOfferRepository;
@@ -27,6 +29,7 @@ describe('CoreIntegrationService', () => {
     products = new InMemoryProductRepository(database);
     components = new InMemoryProductComponentRepository(database);
     sellerOffers = new InMemorySellerOfferRepository(database);
+    priceHistory = new InMemoryPriceHistoryRepository(database);
     preferences = new InMemoryUserPreferenceRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
     analysisOffers = new InMemoryAnalysisOfferRepository(database);
@@ -34,93 +37,62 @@ describe('CoreIntegrationService', () => {
       products,
       components,
       sellerOffers,
+      priceHistory,
       preferences,
       analyses,
       analysisOffers,
     );
   });
 
-  it('persists a product, returns a UUID productId, and reuses the same product key', async () => {
-    const first = await service.persistProduct({
-      canonicalName: 'Round Lab Sun Cream',
-      brand: 'Round Lab',
-      components: [
-        {
-          componentType: 'MAIN',
-          capacityValue: 50,
-          capacityUnit: 'ML',
-          quantity: 1,
-        },
-      ],
-    });
-    const second = await service.persistProduct({
-      canonicalName: 'Round Lab Sun Cream',
-      brand: 'Round Lab',
-    });
+  it('resolves IDENTIFIED products with a UUID productId and reuses the same product', async () => {
+    const first = await service.resolveProduct(resolveProductRequest());
+    const second = await service.resolveProduct(resolveProductRequest('request-2'));
 
-    expect(first.productId).toMatch(UUID_V4_PATTERN);
-    expect(second).toEqual({
-      productId: first.productId,
-      reusedExisting: true,
-    });
+    expect(first).toEqual({ productId: expect.stringMatching(UUID_V4_PATTERN), brandId: null });
+    expect(second).toEqual({ productId: first.productId, brandId: null });
     expect(await products.findById(first.productId)).toMatchObject({
       canonical_name: 'Round Lab Sun Cream',
+      product_key: 'round-lab:round-lab-sun-cream',
     });
     expect(await components.findByProductId(first.productId)).toHaveLength(1);
   });
 
-  it('persists seller offers, returns stored offer IDs, and prevents duplicate product seller URL rows', async () => {
-    const product = await service.persistProduct({
-      canonicalName: 'Product',
-      productKey: 'product-key',
-    });
+  it('rejects non-IDENTIFIED products instead of creating a backend product id', async () => {
+    const request = resolveProductRequest();
+    request.identification.identification_status = 'AMBIGUOUS';
+    (request.identification as Record<string, unknown>).anchor_product = null;
 
-    const first = await service.persistSellerOffers(product.productId, [
+    await expect(service.resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
+    expect(database.store.products).toHaveLength(0);
+  });
+
+  it('ingests only CONTENT_VERIFIED seller offers and returns stored values', async () => {
+    const product = await service.resolveProduct(resolveProductRequest());
+
+    const first = await service.ingestOffers(product.productId, ingestOffersRequest());
+    const second = await service.ingestOffers(product.productId, ingestOffersRequest('same-request-again'));
+
+    expect(first.productId).toBe(product.productId);
+    expect(first.offers).toEqual([
       {
-        sellerName: 'Coupang',
-        sellerUrl: 'https://example.com/offer/',
-        listedPrice: 12000,
-        listedSalePrice: 11000,
+        id: expect.stringMatching(UUID_V4_PATTERN),
+        sellerName: 'COUPANG',
+        sellerUrl: 'https://example.com/coupang',
         marketEffectivePrice: 10000,
-        shippingFee: 0,
-        comparisonStatus: 'DIRECTLY_COMPARABLE',
-      },
-      {
-        sellerName: 'Musinsa',
-        sellerUrl: 'https://example.com/musinsa',
-        listedPrice: 13000,
-        listedSalePrice: 12500,
-        marketEffectivePrice: 12500,
-        shippingFee: 0,
-        comparisonStatus: 'UNIT_COMPARABLE',
+        reusedExisting: false,
       },
     ]);
-    const second = await service.persistSellerOffers(product.productId, [
-      {
-        sellerName: 'Coupang',
-        sellerUrl: 'https://example.com/offer',
-        listedPrice: 99999,
-      },
-    ]);
-
-    expect(first.offers).toHaveLength(2);
-    expect(first.offers[0]).toMatchObject({
-      sellerName: 'Coupang',
-      sellerUrl: 'https://example.com/offer',
-      reusedExisting: false,
-    });
     expect(second.offers).toEqual([
       {
-        id: first.offers[0].id,
-        sellerName: 'Coupang',
-        sellerUrl: 'https://example.com/offer',
+        ...first.offers[0],
         reusedExisting: true,
       },
     ]);
-    expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(2);
+    expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(1);
+    expect(await priceHistory.findByProductId(product.productId)).toHaveLength(1);
   });
 
-  it('builds judgment input from persisted analysis values and does not call AI', async () => {
+  it('builds judgment context from real snapshots and excludes non CONTENT_VERIFIED snapshots', async () => {
     const { analysisId, productId } = await seedJudgmentReadyAnalysis();
 
     const result = await service.buildJudgmentInput(analysisId, 'user-1');
@@ -143,30 +115,26 @@ describe('CoreIntegrationService', () => {
       comparison_price_basis: 'PERSONALIZED',
       allowed_conclusions: ['LOW_POINT_BUY'],
     });
-    expect(result.offers).toHaveLength(2);
+    expect(result.offers).toHaveLength(1);
     expect(result.offers[0]).toMatchObject({
       offer_id: 'offer-lowest',
       seller: 'COUPANG',
       public_effective_price: 10000,
       personalized_effective_price: 9000,
       unit_price: 180,
+      source: { verification_status: 'CONTENT_VERIFIED' },
     });
-    expect(result.allowed_offer_ids).toEqual(['offer-lowest', 'offer-second']);
+    expect(result.allowed_offer_ids).toEqual(['offer-lowest']);
+    expect(result.facts[0].id).toBe('offer:offer-lowest:price');
     expect(result.facts[0].numeric_values).toContain(9000);
   });
 
-  it('saves AI judgment result into the existing analysis row and returns the verdict/result_json', async () => {
+  it('validates and saves AI judgment results into the existing analysis row', async () => {
     const { analysisId } = await seedJudgmentReadyAnalysis();
 
     const saved = await service.saveJudgmentResult(analysisId, 'user-1', {
-      verdict: 'LOW_POINT_BUY',
-      resultJson: {
-        decision_status: 'DECIDED',
-        conclusion_reason: 'Fixture judgment from Core integration test.',
-        recommended_offer_id: 'offer-lowest',
-      },
-      model: 'test-model',
-      promptVersion: 'test-prompt',
+      schemaVersion: 'ai-judgment.v1',
+      judgment: validJudgment(),
     });
 
     expect(saved).toMatchObject({
@@ -177,12 +145,11 @@ describe('CoreIntegrationService', () => {
     expect(saved.result).toMatchObject({
       lowestEffectivePriceOffer: { id: 'offer-lowest' },
       aiJudgment: {
-        decision_status: 'DECIDED',
+        conclusion: 'LOW_POINT_BUY',
         recommended_offer_id: 'offer-lowest',
       },
       aiMetadata: {
-        model: 'test-model',
-        promptVersion: 'test-prompt',
+        schemaVersion: 'ai-judgment.v1',
       },
     });
     await expect(analyses.findById(analysisId)).resolves.toMatchObject({
@@ -195,22 +162,143 @@ describe('CoreIntegrationService', () => {
     });
   });
 
-  it('enforces analysis ownership for judgment input and result persistence', async () => {
+  it('rejects unsupported judgment values and foreign ownership', async () => {
     const { analysisId } = await seedJudgmentReadyAnalysis();
 
     await expect(service.buildJudgmentInput(analysisId, 'user-2'))
       .rejects
       .toBeInstanceOf(ForbiddenException);
-    await expect(service.saveJudgmentResult(analysisId, 'user-2', {
-      verdict: 'LOW_POINT_BUY',
-      resultJson: { decision_status: 'DECIDED' },
+    await expect(service.saveJudgmentResult(analysisId, 'user-1', {
+      schemaVersion: 'ai-judgment.v1',
+      judgment: { ...validJudgment(), recommended_offer_id: 'not-allowed' },
     }))
       .rejects
-      .toBeInstanceOf(ForbiddenException);
+      .toBeInstanceOf(BadRequestException);
+    await expect(service.saveJudgmentResult(analysisId, 'user-1', {
+      schemaVersion: 'ai-judgment.v1',
+      judgment: { ...validJudgment(), used_fact_ids: ['missing-fact'] },
+    }))
+      .rejects
+      .toBeInstanceOf(BadRequestException);
     await expect(service.buildJudgmentInput('00000000-0000-4000-8000-000000000000', 'user-1'))
       .rejects
       .toBeInstanceOf(NotFoundException);
   });
+
+  function resolveProductRequest(idempotencyKey = 'request-1') {
+    return {
+      schemaVersion: 'product-identification.v1' as const,
+      sourceUrl: 'https://example.com/source',
+      idempotencyKey,
+      identification: {
+        identification_status: 'IDENTIFIED',
+        anchor_product: {
+          brand: 'Round Lab',
+          normalized_product_name: 'Round Lab Sun Cream',
+          product_type: 'SUNSCREEN',
+          option: null,
+          shade_or_scent: null,
+          version_or_renewal: null,
+          components: [
+            {
+              type: 'MAIN',
+              name: 'main',
+              capacity_value: 50,
+              capacity_unit: 'ML',
+              quantity: 1,
+            },
+          ],
+        },
+        preview: {
+          seller: 'COUPANG',
+          listed_price: 12000,
+          image_url: null,
+        },
+        source: {
+          source_url: 'https://example.com/source',
+          verification_status: 'URL_VERIFIED',
+        },
+        warnings: [],
+      },
+    };
+  }
+
+  function ingestOffersRequest(idempotencyKey = 'request-1') {
+    return {
+      schemaVersion: 'product-search.v1' as const,
+      idempotencyKey,
+      search: {
+        anchor_product: resolveProductRequest().identification.anchor_product,
+        seller_results: [
+          {
+            seller: 'COUPANG',
+            availability: 'AVAILABLE',
+            candidate_offer: {
+              list_price: 12000,
+              listed_sale_price: 11000,
+              public_coupon_amount: 1000,
+              automatic_discount_amount: null,
+              shipping_fee: 0,
+              components: [],
+            },
+            source: {
+              source_url: 'https://example.com/coupang',
+              observed_at: '2026-08-10T00:00:00.000Z',
+              verification_status: 'CONTENT_VERIFIED',
+            },
+          },
+          {
+            seller: 'MUSINSA_BEAUTY',
+            availability: 'AVAILABLE',
+            candidate_offer: {
+              list_price: 13000,
+              listed_sale_price: 12500,
+              public_coupon_amount: null,
+              automatic_discount_amount: null,
+              shipping_fee: 0,
+              components: [],
+            },
+            source: {
+              source_url: 'https://example.com/musinsa',
+              observed_at: '2026-08-10T00:00:00.000Z',
+              verification_status: 'URL_VERIFIED',
+            },
+          },
+        ],
+        warnings: [],
+      },
+    };
+  }
+
+  function validJudgment() {
+    return {
+      evidence_review: {
+        supporting_fact_ids: ['offer:offer-lowest:price'],
+        contradicting_fact_ids: [],
+        missing_evidence: [],
+      },
+      decision_status: 'DECIDED',
+      conclusion: 'LOW_POINT_BUY',
+      conclusion_reason: 'Fixture judgment from Core integration test.',
+      confidence: {
+        level: 'HIGH',
+        reason: 'Fixture confidence.',
+        used_fact_ids: ['offer:offer-lowest:price'],
+      },
+      criteria_results: [
+        {
+          criterion: 'FINAL_PAYMENT_AMOUNT',
+          status: 'POSITIVE',
+          reason: 'Lowest offer.',
+          used_fact_ids: ['offer:offer-lowest:price'],
+        },
+      ],
+      recommended_offer_id: 'offer-lowest',
+      recommendation_reason: 'Lowest verified offer.',
+      warnings: [],
+      used_fact_ids: ['offer:offer-lowest:price'],
+    };
+  }
 
   async function seedJudgmentReadyAnalysis() {
     await preferences.upsert({
@@ -262,7 +350,7 @@ describe('CoreIntegrationService', () => {
       {
         analysis_id: analysis.id,
         seller_identifier: 'offer-lowest',
-        seller_name: 'Coupang',
+        seller_name: 'COUPANG',
         original_list_price: 12000,
         sale_price: 11000,
         market_effective_price: 10000,
@@ -278,27 +366,19 @@ describe('CoreIntegrationService', () => {
           comparisonStatus: 'DIRECTLY_COMPARABLE',
           sourceUrl: 'https://example.com/offer-lowest',
           observedAt: '2026-08-10T00:00:00.000Z',
+          verificationStatus: 'CONTENT_VERIFIED',
         },
       },
       {
         analysis_id: analysis.id,
-        seller_identifier: 'offer-second',
-        seller_name: 'Musinsa',
-        original_list_price: 13000,
-        sale_price: 12500,
+        seller_identifier: 'offer-unverified',
+        seller_name: 'MUSINSA_BEAUTY',
         market_effective_price: 12500,
         user_effective_price: 12500,
-        shipping_fee: 0,
-        public_discount: null,
-        user_discount: null,
-        quantity: 1,
-        total_amount: 50,
-        unit: 'ML',
-        calculated_unit_price: 250,
         offer_snapshot: {
-          comparisonStatus: 'UNIT_COMPARABLE',
-          sourceUrl: 'https://example.com/offer-second',
-          observedAt: '2026-08-10T00:00:00.000Z',
+          comparisonStatus: 'DIRECTLY_COMPARABLE',
+          sourceUrl: 'https://example.com/unverified',
+          verificationStatus: 'URL_VERIFIED',
         },
       },
     ]);

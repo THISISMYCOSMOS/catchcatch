@@ -18,3 +18,13 @@ export function loadSupabaseEnv(
 
   return { supabaseUrl, supabaseServiceRoleKey };
 }
+
+export function loadInternalApiToken(
+  source: NodeJS.ProcessEnv = process.env,
+): string {
+  const token = source.INTERNAL_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error('INTERNAL_API_TOKEN is required');
+  }
+  return token;
+}

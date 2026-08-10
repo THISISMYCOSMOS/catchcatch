@@ -1,6 +1,6 @@
-import { Inject, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, Optional, UnauthorizedException } from '@nestjs/common';
 import { AuthError, Session, User } from '@supabase/supabase-js';
-import { CatchCatchSupabaseClient, SUPABASE_CLIENT } from '../database/supabase.client';
+import { CatchCatchSupabaseClient, createSupabaseServerClient, SUPABASE_CLIENT } from '../database/supabase.client';
 import { AuthenticatedUser } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -18,14 +18,18 @@ export type AuthResponse = {
   expiresAt: number | null;
 };
 
+export type PublicAuthResponse = Omit<AuthResponse, 'refreshToken'>;
+
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(SUPABASE_CLIENT) private readonly client: CatchCatchSupabaseClient,
+    @Optional()
+    private readonly authClientFactory: () => CatchCatchSupabaseClient = createAuthClient,
   ) {}
 
   async signup(input: SignupDto): Promise<AuthResponse> {
-    const { data, error } = await this.client.auth.signUp({
+    const { data, error } = await this.createAuthClient().auth.signUp({
       email: input.email,
       password: input.password,
       options: input.displayName
@@ -42,7 +46,7 @@ export class AuthService {
   }
 
   async login(input: LoginDto): Promise<AuthResponse> {
-    const { data, error } = await this.client.auth.signInWithPassword({
+    const { data, error } = await this.createAuthClient().auth.signInWithPassword({
       email: input.email,
       password: input.password,
     });
@@ -56,7 +60,10 @@ export class AuthService {
   }
 
   async refresh(input: RefreshTokenDto): Promise<AuthResponse> {
-    const { data, error } = await this.client.auth.refreshSession({
+    if (!input.refreshToken) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    const { data, error } = await this.createAuthClient().auth.refreshSession({
       refresh_token: input.refreshToken,
     });
     if (error || !data.user || !data.session) {
@@ -82,6 +89,10 @@ export class AuthService {
       id: data.user.id,
       email: data.user.email ?? null,
     };
+  }
+
+  private createAuthClient(): CatchCatchSupabaseClient {
+    return (this.authClientFactory ?? createAuthClient)();
   }
 }
 
@@ -109,4 +120,8 @@ function toAuthException(error: AuthError, fallbackMessage: string): Error {
     return new UnauthorizedException(fallbackMessage);
   }
   return new InternalServerErrorException(fallbackMessage);
+}
+
+function createAuthClient(): CatchCatchSupabaseClient {
+  return createSupabaseServerClient();
 }

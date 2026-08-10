@@ -2,12 +2,14 @@ import { InternalServerErrorException, UnauthorizedException } from '@nestjs/com
 import { validate } from 'class-validator';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
+import { AuthController } from './auth.controller';
+import { InternalApiGuard } from './internal-api.guard';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 
 describe('AuthService', () => {
   it('signs up with Supabase Auth and does not return passwords or secrets', async () => {
-    const service = new AuthService(mockClient({
+    const service = authServiceWithAuthClient({
       signUp: jest.fn().mockResolvedValue({
         data: {
           user: { id: 'user-1', email: 'user@example.com' },
@@ -15,7 +17,7 @@ describe('AuthService', () => {
         },
         error: null,
       }),
-    }));
+    });
 
     const result = await service.signup({
       email: 'user@example.com',
@@ -33,7 +35,7 @@ describe('AuthService', () => {
   });
 
   it('logs in and returns frontend-safe top-level session tokens', async () => {
-    const service = new AuthService(mockClient({
+    const service = authServiceWithAuthClient({
       signInWithPassword: jest.fn().mockResolvedValue({
         data: {
           user: { id: 'user-1', email: 'user@example.com' },
@@ -45,7 +47,7 @@ describe('AuthService', () => {
         },
         error: null,
       }),
-    }));
+    });
 
     const result = await service.login({
       email: 'user@example.com',
@@ -77,7 +79,7 @@ describe('AuthService', () => {
       },
       error: null,
     });
-    const service = new AuthService(mockClient({ refreshSession }));
+    const service = authServiceWithAuthClient({ refreshSession });
 
     const result = await service.refresh({ refreshToken: 'old-refresh-token' });
 
@@ -92,12 +94,12 @@ describe('AuthService', () => {
   });
 
   it('returns 401 for invalid refresh tokens', async () => {
-    const service = new AuthService(mockClient({
+    const service = authServiceWithAuthClient({
       refreshSession: jest.fn().mockResolvedValue({
         data: { user: null, session: null },
         error: { message: 'bad refresh token' },
       }),
-    }));
+    });
 
     await expect(service.refresh({ refreshToken: 'bad-refresh-token' }))
       .rejects
@@ -128,7 +130,7 @@ describe('AuthService', () => {
   });
 
   it('returns 401 when login succeeds without a session', async () => {
-    const service = new AuthService(mockClient({
+    const service = authServiceWithAuthClient({
       signInWithPassword: jest.fn().mockResolvedValue({
         data: {
           user: { id: 'user-1', email: 'user@example.com' },
@@ -136,7 +138,7 @@ describe('AuthService', () => {
         },
         error: null,
       }),
-    }));
+    });
 
     await expect(service.login({
       email: 'user@example.com',
@@ -146,13 +148,14 @@ describe('AuthService', () => {
 
   it('returns 401 for failed login and invalid access tokens', async () => {
     const service = new AuthService(mockClient({
-      signInWithPassword: jest.fn().mockResolvedValue({
-        data: { user: null, session: null },
-        error: { message: 'Invalid login credentials' },
-      }),
       getUser: jest.fn().mockResolvedValue({
         data: { user: null },
         error: { message: 'bad token' },
+      }),
+    }), () => mockClient({
+      signInWithPassword: jest.fn().mockResolvedValue({
+        data: { user: null, session: null },
+        error: { message: 'Invalid login credentials' },
       }),
     }));
 
@@ -164,12 +167,12 @@ describe('AuthService', () => {
   });
 
   it('returns 500 when signup succeeds without a user', async () => {
-    const service = new AuthService(mockClient({
+    const service = authServiceWithAuthClient({
       signUp: jest.fn().mockResolvedValue({
         data: { user: null, session: null },
         error: null,
       }),
-    }));
+    });
 
     await expect(service.signup({
       email: 'user@example.com',
@@ -218,6 +221,105 @@ describe('AuthGuard', () => {
   });
 });
 
+describe('InternalApiGuard', () => {
+  const previousToken = process.env.INTERNAL_API_TOKEN;
+
+  afterEach(() => {
+    if (previousToken === undefined) {
+      delete process.env.INTERNAL_API_TOKEN;
+    } else {
+      process.env.INTERNAL_API_TOKEN = previousToken;
+    }
+  });
+
+  it('accepts only matching x-internal-api-token values', () => {
+    process.env.INTERNAL_API_TOKEN = 'internal-token';
+    const guard = new InternalApiGuard();
+
+    expect(guard.canActivate(contextFor({
+      headers: { 'x-internal-api-token': 'internal-token' },
+    }))).toBe(true);
+    expect(() => guard.canActivate(contextFor({
+      headers: {},
+    }))).toThrow(UnauthorizedException);
+    expect(() => guard.canActivate(contextFor({
+      headers: { 'x-internal-api-token': 'wrong-token' },
+    }))).toThrow(UnauthorizedException);
+  });
+});
+
+describe('AuthController cookie responses', () => {
+  it('sets refresh cookie and omits refreshToken from login JSON', async () => {
+    const controller = new AuthController({
+      login: jest.fn().mockResolvedValue({
+        user: { id: 'user-1', email: 'user@example.com' },
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresAt: 123,
+      }),
+    } as never);
+    const response = mockResponse();
+
+    const result = await controller.login({
+      email: 'user@example.com',
+      password: 'password123',
+    }, response);
+
+    expect(result).toEqual({
+      user: { id: 'user-1', email: 'user@example.com' },
+      accessToken: 'access-token',
+      expiresAt: 123,
+    });
+    expect(JSON.stringify(result)).not.toContain('refresh-token');
+    expect(response.cookie).toHaveBeenCalledWith(
+      'catchcatch_refresh_token',
+      'refresh-token',
+      expect.objectContaining({ httpOnly: true, secure: true }),
+    );
+  });
+
+  it('refreshes from cookie and omits refreshToken from refresh JSON', async () => {
+    const refresh = jest.fn().mockResolvedValue({
+      user: { id: 'user-1', email: 'user@example.com' },
+      accessToken: 'new-access-token',
+      refreshToken: 'new-refresh-token',
+      expiresAt: 456,
+    });
+    const controller = new AuthController({ refresh } as never);
+    const response = mockResponse();
+
+    const result = await controller.refresh({}, {
+      headers: { cookie: 'catchcatch_refresh_token=old-refresh-token' },
+    }, response);
+
+    expect(refresh).toHaveBeenCalledWith({ refreshToken: 'old-refresh-token' });
+    expect(result).toEqual({
+      user: { id: 'user-1', email: 'user@example.com' },
+      accessToken: 'new-access-token',
+      expiresAt: 456,
+    });
+    expect(JSON.stringify(result)).not.toContain('new-refresh-token');
+    expect(response.cookie).toHaveBeenCalledWith(
+      'catchcatch_refresh_token',
+      'new-refresh-token',
+      expect.objectContaining({ httpOnly: true, secure: true }),
+    );
+  });
+
+  it('clears refresh cookie on logout', async () => {
+    const controller = new AuthController({
+      logout: jest.fn().mockResolvedValue({ success: true }),
+    } as never);
+    const response = mockResponse();
+
+    await expect(controller.logout('access-token', response)).resolves.toEqual({ success: true });
+    expect(response.clearCookie).toHaveBeenCalledWith(
+      'catchcatch_refresh_token',
+      expect.objectContaining({ httpOnly: true, secure: true }),
+    );
+  });
+});
+
 function mockClient(authOverrides: Record<string, unknown>) {
   return {
     auth: {
@@ -233,10 +335,21 @@ function mockClient(authOverrides: Record<string, unknown>) {
   } as never;
 }
 
+function authServiceWithAuthClient(authOverrides: Record<string, unknown>) {
+  return new AuthService(mockClient({}), () => mockClient(authOverrides));
+}
+
 function contextFor(request: unknown) {
   return {
     switchToHttp: () => ({
       getRequest: () => request,
     }),
   } as never;
+}
+
+function mockResponse() {
+  return {
+    cookie: jest.fn(),
+    clearCookie: jest.fn(),
+  };
 }

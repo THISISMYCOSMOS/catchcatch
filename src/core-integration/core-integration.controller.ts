@@ -2,42 +2,43 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, UseGuards } fro
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { InternalApiGuard } from '../auth/internal-api.guard';
 import { CoreIntegrationService } from './core-integration.service';
-import { PersistProductDto } from './dto/persist-product.dto';
-import { PersistSellerOffersDto } from './dto/persist-seller-offers.dto';
-import { SaveJudgmentResultDto } from './dto/save-judgment-result.dto';
+import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
 
-@UseGuards(AuthGuard)
-@Controller('core')
+@UseGuards(AuthGuard, InternalApiGuard)
+@Controller('internal/v1')
 export class CoreIntegrationController {
   constructor(private readonly service: CoreIntegrationService) {}
 
-  @Post('products')
-  persistProduct(@Body() body: PersistProductDto) {
-    return this.service.persistProduct(body);
+  @Post('products/resolve')
+  resolveProduct(@Body() body: ResolveProductDto) {
+    return this.service.resolveProduct(body);
   }
 
-  @Post('products/:productId/seller-offers')
-  persistSellerOffers(
+  @Put('products/:productId/offers')
+  ingestOffers(
     @Param('productId', new ParseUUIDPipe({ version: '4' })) productId: string,
-    @Body() body: PersistSellerOffersDto,
+    @Body() body: IngestOffersDto,
   ) {
-    return this.service.persistSellerOffers(productId, body.offers);
+    return this.service.ingestOffers(productId, body);
   }
 
-  @Get('analyses/:analysisId/judgment-input')
-  buildJudgmentInput(
+  @Get('analyses/:analysisId/judgment-context')
+  async buildJudgmentInput(
     @Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.service.buildJudgmentInput(analysisId, user.id);
+    return {
+      judgmentInput: await this.service.buildJudgmentInput(analysisId, user.id),
+    };
   }
 
-  @Put('analyses/:analysisId/judgment-result')
+  @Put('analyses/:analysisId/judgment')
   saveJudgmentResult(
     @Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string,
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: SaveJudgmentResultDto,
+    @Body() body: SaveJudgmentDto,
   ) {
     return this.service.saveJudgmentResult(analysisId, user.id, body);
   }
