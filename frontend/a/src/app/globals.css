@@ -1460,6 +1460,8 @@ button, input, textarea, select { font: inherit; }
 .profile-dialog-overlay { z-index: 90; }
 .profile-dialog { width: min(100%, 420px); max-height: calc(100% - 24px); background: var(--panel-surface); }
 .profile-dialog-header { position: relative; padding: 22px 58px 16px 20px; flex: none; border-bottom: 1px solid var(--divider); }
+.profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-header { padding: 22px 38px 20px; border-bottom: 0; text-align: center; }
+.profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-header p { width: min(100%, 280px); margin: 16px auto 0; }
 .profile-dialog-header h2 { margin: 0; font-size: 21px; font-weight: var(--type-section-weight); line-height: var(--type-section-line); letter-spacing: -.02em; }
 .profile-dialog-header p { margin: 7px 0 0; color: var(--muted); font-size: 13px; font-weight: var(--type-body-weight); line-height: 1.55; }
 .profile-dialog-close { top: 10px; right: 10px; }
@@ -1473,6 +1475,7 @@ button, input, textarea, select { font: inherit; }
 .profile-withdrawal-copy { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .profile-withdrawal-copy + .profile-support-notice { margin-top: 14px; }
 .profile-withdrawal-confirm { border-color: rgba(156, 76, 66, .24); color: #9c4c42; background: var(--surface); }
+.profile-dialog:has(.profile-withdrawal-confirm) .profile-withdrawal-confirm { margin-top: 24px; }
 .profile-withdrawal-confirm:focus-visible { outline: 3px solid rgba(156, 76, 66, .35); outline-offset: 2px; }
 
 @media (hover: hover) and (pointer: fine) {

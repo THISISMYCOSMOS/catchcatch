@@ -16,8 +16,12 @@ import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame
 import { getMockAuthenticatedUsername } from "@/lib/mock/session";
 import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
 import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
+import { mockAnalyzeProduct } from "@/lib/mock/analysis";
+import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
+type AnalysisState = "idle" | "loading" | "error";
+type AnalysisRequest = { productUrl: string; platform: "쿠팡" };
 
 function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
@@ -29,6 +33,16 @@ function LinkIcon() {
 
 function ArrowIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>;
+}
+
+function AnalysisFailureIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.8v5.4" />
+      <path d="M12 16.4h.01" />
+    </svg>
+  );
 }
 
 function formatPrice(price: number) {
@@ -78,8 +92,9 @@ export function HomeScreen() {
   const router = useRouter();
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState("");
-  const [isNavigatingToResult, setIsNavigatingToResult] = useState(false);
-  const isNavigatingToResultRef = useRef(false);
+  const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
+  const [lastAnalysisRequest, setLastAnalysisRequest] = useState<AnalysisRequest | null>(null);
+  const isAnalyzingRef = useRef(false);
   const [product, setProduct] = useState<ProductPreview | null>(null);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [isProductSelecting, setIsProductSelecting] = useState(false);
@@ -168,9 +183,37 @@ export function HomeScreen() {
     }, 160);
   }
 
+  async function runAnalysis(request: AnalysisRequest) {
+    if (isAnalyzingRef.current) return;
+    const query = new URLSearchParams({
+      url: request.productUrl,
+      platform: request.platform,
+    });
+
+    isAnalyzingRef.current = true;
+    setLastAnalysisRequest(request);
+    setAnalysisState("loading");
+    setLinkError("");
+    closeProductPopover();
+
+    try {
+      const result = await mockAnalyzeProduct(request.productUrl);
+      if (!result.ok) {
+        setAnalysisState("error");
+        isAnalyzingRef.current = false;
+        return;
+      }
+      window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, request.productUrl);
+      router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
+    } catch {
+      setAnalysisState("error");
+      isAnalyzingRef.current = false;
+    }
+  }
+
   function handleAnalyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (isNavigatingToResultRef.current) return;
+    if (isAnalyzingRef.current) return;
 
     const validation = validateCoupangProductUrl(linkValue);
     if (!validation.ok) {
@@ -180,16 +223,7 @@ export function HomeScreen() {
       return;
     }
 
-    const query = new URLSearchParams({
-      url: validation.productUrl,
-      platform: validation.platform,
-    });
-
-    isNavigatingToResultRef.current = true;
-    setIsNavigatingToResult(true);
-    setLinkError("");
-    window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, validation.productUrl);
-    router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
+    void runAnalysis({ productUrl: validation.productUrl, platform: validation.platform });
   }
 
   return (
@@ -222,40 +256,70 @@ export function HomeScreen() {
           </section>
         ) : null}
 
-        <form className="analysis-form" onSubmit={handleAnalyze} noValidate>
-          <div className="analysis-input-region" ref={productRegionRef}>
-            <label className="analysis-input-wrap">
-              <span className="sr-only">상품 링크</span>
-              <span className="analysis-link-icon"><LinkIcon /></span>
-              <input
-                className="home-link-input-focus"
-                type="url"
-                value={linkValue}
-                onChange={(event) => handleLinkChange(event.target.value)}
-                onFocus={() => {
-                  if (product) setIsProductPopoverOpen(true);
-                }}
+        {analysisState === "loading" ? (
+          <section className={styles.status} aria-live="polite" aria-busy="true">
+            <div className={styles.loadingVisual} aria-hidden="true">
+              <span className={styles.loader} />
+            </div>
+            <h2 className={styles.title}>상품을 분석하고 있어요</h2>
+            <p className={styles.description}>가격과 구성 정보를 확인하고 있어요.<br />잠시만 기다려주세요.</p>
+          </section>
+        ) : analysisState === "error" ? (
+          <section className={styles.status} role="alert">
+            <div className={styles.failureVisual}>
+              <AnalysisFailureIcon />
+            </div>
+            <h2 className={styles.title}>분석에 실패했어요</h2>
+            <p className={styles.description}>상품 정보를 분석하는 중 문제가 발생했어요.<br />잠시 후 다시 시도해주세요.</p>
+            <div className={styles.actions}>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={!lastAnalysisRequest}
                 onClick={() => {
-                  if (product) setIsProductPopoverOpen(true);
+                  if (lastAnalysisRequest) void runAnalysis(lastAnalysisRequest);
                 }}
-                placeholder="링크 붙여넣기"
-                autoComplete="url"
-                aria-invalid={Boolean(linkError)}
-                aria-describedby={linkError ? "analysis-link-error" : undefined}
-              />
-            </label>
-            {product && isProductPopoverOpen ? (
-              <ProductPreviewCard
-                product={product}
-                isSelecting={isProductSelecting}
-                onSelect={handleSelectProduct}
-              />
-            ) : null}
-          </div>
-          {linkError ? <p className="analysis-link-error" id="analysis-link-error" role="alert">{linkError}</p> : null}
-          <button className="analysis-submit" type="submit" disabled={isNavigatingToResult}>분석하기</button>
-          <p className="demo-link-hint">데모 링크: {DEMO_PRODUCT_URL}</p>
-        </form>
+              >
+                다시 시도
+              </button>
+            </div>
+          </section>
+        ) : (
+          <form className="analysis-form" onSubmit={handleAnalyze} noValidate>
+            <div className="analysis-input-region" ref={productRegionRef}>
+              <label className="analysis-input-wrap">
+                <span className="sr-only">상품 링크</span>
+                <span className="analysis-link-icon"><LinkIcon /></span>
+                <input
+                  className="home-link-input-focus"
+                  type="url"
+                  value={linkValue}
+                  onChange={(event) => handleLinkChange(event.target.value)}
+                  onFocus={() => {
+                    if (product) setIsProductPopoverOpen(true);
+                  }}
+                  onClick={() => {
+                    if (product) setIsProductPopoverOpen(true);
+                  }}
+                  placeholder="링크 붙여넣기"
+                  autoComplete="url"
+                  aria-invalid={Boolean(linkError)}
+                  aria-describedby={linkError ? "analysis-link-error" : undefined}
+                />
+              </label>
+              {product && isProductPopoverOpen ? (
+                <ProductPreviewCard
+                  product={product}
+                  isSelecting={isProductSelecting}
+                  onSelect={handleSelectProduct}
+                />
+              ) : null}
+            </div>
+            {linkError ? <p className="analysis-link-error" id="analysis-link-error" role="alert">{linkError}</p> : null}
+            <button className="analysis-submit" type="submit">분석하기</button>
+            <p className="demo-link-hint">데모 링크: {DEMO_PRODUCT_URL}</p>
+          </form>
+        )}
 
         <section className="recent-section" aria-labelledby="recent-title">
           <div className="recent-heading">

@@ -1,16 +1,17 @@
 export const DATA_MODE = "frontend_mock" as const;
 
 const DEMO_ACCOUNT = {
-  username: "catchcatch",
+  accountId: "catchcatch",
+  email: "catchcatch@test.test",
   password: "catch1234",
 } as const;
 
 const MOCK_ACCOUNTS_STORAGE_KEY = "catchcatch:mock-accounts";
 
 type StoredMockAccount = {
-  username: string;
+  accountId: string;
   password: string;
-  email?: string;
+  email: string | null;
 };
 
 function readMockAccounts(): StoredMockAccount[] {
@@ -18,15 +19,23 @@ function readMockAccounts(): StoredMockAccount[] {
     const storedAccounts = localStorage.getItem(MOCK_ACCOUNTS_STORAGE_KEY);
     if (!storedAccounts) return [];
     const parsedAccounts: unknown = JSON.parse(storedAccounts);
-    return Array.isArray(parsedAccounts)
-      ? parsedAccounts.filter((account): account is StoredMockAccount => (
-          Boolean(account)
-          && typeof account === "object"
-          && typeof account.username === "string"
-          && typeof account.password === "string"
-          && (account.email === undefined || typeof account.email === "string")
-        ))
-      : [];
+    if (!Array.isArray(parsedAccounts)) return [];
+
+    return parsedAccounts.flatMap((account): StoredMockAccount[] => {
+      if (!account || typeof account !== "object") return [];
+      const storedAccount = account as Record<string, unknown>;
+      const accountId = typeof storedAccount.accountId === "string"
+        ? storedAccount.accountId
+        : typeof storedAccount.username === "string"
+          ? storedAccount.username
+          : null;
+      if (!accountId || typeof storedAccount.password !== "string") return [];
+      return [{
+        accountId: accountId.trim().toLowerCase(),
+        password: storedAccount.password,
+        email: typeof storedAccount.email === "string" ? storedAccount.email.trim().toLowerCase() : null,
+      }];
+    });
   } catch {
     return [];
   }
@@ -35,26 +44,28 @@ function readMockAccounts(): StoredMockAccount[] {
 const wait = (milliseconds = 350) =>
   new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
-export async function mockLogin(username: string, password: string) {
+export async function mockLogin(email: string, password: string) {
   await wait();
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
   const account = readMockAccounts().find(
-    (storedAccount) => storedAccount.username === normalizedUsername,
+    (storedAccount) => storedAccount.email === normalizedEmail,
   );
   const expectedPassword = account?.password
-    ?? (normalizedUsername === DEMO_ACCOUNT.username ? DEMO_ACCOUNT.password : null);
+    ?? (normalizedEmail === DEMO_ACCOUNT.email ? DEMO_ACCOUNT.password : null);
+  const accountId = account?.accountId
+    ?? (normalizedEmail === DEMO_ACCOUNT.email ? DEMO_ACCOUNT.accountId : null);
   return expectedPassword === password
-    ? { ok: true as const, username: normalizedUsername }
+    ? { ok: true as const, accountId: accountId! }
     : { ok: false as const };
 }
 
-export async function mockChangePassword(username: string, currentPassword: string, newPassword: string) {
+export async function mockChangePassword(accountId: string, currentPassword: string, newPassword: string) {
   await wait(420);
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedAccountId = accountId.trim().toLowerCase();
   const accounts = readMockAccounts();
-  const account = accounts.find((storedAccount) => storedAccount.username === normalizedUsername);
+  const account = accounts.find((storedAccount) => storedAccount.accountId === normalizedAccountId);
   const expectedPassword = account?.password
-    ?? (normalizedUsername === DEMO_ACCOUNT.username ? DEMO_ACCOUNT.password : null);
+    ?? (normalizedAccountId === DEMO_ACCOUNT.accountId ? DEMO_ACCOUNT.password : null);
 
   if (expectedPassword === null) {
     return { ok: false as const, reason: "account_not_found" as const };
@@ -65,13 +76,14 @@ export async function mockChangePassword(username: string, currentPassword: stri
 
   const updatedAccount: StoredMockAccount = {
     ...account,
-    username: normalizedUsername,
+    accountId: normalizedAccountId,
+    email: account?.email ?? (normalizedAccountId === DEMO_ACCOUNT.accountId ? DEMO_ACCOUNT.email : null),
     password: newPassword,
   };
 
   try {
     localStorage.setItem(MOCK_ACCOUNTS_STORAGE_KEY, JSON.stringify(account
-      ? accounts.map((storedAccount) => storedAccount.username === normalizedUsername ? updatedAccount : storedAccount)
+      ? accounts.map((storedAccount) => storedAccount.accountId === normalizedAccountId ? updatedAccount : storedAccount)
       : [...accounts, updatedAccount]));
     return { ok: true as const };
   } catch {
@@ -79,39 +91,41 @@ export async function mockChangePassword(username: string, currentPassword: stri
   }
 }
 
-export function getMockAccountEmail(username: string) {
-  const normalizedUsername = username.trim().toLowerCase();
+export function getMockAccountEmail(accountId: string) {
+  const normalizedAccountId = accountId.trim().toLowerCase();
   return readMockAccounts().find(
-    (storedAccount) => storedAccount.username === normalizedUsername,
-  )?.email ?? null;
+    (storedAccount) => storedAccount.accountId === normalizedAccountId,
+  )?.email ?? (normalizedAccountId === DEMO_ACCOUNT.accountId ? DEMO_ACCOUNT.email : null);
 }
 
-export function isMockAccountEmailInUse(email: string, excludedUsername: string) {
+export function isMockAccountEmailInUse(email: string, excludedAccountId: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  const normalizedExcludedUsername = excludedUsername.trim().toLowerCase();
-  return readMockAccounts().some((storedAccount) => (
-    storedAccount.username !== normalizedExcludedUsername
+  const normalizedExcludedAccountId = excludedAccountId.trim().toLowerCase();
+  return (
+    normalizedEmail === DEMO_ACCOUNT.email && normalizedExcludedAccountId !== DEMO_ACCOUNT.accountId
+  ) || readMockAccounts().some((storedAccount) => (
+    storedAccount.accountId !== normalizedExcludedAccountId
     && storedAccount.email?.toLowerCase() === normalizedEmail
   ));
 }
 
-export async function mockSignup(username: string, password: string, email: string) {
+export async function mockSignup(email: string, password: string) {
   await wait();
-  const normalizedUsername = username.trim().toLowerCase();
   const normalizedEmail = email.trim().toLowerCase();
   const accounts = readMockAccounts();
   if (
-    normalizedUsername === DEMO_ACCOUNT.username
-    || accounts.some((account) => account.username === normalizedUsername)
+    normalizedEmail === DEMO_ACCOUNT.email
+    || accounts.some((account) => account.email === normalizedEmail)
   ) {
-    return { ok: false as const, reason: "duplicate_username" as const };
+    return { ok: false as const, reason: "duplicate_email" as const };
   }
 
+  const accountId = window.crypto.randomUUID();
   localStorage.setItem(MOCK_ACCOUNTS_STORAGE_KEY, JSON.stringify([
     ...accounts,
-    { username: normalizedUsername, password, email: normalizedEmail },
+    { accountId, password, email: normalizedEmail },
   ]));
-  return { ok: true as const };
+  return { ok: true as const, accountId };
 }
 
 export async function mockSavePriorities() {

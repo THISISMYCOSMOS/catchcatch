@@ -49,12 +49,14 @@ function ProfileDialog({
   initialFocusSelector,
   onClose,
   title,
+  unifiedContent = false,
 }: {
   children: ReactNode;
   description: string;
   initialFocusSelector: string;
   onClose: () => void;
   title: string;
+  unifiedContent?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -142,45 +144,52 @@ function ProfileDialog({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={keepFocusInside}
       >
-        <header className="profile-dialog-header">
-          <div>
+        {unifiedContent ? (
+          <div className="profile-dialog-header">
             <h2 id={titleId}>{title}</h2>
             <p id={descriptionId}>{description}</p>
+            {children}
+            <button className="previous-analysis-close profile-dialog-close" type="button" aria-label={`${title} 창 닫기`} onClick={onClose}>
+              <CloseIcon />
+            </button>
           </div>
-          <button className="previous-analysis-close profile-dialog-close" type="button" aria-label={`${title} 창 닫기`} onClick={onClose}>
-            <CloseIcon />
-          </button>
-        </header>
-        <div className="profile-dialog-content">{children}</div>
+        ) : (
+          <>
+            <header className="profile-dialog-header">
+              <div>
+                <h2 id={titleId}>{title}</h2>
+                <p id={descriptionId}>{description}</p>
+              </div>
+              <button className="previous-analysis-close profile-dialog-close" type="button" aria-label={`${title} 창 닫기`} onClick={onClose}>
+                <CloseIcon />
+              </button>
+            </header>
+            <div className="profile-dialog-content">{children}</div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 function WithdrawalDialog({ onClose }: { onClose: () => void }) {
-  const [supportNotice, setSupportNotice] = useState("");
+  const [, setSupportNotice] = useState("");
 
   return (
     <ProfileDialog
-      title="회원 탈퇴"
+      title="회원탈퇴"
       description="탈퇴하면 저장한 관심상품과 분석 기록을 다시 확인할 수 없어요."
-      initialFocusSelector=".profile-dialog-cancel"
+      initialFocusSelector=".profile-withdrawal-confirm"
       onClose={onClose}
+      unifiedContent
     >
-      <p className="profile-withdrawal-copy">
-        현재 frontend_mock에는 계정 삭제 정책과 API가 연결되어 있지 않아 실제 탈퇴 요청은 실행되지 않습니다.
-      </p>
-      {supportNotice ? <p className="profile-support-notice" role="status">{supportNotice}</p> : null}
-      <div className="profile-dialog-actions">
-        <button className="button button-secondary profile-dialog-cancel" type="button" onClick={onClose}>취소</button>
-        <button
-          className="button profile-withdrawal-confirm"
-          type="button"
-          onClick={() => setSupportNotice("회원 탈퇴는 지원되지 않으며 계정에는 아무 변경도 적용되지 않았습니다.")}
-        >
-          탈퇴하기
-        </button>
-      </div>
+      <button
+        className="button profile-withdrawal-confirm"
+        type="button"
+        onClick={() => setSupportNotice("회원 탈퇴는 지원되지 않으며 계정에는 아무 변경도 적용되지 않았습니다.")}
+      >
+        탈퇴하기
+      </button>
     </ProfileDialog>
   );
 }
@@ -497,7 +506,7 @@ export function ProfileScreen() {
   }
 
   const displayEmail = profile?.email ?? "등록되지 않음";
-  const displayName = profile?.nickname ?? profile?.username ?? "";
+  const displayName = profile?.nickname ?? profile?.email ?? "";
   const profileInitial = Array.from(displayName)[0]?.toUpperCase() ?? "";
 
   return (
@@ -538,7 +547,7 @@ export function ProfileScreen() {
                 <div className="profile-initial" aria-hidden="true">{profileInitial}</div>
                 <div className="profile-summary-copy">
                   <strong>{displayName}</strong>
-                  <span>{profile.email ?? "이메일 등록 정보 없음"}</span>
+                  {profile.nickname ? <span>{profile.email ?? "이메일 등록 정보 없음"}</span> : null}
                 </div>
               </section>
 
@@ -554,10 +563,6 @@ export function ProfileScreen() {
                 {isEditing ? (
                   <form className="profile-edit-form" onSubmit={saveProfile} noValidate>
                     <div className="profile-info-card profile-edit-card">
-                      <div className="profile-edit-readonly">
-                        <span>아이디</span>
-                        <strong>{profile.username}</strong>
-                      </div>
                       <div className="profile-edit-row">
                         <FormField
                           id="profile-nickname"
@@ -593,7 +598,6 @@ export function ProfileScreen() {
                   </form>
                 ) : (
                   <dl className="profile-info-card">
-                    <div><dt>아이디</dt><dd>{profile.username}</dd></div>
                     <div><dt>닉네임</dt><dd className={profile.nickname ? undefined : "is-empty"}>{profile.nickname ?? "등록되지 않음"}</dd></div>
                     <div><dt>이메일</dt><dd className={profile.email ? undefined : "is-empty"}>{displayEmail}</dd></div>
                   </dl>

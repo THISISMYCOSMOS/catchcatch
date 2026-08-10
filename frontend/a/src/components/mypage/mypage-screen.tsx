@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
+import { getMockUserProfile } from "@/lib/mock/profile";
 import {
   getMockAuthenticatedRoute,
   getMockAuthenticatedUsername,
@@ -22,11 +23,12 @@ function ChevronIcon() {
 
 export function MyPageScreen() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
+    let isCancelled = false;
+    const authorizationCheck = window.setTimeout(async () => {
       const authenticatedRoute = getMockAuthenticatedRoute();
       if (authenticatedRoute !== "/home") {
         router.replace(authenticatedRoute);
@@ -37,10 +39,15 @@ export function MyPageScreen() {
         router.replace("/login");
         return;
       }
-      setUsername(authenticatedUsername);
+      const profile = await getMockUserProfile(authenticatedUsername);
+      if (isCancelled) return;
+      setAccountEmail(profile?.email ?? "이메일 등록 정보 없음");
       setIsAuthorized(true);
     }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(authorizationCheck);
+    };
   }, [router]);
 
   if (!isAuthorized) return null;
@@ -51,7 +58,7 @@ export function MyPageScreen() {
         <h1 className="section-page-title" id="mypage-title">마이페이지</h1>
         <div className="mypage-profile-summary">
           <span>로그인 계정</span>
-          <p><strong>{username}</strong></p>
+          <p><strong>{accountEmail}</strong></p>
         </div>
       </section>
 

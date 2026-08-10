@@ -1,3 +1,5 @@
+import { DEMO_PRODUCT_URL } from "@/lib/mock/home";
+
 // B 결과 화면의 구조를 A 안에서 독립적으로 재구성하기 위한 데모 데이터입니다.
 // 실제 상품 분석 API 계약은 아직 연결되지 않았습니다.
 export type StoreOffer = {
@@ -6,6 +8,18 @@ export type StoreOffer = {
   readonly description: string;
   readonly purchaseUrl: string;
 };
+
+export type MockAnalysisResult =
+  | { ok: true }
+  | { ok: false };
+
+const wait = (milliseconds = 650) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+
+export async function mockAnalyzeProduct(productUrl: string): Promise<MockAnalysisResult> {
+  await wait();
+  return productUrl === DEMO_PRODUCT_URL ? { ok: true } : { ok: false };
+}
 
 export const analysisMock = {
   product: {

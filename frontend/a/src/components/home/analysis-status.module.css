@@ -1,0 +1,95 @@
+.status {
+  min-height: clamp(264px, 38svh, 344px);
+  margin-bottom: 32px;
+  padding: 28px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.loadingVisual,
+.failureVisual {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel);
+}
+
+.loader {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgba(121, 93, 10, .18);
+  border-top-color: var(--gold-text);
+  border-radius: 50%;
+  animation: analysis-loader-spin .85s linear infinite;
+}
+
+.failureVisual {
+  color: var(--gold-text);
+  background: var(--selected);
+}
+
+.failureVisual svg {
+  width: 36px;
+  height: 36px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.title {
+  margin: 0;
+  color: var(--text);
+  font-size: 21px;
+  font-weight: 750;
+  line-height: 1.4;
+  letter-spacing: -.025em;
+}
+
+.description {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: var(--type-body-weight);
+  line-height: 1.7;
+  letter-spacing: -.01em;
+}
+
+.actions {
+  width: min(100%, 320px);
+  margin-top: 26px;
+}
+
+@keyframes analysis-loader-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader {
+    animation: none;
+    border-color: rgba(121, 93, 10, .24);
+    border-top-color: var(--gold-text);
+  }
+}
+
+@media (max-width: 359px) {
+  .status {
+    min-height: 248px;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .loadingVisual,
+  .failureVisual {
+    margin-bottom: 22px;
+  }
+
+  .title { font-size: 20px; }
+}

@@ -1,6 +1,5 @@
 export type SignupValues = {
   email: string;
-  username: string;
   password: string;
   passwordConfirmation: string;
   agreedToTerms: boolean;
@@ -9,12 +8,10 @@ export type SignupValues = {
 export type SignupField = keyof SignupValues;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const USERNAME_PATTERN = /^[A-Za-z0-9]+$/;
 const PASSWORD_LETTER_PATTERN = /[A-Za-z]/;
 const PASSWORD_NUMBER_PATTERN = /[0-9]/;
 const PASSWORD_SPECIAL_PATTERN = /[^A-Za-z0-9\s]/;
 const DUPLICATE_EMAILS = new Set(["used@example.com"]);
-const DUPLICATE_USERNAMES = new Set(["catchcatch"]);
 
 export function getPasswordError(password: string): string | undefined {
   if (!password) return "비밀번호를 입력해주세요.";
@@ -37,12 +34,6 @@ export function getSignupError(field: SignupField, values: SignupValues): string
       if (getEmailError(values.email)) return getEmailError(values.email);
       if (DUPLICATE_EMAILS.has(values.email.trim().toLowerCase())) return "이미 사용 중인 이메일입니다.";
       return undefined;
-    case "username":
-      if (!values.username.trim()) return "아이디를 입력해주세요.";
-      if (!USERNAME_PATTERN.test(values.username)) return "영문과 숫자만 사용 가능합니다.";
-      if (values.username.length < 4 || values.username.length > 12) return "아이디는 4자 이상 12자 이하로 입력해주세요.";
-      if (DUPLICATE_USERNAMES.has(values.username.toLowerCase())) return "이미 사용 중인 아이디입니다.";
-      return undefined;
     case "password":
       return getPasswordError(values.password);
     case "passwordConfirmation":
@@ -55,6 +46,6 @@ export function getSignupError(field: SignupField, values: SignupValues): string
 }
 
 export function isSignupValid(values: SignupValues) {
-  const fields: SignupField[] = ["email", "username", "password", "passwordConfirmation", "agreedToTerms"];
+  const fields: SignupField[] = ["email", "password", "passwordConfirmation", "agreedToTerms"];
   return fields.every((field) => !getSignupError(field, values));
 }

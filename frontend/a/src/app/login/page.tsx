@@ -7,16 +7,17 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
 import { mockLogin } from "@/lib/mock/auth";
 import { getMockAuthenticatedRoute, setMockAuthenticated } from "@/lib/mock/session";
+import { getEmailError } from "@/lib/validation/auth";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberLogin, setRememberLogin] = useState(false);
-  const [errors, setErrors] = useState<{ username?: string; password?: string; form?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; form?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const canSubmit = Boolean(username.trim() && password) && !isSubmitting;
+  const canSubmit = Boolean(email.trim() && password) && !isSubmitting;
 
   useEffect(() => {
     const authenticatedRoute = getMockAuthenticatedRoute();
@@ -27,19 +28,19 @@ export default function LoginPage() {
     event.preventDefault();
     if (isSubmitting) return;
     const nextErrors = {
-      username: username.trim() ? undefined : "아이디를 입력해주세요.",
+      email: getEmailError(email),
       password: password ? undefined : "비밀번호를 입력해주세요.",
     };
     setErrors(nextErrors);
-    if (nextErrors.username || nextErrors.password) return;
+    if (nextErrors.email || nextErrors.password) return;
     setIsSubmitting(true);
     try {
-      const result = await mockLogin(username.trim(), password);
+      const result = await mockLogin(email, password);
       if (!result.ok) {
-        setErrors({ form: "아이디 또는 비밀번호가 일치하지 않습니다." });
+        setErrors({ form: "이메일 또는 비밀번호가 일치하지 않습니다." });
         return;
       }
-      setMockAuthenticated(result.username, rememberLogin);
+      setMockAuthenticated(result.accountId, rememberLogin);
       router.replace(getMockAuthenticatedRoute());
     } catch {
       setErrors({ form: "로그인 처리 중 예상하지 못한 오류가 발생했습니다." });
@@ -51,7 +52,7 @@ export default function LoginPage() {
   return (
     <AuthShell title="로그인" className="login-card">
       <form className="stage-form" onSubmit={handleSubmit} noValidate>
-        <FormField id="username" label="아이디" type="text" homeLinkFocus placeholder="아이디 입력" autoComplete="username" value={username} onChange={(e) => { setUsername(e.target.value); setErrors({}); }} onBlur={() => { if (!username.trim()) setErrors((current) => ({ ...current, username: "아이디를 입력해주세요." })); }} error={errors.username} />
+        <FormField id="email" label="이메일" type="email" homeLinkFocus placeholder="example@domain.com" autoComplete="email" value={email} onChange={(e) => { setEmail(e.target.value); setErrors({}); }} onBlur={() => setErrors((current) => ({ ...current, email: getEmailError(email) }))} error={errors.email} />
         <div className="login-password-options">
           <FormField id="password" label="비밀번호" type={showPassword ? "text" : "password"} homeLinkFocus placeholder="비밀번호 입력" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setErrors({}); }} onBlur={() => { if (!password) setErrors((current) => ({ ...current, password: "비밀번호를 입력해주세요." })); }} error={errors.password} trailingControl={<PasswordVisibilityButton visible={showPassword} onToggle={() => { setShowPassword((value) => !value); window.requestAnimationFrame(() => document.getElementById("password")?.focus()); }} />} />
           <label className="checkbox-label login-persistence">
@@ -59,7 +60,7 @@ export default function LoginPage() {
             <span>로그인 유지</span>
           </label>
         </div>
-        <p className="disabled-help" aria-disabled="true">아이디 찾기 <span aria-hidden="true">·</span> 비밀번호 찾기</p>
+        <p className="disabled-help" aria-disabled="true">이메일 찾기 <span aria-hidden="true">·</span> 비밀번호 찾기</p>
         {errors.form ? <p className="form-error" role="alert">{errors.form}</p> : null}
         <div className="button-stack">
           <button className="button button-primary" type="submit" disabled={!canSubmit}>{isSubmitting ? "로그인 중..." : "로그인"}</button>
