@@ -2,7 +2,9 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthenticatedUser } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
+import { CurrentAccessToken } from './current-access-token.decorator';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SignupDto } from './dto/signup.dto';
 import { AuthGuard } from './auth.guard';
 
@@ -18,6 +20,17 @@ export class AuthController {
   @Post('login')
   login(@Body() body: LoginDto) {
     return this.service.login(body);
+  }
+
+  @Post('refresh')
+  refresh(@Body() body: RefreshTokenDto) {
+    return this.service.refresh(body);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('logout')
+  logout(@CurrentAccessToken() accessToken: string) {
+    return this.service.logout(accessToken);
   }
 
   @UseGuards(AuthGuard)

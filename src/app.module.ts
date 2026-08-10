@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AnalysesModule } from './analyses/analyses.module';
 import { AuthModule } from './auth/auth.module';
+import { CoreIntegrationModule } from './core-integration/core-integration.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { PriceAlertsModule } from './price-alerts/price-alerts.module';
@@ -17,6 +18,7 @@ import { UserPreferencesModule } from './user-preferences/user-preferences.modul
     }),
     DatabaseModule,
     AuthModule,
+    CoreIntegrationModule,
     UserPreferencesModule,
     AnalysesModule,
     SavedProductsModule,

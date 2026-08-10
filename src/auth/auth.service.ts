@@ -3,6 +3,7 @@ import { AuthError, Session, User } from '@supabase/supabase-js';
 import { CatchCatchSupabaseClient, SUPABASE_CLIENT } from '../database/supabase.client';
 import { AuthenticatedUser } from './auth.types';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SignupDto } from './dto/signup.dto';
 
 export type AuthUserResponse = {
@@ -52,6 +53,24 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
     return toAuthResponse(data.user, data.session, true);
+  }
+
+  async refresh(input: RefreshTokenDto): Promise<AuthResponse> {
+    const { data, error } = await this.client.auth.refreshSession({
+      refresh_token: input.refreshToken,
+    });
+    if (error || !data.user || !data.session) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    return toAuthResponse(data.user, data.session, true);
+  }
+
+  async logout(accessToken: string): Promise<{ success: true }> {
+    const { error } = await this.client.auth.admin.signOut(accessToken, 'local');
+    if (error) {
+      throw new UnauthorizedException('Invalid or expired access token');
+    }
+    return { success: true };
   }
 
   async verifyAccessToken(accessToken: string): Promise<AuthenticatedUser> {

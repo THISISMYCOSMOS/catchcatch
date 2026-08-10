@@ -5,6 +5,7 @@ import { AuthenticatedUser } from './auth.types';
 export type AuthenticatedRequest = {
   headers: Record<string, string | string[] | undefined>;
   user?: AuthenticatedUser;
+  accessToken?: string;
 };
 
 @Injectable()
@@ -15,6 +16,7 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const token = extractBearerToken(request.headers.authorization);
     request.user = await this.auth.verifyAccessToken(token);
+    request.accessToken = token;
     return true;
   }
 }

@@ -65,6 +65,68 @@ describe('AuthService', () => {
     expect(JSON.stringify(result)).not.toContain('service-role-key');
   });
 
+  it('refreshes a session and returns fresh top-level tokens', async () => {
+    const refreshSession = jest.fn().mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'user@example.com' },
+        session: {
+          access_token: 'new-access-token',
+          refresh_token: 'new-refresh-token',
+          expires_at: 456,
+        },
+      },
+      error: null,
+    });
+    const service = new AuthService(mockClient({ refreshSession }));
+
+    const result = await service.refresh({ refreshToken: 'old-refresh-token' });
+
+    expect(refreshSession).toHaveBeenCalledWith({ refresh_token: 'old-refresh-token' });
+    expect(result).toEqual({
+      user: { id: 'user-1', email: 'user@example.com' },
+      accessToken: 'new-access-token',
+      refreshToken: 'new-refresh-token',
+      expiresAt: 456,
+    });
+    expect(JSON.stringify(result)).not.toContain('service-role-key');
+  });
+
+  it('returns 401 for invalid refresh tokens', async () => {
+    const service = new AuthService(mockClient({
+      refreshSession: jest.fn().mockResolvedValue({
+        data: { user: null, session: null },
+        error: { message: 'bad refresh token' },
+      }),
+    }));
+
+    await expect(service.refresh({ refreshToken: 'bad-refresh-token' }))
+      .rejects
+      .toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('logs out only the current session with the access token', async () => {
+    const signOut = jest.fn().mockResolvedValue({ data: null, error: null });
+    const service = new AuthService(mockClient({
+      admin: { signOut },
+    }));
+
+    await expect(service.logout('access-token')).resolves.toEqual({ success: true });
+    expect(signOut).toHaveBeenCalledWith('access-token', 'local');
+  });
+
+  it('returns 401 when logout token is invalid', async () => {
+    const service = new AuthService(mockClient({
+      admin: {
+        signOut: jest.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'invalid token' },
+        }),
+      },
+    }));
+
+    await expect(service.logout('bad-token')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
   it('returns 401 when login succeeds without a session', async () => {
     const service = new AuthService(mockClient({
       signInWithPassword: jest.fn().mockResolvedValue({
@@ -141,6 +203,7 @@ describe('AuthGuard', () => {
     expect(auth.verifyAccessToken).toHaveBeenCalledWith('access-token');
     expect(request).toMatchObject({
       user: { id: 'user-1', email: 'user@example.com' },
+      accessToken: 'access-token',
     });
   });
 
@@ -160,7 +223,11 @@ function mockClient(authOverrides: Record<string, unknown>) {
     auth: {
       signUp: jest.fn(),
       signInWithPassword: jest.fn(),
+      refreshSession: jest.fn(),
       getUser: jest.fn(),
+      admin: {
+        signOut: jest.fn(),
+      },
       ...authOverrides,
     },
   } as never;
