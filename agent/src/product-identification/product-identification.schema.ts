@@ -11,10 +11,24 @@ import {
   inferBrandOfficialDomain,
   normalizeSellerPageUrl,
 } from '../ai-contracts/seller-domain.policy';
+import {
+  addArrayLimitIssue,
+  addSerializedSizeIssue,
+  addTextLimitIssue,
+  MAX_ALLOWED_DOMAINS,
+  MAX_URL_LENGTH,
+} from '../ai-contracts/input-limits';
 
 export const productIdentificationInputSchema = z.object({
   product_url: z.string().url(),
   allowed_domains: z.array(z.string().min(1)).min(1),
+}).superRefine((input, context) => {
+  addTextLimitIssue(input.product_url, MAX_URL_LENGTH, ['product_url'], context);
+  addArrayLimitIssue(input.allowed_domains, MAX_ALLOWED_DOMAINS, ['allowed_domains'], context);
+  input.allowed_domains.forEach((domain, index) => {
+    addTextLimitIssue(domain, MAX_URL_LENGTH, ['allowed_domains', index], context);
+  });
+  addSerializedSizeIssue(input, context);
 });
 
 const productIdentificationResultShape = {

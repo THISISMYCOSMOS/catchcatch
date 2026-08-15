@@ -6,6 +6,19 @@ import {
   sellerSchema,
   sourceMetadataSchema,
 } from '../ai-contracts/product-data.schema';
+import {
+  addArrayLimitIssue,
+  addProductIdentityLimitIssues,
+  addSerializedSizeIssue,
+  addTextLimitIssue,
+  MAX_FACT_DESCRIPTION_LENGTH,
+  MAX_IDENTITY_TEXT_LENGTH,
+  MAX_JUDGMENT_FACTS,
+  MAX_JUDGMENT_OFFERS,
+  MAX_SOURCE_URLS_PER_FACT,
+  MAX_WARNING_LENGTH,
+  MAX_WARNINGS,
+} from '../ai-contracts/input-limits';
 
 export const conclusionSchema = z.enum([
   'LOW_POINT_BUY',
@@ -320,6 +333,36 @@ export const judgmentInputSchema = z.object({
   ) {
     context.addIssue({ code: 'custom', path: ['cheapest_offer_id'], message: 'Personalized price basis requires verified eligibility' });
   }
+  addJudgmentInputLimitIssues(input, context);
 });
+
+// Size limits for the judgment request. This is by far the largest body the
+// service accepts (verified offers, facts and their source URLs), so it is
+// also the one where an unbounded array turns into an unbounded prompt.
+function addJudgmentInputLimitIssues(
+  input: {
+    offers: Array<{ product_name: string | null }>;
+    facts: Array<{ description: string; source_urls: string[] }>;
+    data_quality: { warnings: string[] };
+    product: { identity: Parameters<typeof addProductIdentityLimitIssues>[0] };
+  },
+  context: z.RefinementCtx,
+): void {
+  addArrayLimitIssue(input.offers, MAX_JUDGMENT_OFFERS, ['offers'], context);
+  addArrayLimitIssue(input.facts, MAX_JUDGMENT_FACTS, ['facts'], context);
+  addArrayLimitIssue(input.data_quality.warnings, MAX_WARNINGS, ['data_quality', 'warnings'], context);
+  addProductIdentityLimitIssues(input.product.identity, ['product', 'identity'], context);
+  input.offers.forEach((offer, index) => {
+    addTextLimitIssue(offer.product_name, MAX_IDENTITY_TEXT_LENGTH, ['offers', index, 'product_name'], context);
+  });
+  input.facts.forEach((fact, index) => {
+    addTextLimitIssue(fact.description, MAX_FACT_DESCRIPTION_LENGTH, ['facts', index, 'description'], context);
+    addArrayLimitIssue(fact.source_urls, MAX_SOURCE_URLS_PER_FACT, ['facts', index, 'source_urls'], context);
+  });
+  input.data_quality.warnings.forEach((warning, index) => {
+    addTextLimitIssue(warning, MAX_WARNING_LENGTH, ['data_quality', 'warnings', index], context);
+  });
+  addSerializedSizeIssue(input, context);
+}
 
 export type JudgmentInput = z.infer<typeof judgmentInputSchema>;

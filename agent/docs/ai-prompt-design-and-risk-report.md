@@ -266,16 +266,24 @@ OpenAI API 입력·출력은 기본적으로 모델 학습에 사용되지 않�
 
 fragment, trailing slash, `utm_*`, `ref`, `tracking`, `fbclid`, `gclid`를 공통 정규화한다. 판매처 상품 ID 우선 비교는 저장 파이프라인에서 추가해야 한다.
 
-### P1: 입력 크기 제한 부재
+### 해결: 입력 크기 제한 부재
 
-브랜드명에 100,000자를 넣어도 입력 스키마를 통과했다.
+브랜드명에 100,000자를 넣어도 입력 스키마를 통과했다. 세 요청 스키마(`productSearchInputSchema`, `productIdentificationInputSchema`, `judgmentInputSchema`)에 상한을 넣었다(`src/ai-contracts/input-limits.ts`).
 
-보강:
+- 식별 문자열(브랜드·상품명·유형·옵션·색상/향·버전) 200자
+- 구성품 20개, 허용 도메인 20개, 오퍼 20개, fact 50개, fact당 출처 URL 20개, 경고 50개
+- fact 설명·경고 문자열 1,000자, URL 2,048자
+- 전체 직렬화 입력 64KB (개별 필드는 다 통과해도 총량이 비정상인 경우를 잡는 backstop)
 
-- 브랜드·상품명·옵션 문자열 최대 길이
-- 구성품·fact·경고·URL 배열 최대 개수
-- 전체 직렬화 입력 바이트 제한
-- 요청당 최대 토큰·실행 시간 제한
+상한은 **입력 스키마에만** 적용했다. AI 결과 스키마는 `zodTextFormat`으로 JSON Schema 변환을 거치는데 그 변환이 지원하는 키워드 집합이 제한적이라, 거기에 제약을 걸면 실제 API 호출이 요청 생성 단계에서 깨질 수 있다.
+
+함께 고친 것: 입력 검증 실패가 **400**을 반환한다(`parseRequestInput`). 이전에는 스키마 `.parse()`가 던진 `ZodError`가 Nest 기본 처리로 500이 되어, 잘못된 요청을 서비스 장애처럼 알렸다. 응답 본문에는 문제 위치(`path`)와 사유만 담고 제출된 값은 되돌려주지 않는다. AI 출력 검증 실패는 종전대로 각 서비스의 try/catch에서 503으로 매핑된다.
+
+```json
+{"code":"INVALID_REQUEST_INPUT","issues":[{"path":"anchor_product.brand","message":"Must be 200 characters or fewer"}]}
+```
+
+상태: 코드와 테스트 반영 완료(`input-limits.spec.ts`, `request-input.spec.ts`). 남은 항목은 요청당 최대 토큰 제한이다. 실행 시간은 `OPENAI_TIMEOUT_MS`로 이미 제한된다.
 
 ### P1: NAVER 웹문서 fallback 미구현
 

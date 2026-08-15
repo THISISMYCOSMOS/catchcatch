@@ -8,6 +8,13 @@ import {
   sourceCandidateMetadataSchema,
   sourceMetadataSchema,
 } from '../ai-contracts/product-data.schema';
+import {
+  addProductIdentityLimitIssues,
+  addSerializedSizeIssue,
+  addTextLimitIssue,
+  MAX_IDENTITY_TEXT_LENGTH,
+  MAX_URL_LENGTH,
+} from '../ai-contracts/input-limits';
 
 // Minimum number of registered sellers that must be present in seller_results.
 // A registered seller may still be reported as NOT_AVAILABLE (that counts as
@@ -196,6 +203,10 @@ export const productSearchInputSchema = z.object({
       message: 'A brand ID requires an identified anchor brand',
     });
   }
+  addTextLimitIssue(input.product_url, MAX_URL_LENGTH, ['product_url'], context);
+  addTextLimitIssue(input.brand_id, MAX_IDENTITY_TEXT_LENGTH, ['brand_id'], context);
+  addProductIdentityLimitIssues(input.anchor_product, ['anchor_product'], context);
+  addSerializedSizeIssue(input, context);
 });
 
 export type ProductSearchInput = z.infer<typeof productSearchInputSchema>;

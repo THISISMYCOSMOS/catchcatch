@@ -14,6 +14,7 @@ import {
   productIdentificationInputSchema,
   validateProductIdentificationResult,
 } from './product-identification.schema';
+import { parseRequestInput } from '../ai-contracts/request-input';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real identification result (PRODUCT_DATA_MODE=sample).';
 
@@ -32,7 +33,7 @@ export class ProductIdentificationService {
   constructor(private readonly config: ConfigService) {}
 
   async identify(rawInput: unknown): Promise<ProductIdentificationResult> {
-    const input = productIdentificationInputSchema.parse(rawInput);
+    const input = parseRequestInput(productIdentificationInputSchema, rawInput);
     assertAllowedSellerUrl(input.product_url, input.allowed_domains);
 
     const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');

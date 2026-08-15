@@ -33,6 +33,7 @@ import {
   normalizeSellerPageUrl,
 } from '../ai-contracts/seller-domain.policy';
 import { ProductIdentity, Seller, sellerSchema } from '../ai-contracts/product-data.schema';
+import { parseRequestInput } from '../ai-contracts/request-input';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real seller result (PRODUCT_DATA_MODE=sample).';
 const SAMPLE_BRAND_OFFICIAL_WARNING = 'Brand-official domain discovery does not run in sample mode (PRODUCT_DATA_MODE=sample); BRAND_OFFICIAL is always reported as UNKNOWN.';
@@ -66,7 +67,7 @@ export class ProductSearchService {
   constructor(private readonly config: ConfigService) {}
 
   async searchSameProduct(rawInput: unknown): Promise<ProductSearchResult> {
-    const input = productSearchInputSchema.parse(rawInput);
+    const input = parseRequestInput(productSearchInputSchema, rawInput);
     const relaxedFieldWarnings = collectAnchorProductWarnings(input.anchor_product);
 
     const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');

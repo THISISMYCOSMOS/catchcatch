@@ -13,6 +13,7 @@ import {
   CATCHCATCH_JUDGMENT_CORRECTION_INSTRUCTIONS,
   CATCHCATCH_JUDGMENT_INSTRUCTIONS,
 } from './ai-judgment.prompt';
+import { parseRequestInput } from '../ai-contracts/request-input';
 
 @Injectable()
 export class AiJudgmentService {
@@ -21,7 +22,7 @@ export class AiJudgmentService {
   constructor(private readonly config: ConfigService) {}
 
   async judge(rawInput: unknown): Promise<AiJudgment> {
-    const input = judgmentInputSchema.parse(rawInput);
+    const input = parseRequestInput(judgmentInputSchema, rawInput);
     const mode = this.config.get<string>('AI_JUDGMENT_MODE', 'real');
 
     if (mode === 'mock') {
