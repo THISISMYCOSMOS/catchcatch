@@ -1,4 +1,6 @@
 import {
+  collectAnchorProductWarnings,
+  productSearchInputSchema,
   productSearchResultSchema,
   sellerSearchResultSchema,
 } from './product-search.schema';
@@ -72,26 +74,29 @@ describe('product search output contract', () => {
     }).success).toBe(false);
   });
 
-  it('requires all four registered sellers exactly once', () => {
-    const unavailable = (seller: string) => ({
-      seller,
-      availability: 'NOT_AVAILABLE',
-      candidate_offer: null,
-      match_evidence: [],
-      mismatch_reasons: [],
-      source: null,
-    });
+  const unavailable = (seller: string) => ({
+    seller,
+    availability: 'NOT_AVAILABLE',
+    candidate_offer: null,
+    match_evidence: [],
+    mismatch_reasons: [],
+    source: null,
+  });
+
+  const available = {
+    seller: 'OLIVE_YOUNG',
+    availability: 'AVAILABLE',
+    candidate_offer: offer,
+    match_evidence: ['브랜드와 옵션 일치'],
+    mismatch_reasons: [],
+    source,
+  };
+
+  it('accepts all four registered sellers with no coverage warning', () => {
     const valid = productSearchResultSchema.safeParse({
       anchor_product: anchorProduct,
       seller_results: [
-        {
-          seller: 'OLIVE_YOUNG',
-          availability: 'AVAILABLE',
-          candidate_offer: offer,
-          match_evidence: ['브랜드와 옵션 일치'],
-          mismatch_reasons: [],
-          source,
-        },
+        available,
         unavailable('MUSINSA_BEAUTY'),
         unavailable('COUPANG'),
         unavailable('BRAND_OFFICIAL'),
@@ -99,15 +104,102 @@ describe('product search output contract', () => {
       warnings: [],
     });
     expect(valid.success).toBe(true);
+    if (valid.success) {
+      expect(valid.data.warnings).toEqual([]);
+    }
+  });
 
-    const duplicateSeller = valid.success
-      ? {
-          ...valid.data,
-          seller_results: valid.data.seller_results.map((item, index) => (
-            index === 3 ? { ...item, seller: 'COUPANG' as const } : item
-          )),
-        }
-      : null;
+  it('accepts three distinct sellers and warns about the one omitted seller', () => {
+    const valid = productSearchResultSchema.safeParse({
+      anchor_product: anchorProduct,
+      seller_results: [
+        available,
+        unavailable('MUSINSA_BEAUTY'),
+        unavailable('COUPANG'),
+      ],
+      warnings: [],
+    });
+    expect(valid.success).toBe(true);
+    if (valid.success) {
+      expect(valid.data.warnings).toEqual([
+        'Seller result omitted for registered seller BRAND_OFFICIAL; coverage was not checked',
+      ]);
+    }
+  });
+
+  it('rejects fewer than three distinct sellers', () => {
+    const invalid = productSearchResultSchema.safeParse({
+      anchor_product: anchorProduct,
+      seller_results: [
+        available,
+        unavailable('MUSINSA_BEAUTY'),
+      ],
+      warnings: [],
+    });
+    expect(invalid.success).toBe(false);
+  });
+
+  it('rejects a duplicated seller even when the array is otherwise full', () => {
+    const duplicateSeller = {
+      anchor_product: anchorProduct,
+      seller_results: [
+        available,
+        unavailable('MUSINSA_BEAUTY'),
+        unavailable('COUPANG'),
+        { ...unavailable('COUPANG') },
+      ],
+      warnings: [],
+    };
     expect(productSearchResultSchema.safeParse(duplicateSeller).success).toBe(false);
+  });
+
+  it('counts a present-but-NOT_AVAILABLE seller toward the floor without an "omitted" warning', () => {
+    const valid = productSearchResultSchema.safeParse({
+      anchor_product: anchorProduct,
+      seller_results: [
+        available,
+        unavailable('MUSINSA_BEAUTY'),
+        unavailable('COUPANG'),
+        unavailable('BRAND_OFFICIAL'),
+      ],
+      warnings: [],
+    });
+    expect(valid.success).toBe(true);
+    if (valid.success) {
+      expect(valid.data.warnings.some((warning) => warning.includes('omitted'))).toBe(false);
+    }
+  });
+});
+
+describe('product search input contract (T4)', () => {
+  it('accepts a null product_type as long as brand and product name are present', () => {
+    expect(productSearchInputSchema.safeParse({
+      product_url: 'https://www.oliveyoung.co.kr/store/goods/example',
+      anchor_product: { ...anchorProduct, product_type: null },
+      brand_id: null,
+    }).success).toBe(true);
+  });
+
+  it('still rejects a missing brand', () => {
+    expect(productSearchInputSchema.safeParse({
+      product_url: 'https://www.oliveyoung.co.kr/store/goods/example',
+      anchor_product: { ...anchorProduct, brand: null },
+      brand_id: null,
+    }).success).toBe(false);
+  });
+
+  it('still rejects a missing normalized product name', () => {
+    expect(productSearchInputSchema.safeParse({
+      product_url: 'https://www.oliveyoung.co.kr/store/goods/example',
+      anchor_product: { ...anchorProduct, normalized_product_name: null },
+      brand_id: null,
+    }).success).toBe(false);
+  });
+
+  it('warns about a missing product_type and stays silent when it is present', () => {
+    expect(collectAnchorProductWarnings({ product_type: null })).toEqual([
+      'anchor_product.product_type is missing; search proceeded without a verified product type',
+    ]);
+    expect(collectAnchorProductWarnings({ product_type: '세럼' })).toEqual([]);
   });
 });

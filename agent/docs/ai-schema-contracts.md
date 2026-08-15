@@ -11,8 +11,9 @@ src/ai-contracts/seller-domain.policy.ts
 src/product-identification/product-identification.schema.ts
 src/product-search/product-search.schema.ts
 src/ai-judgment/ai-judgment.schema.ts
-src/similar-product-search/similar-product-search.schema.ts
 ```
+
+`src/similar-product-search/similar-product-search.schema.ts`는 어떤 서비스·컨트롤러에도 연결되지 않은 미연결 코드였으므로 삭제했다. §8은 설계 이력으로만 남긴다.
 
 ## 1. 공통 상품 데이터
 
@@ -98,7 +99,7 @@ COUPANG       → coupang.com
 }
 ```
 
-서비스는 `BRAND_OFFICIAL_DOMAINS_JSON` 또는 향후 브랜드 저장소에서 공식몰 도메인을 조회한다. URL 비교 시 fragment, trailing slash, `utm_*`, `ref`, `tracking`, `fbclid`, `gclid`를 정규화한다.
+(T5 갱신) 공식몰 도메인은 더 이상 `brand_id` 키의 사람이 큐레이션한 레지스트리(`BRAND_OFFICIAL_DOMAINS_JSON`, 삭제됨)에서 조회하지 않는다. 서비스가 식별된 브랜드명으로부터 후보 도메인을 발견(discovery)하고, 규칙 기반 게이트(`gateBrandOfficialDomainCandidate`, 마켓플레이스·고정 판매처 도메인 차단)를 통과한 도메인만 검색 허용 도메인에 추가한다. `brand_id`는 하위 호환을 위해 입력에는 남아 있지만 이 조회에 쓰이지 않는다. URL 비교 시 fragment, trailing slash, `utm_*`, `ref`, `tracking`, `fbclid`, `gclid`를 정규화하는 것은 동일하다.
 
 ## 4. 조건부 상품 식별 계약
 
@@ -317,7 +318,7 @@ AI는 백엔드가 허용 결론을 제공했더라도 근거가 부족하거나
 
 `DECIDED`는 지지 fact가 한 개 이상 필요하다. 지지·반대 fact ID는 각각 중복될 수 없고 같은 fact를 양쪽에 동시에 넣을 수 없다.
 
-## 8. 유사상품 검색 계약
+## 8. 유사상품 검색 계약 (설계 이력 — 삭제됨, 실행 파일 없음)
 
 ### 입력
 

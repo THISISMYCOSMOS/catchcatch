@@ -15,6 +15,8 @@ import {
   validateProductIdentificationResult,
 } from './product-identification.schema';
 
+const SAMPLE_DATA_WARNING = 'This is sample data, not a real identification result (PRODUCT_DATA_MODE=sample).';
+
 type WebSearchOutputItem = {
   type?: string;
   action?: {
@@ -32,8 +34,13 @@ export class ProductIdentificationService {
   async identify(rawInput: unknown): Promise<ProductIdentificationResult> {
     const input = productIdentificationInputSchema.parse(rawInput);
     assertAllowedSellerUrl(input.product_url, input.allowed_domains);
-    if (this.config.get<string>('PRODUCT_DATA_MODE', 'sample') !== 'web_search') {
-      throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be web_search');
+
+    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
+    if (mode === 'sample') {
+      return this.createSampleIdentification(input);
+    }
+    if (mode !== 'web_search') {
+      throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be sample or web_search');
     }
 
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
@@ -96,6 +103,41 @@ export class ProductIdentificationService {
         retryable: false,
       });
     }
+  }
+
+  // Deterministic, non-network fixture path used when PRODUCT_DATA_MODE is
+  // "sample" (the .env.example default). It is run through the same
+  // validateProductIdentificationResult pipeline the real web_search path
+  // uses, so it is validated by the exact same zod schemas and source-url
+  // invariants without requiring OPENAI_API_KEY.
+  private createSampleIdentification(
+    input: ProductIdentificationInput,
+  ): ProductIdentificationResult {
+    const sampleAiResult = {
+      identification_status: 'IDENTIFIED' as const,
+      anchor_product: {
+        brand: 'CatchCatch Sample Brand',
+        normalized_product_name: 'CatchCatch Sample Product',
+        product_type: 'Sample cosmetic',
+        option: null,
+        shade_or_scent: null,
+        version_or_renewal: null,
+        components: [],
+      },
+      preview: {
+        seller: null,
+        listed_price: 10000,
+        image_url: null,
+      },
+      source: {
+        source_type: 'SELLER_PAGE' as const,
+        source_url: input.product_url,
+        acquisition_method: 'AI_WEB_SEARCH' as const,
+        verification_status: 'UNVERIFIED' as const,
+      },
+      warnings: [SAMPLE_DATA_WARNING],
+    };
+    return validateProductIdentificationResult(input, sampleAiResult);
   }
 }
 

@@ -2,11 +2,17 @@ import { z } from 'zod';
 import {
   availabilitySchema,
   productComponentSchema,
+  ProductIdentity,
   productIdentitySchema,
   sellerSchema,
   sourceCandidateMetadataSchema,
   sourceMetadataSchema,
 } from '../ai-contracts/product-data.schema';
+
+// Minimum number of registered sellers that must be present in seller_results.
+// A registered seller may still be reported as NOT_AVAILABLE (that counts as
+// present); only an entirely omitted seller reduces the count below this floor.
+const MIN_SELLER_COVERAGE = 3;
 
 export { productComponentSchema, sellerSchema };
 
@@ -86,37 +92,85 @@ function addSellerResultIssues(
   }
 }
 
+// IMPORTANT: this schema is passed to openai's zodTextFormat() (in
+// product-search.service.ts) to build the OpenAI structured-output format.
+// zodTextFormat cannot convert a schema with .transform() ("Transforms
+// cannot be represented in JSON Schema"), so this schema must stay
+// transform-free — superRefine only. The missing-seller warning is applied
+// by productSearchResultSchema below, which every code path (real and
+// sample) parses through as its final step.
 export const productSearchAiResultSchema = z.object({
   anchor_product: productIdentitySchema,
-  seller_results: z.array(aiSellerSearchResultSchema).length(4),
+  seller_results: z.array(aiSellerSearchResultSchema).max(sellerSchema.options.length),
   warnings: z.array(z.string()),
 }).superRefine(addSellerCoverageIssues);
 
+// Not passed to zodTextFormat, so a .transform() here is safe. This is the
+// schema every search result (real web_search and sample) is parsed through
+// as its last step, so appendOmittedSellerWarnings always gets applied.
 export const productSearchResultSchema = z.object({
   anchor_product: productIdentitySchema,
-  seller_results: z.array(sellerSearchResultSchema).length(4),
+  seller_results: z.array(sellerSearchResultSchema).max(sellerSchema.options.length),
   warnings: z.array(z.string()),
-}).superRefine(addSellerCoverageIssues);
+}).superRefine(addSellerCoverageIssues).transform(appendOmittedSellerWarnings);
 
+// Hard-validation gate: rejects a seller repeated in the array and rejects
+// coverage below MIN_SELLER_COVERAGE distinct registered sellers. A single
+// omitted seller (present count == MIN_SELLER_COVERAGE) is not an error here —
+// it is surfaced as a warning by appendOmittedSellerWarnings below.
 function addSellerCoverageIssues(
   result: { seller_results: Array<{ seller: z.infer<typeof sellerSchema> }> },
   context: z.RefinementCtx,
 ): void {
   const sellers = result.seller_results.map((item) => item.seller);
   const uniqueSellers = new Set(sellers);
-  const expectedSellers = sellerSchema.options;
-  if (
-    uniqueSellers.size !== expectedSellers.length ||
-    expectedSellers.some((seller) => !uniqueSellers.has(seller))
-  ) {
+  if (uniqueSellers.size !== sellers.length) {
     context.addIssue({
       code: 'custom',
       path: ['seller_results'],
-      message: 'Each registered seller must appear exactly once',
+      message: 'A registered seller cannot appear more than once in seller_results',
+    });
+    return;
+  }
+  if (uniqueSellers.size < MIN_SELLER_COVERAGE) {
+    context.addIssue({
+      code: 'custom',
+      path: ['seller_results'],
+      message: `At least ${MIN_SELLER_COVERAGE} distinct registered sellers are required in seller_results`,
     });
   }
 }
 
+// Demotes missing-seller coverage from a hard error to a warning. A seller
+// entirely absent from seller_results (as opposed to one present with
+// availability NOT_AVAILABLE/UNKNOWN) gets a named warning so downstream
+// consumers can tell "checked and unavailable" apart from "never checked".
+function appendOmittedSellerWarnings<
+  T extends { seller_results: Array<{ seller: z.infer<typeof sellerSchema> }>; warnings: string[] },
+>(result: T): T {
+  const presentSellers = new Set(result.seller_results.map((item) => item.seller));
+  const omittedSellers = sellerSchema.options.filter((seller) => !presentSellers.has(seller));
+  if (omittedSellers.length === 0) {
+    return result;
+  }
+  const additionalWarnings = omittedSellers
+    .map((seller) => `Seller result omitted for registered seller ${seller}; coverage was not checked`)
+    .filter((message) => !result.warnings.includes(message));
+  if (additionalWarnings.length === 0) {
+    return result;
+  }
+  return { ...result, warnings: [...result.warnings, ...additionalWarnings] };
+}
+
+// brand and normalized_product_name stay required: they are what the search
+// prompt uses to tell the model *what* to look for at each seller, and the
+// service's identity screening (compareRequiredIdentity with
+// allowContainment for the name) treats them as load-bearing. product_type
+// is relaxed to nullable: identification can legitimately fail to resolve a
+// product_type (see productIdentificationResultSchema) while still yielding
+// a usable brand + name, and Core forwards anchor_product unchanged once
+// identification_status is IDENTIFIED, so search must not hard-reject a
+// product_type identification could not guarantee.
 export const productSearchInputSchema = z.object({
   product_url: z.string().url(),
   anchor_product: productIdentitySchema,
@@ -124,13 +178,12 @@ export const productSearchInputSchema = z.object({
 }).superRefine((input, context) => {
   if (
     !input.anchor_product.brand ||
-    !input.anchor_product.normalized_product_name ||
-    !input.anchor_product.product_type
+    !input.anchor_product.normalized_product_name
   ) {
     context.addIssue({
       code: 'custom',
       path: ['anchor_product'],
-      message: 'Product search requires a verified anchor identity',
+      message: 'Product search requires a verified anchor brand and product name',
     });
   }
   if (
@@ -148,3 +201,28 @@ export const productSearchInputSchema = z.object({
 export type ProductSearchInput = z.infer<typeof productSearchInputSchema>;
 export type ProductSearchAiResult = z.infer<typeof productSearchAiResultSchema>;
 export type ProductSearchResult = z.infer<typeof productSearchResultSchema>;
+
+// Fields relaxed by productSearchInputSchema that are absent get surfaced as
+// a warning on the eventual search result instead of silently disappearing.
+export function collectAnchorProductWarnings(
+  anchorProduct: Pick<ProductIdentity, 'product_type'>,
+): string[] {
+  return anchorProduct.product_type
+    ? []
+    : ['anchor_product.product_type is missing; search proceeded without a verified product type'];
+}
+
+export function mergeWarnings(...groups: string[][]): string[] {
+  return [...new Set(groups.flat())];
+}
+
+// Output contract for the brand-official domain discovery step (T5). Kept
+// deliberately tiny and separate from productSearchAiResultSchema: it is a
+// different call with a different job (propose, not search), and its output
+// is never trusted directly — it only becomes a search domain if it passes
+// gateBrandOfficialDomainCandidate.
+export const brandOfficialDomainCandidateSchema = z.object({
+  candidate_domain: z.string().min(1).nullable(),
+});
+
+export type BrandOfficialDomainCandidate = z.infer<typeof brandOfficialDomainCandidateSchema>;

@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import {
+  ProductSearchAiResult,
+  ProductSearchInput,
   ProductSearchResult,
+  brandOfficialDomainCandidateSchema,
+  collectAnchorProductWarnings,
+  mergeWarnings,
   productSearchAiResultSchema,
   productSearchInputSchema,
   productSearchResultSchema,
@@ -13,13 +18,30 @@ import {
   CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS,
 } from './product-search.prompt';
 import {
+  buildBrandOfficialDomainCandidatePrompt,
+  CATCHCATCH_BRAND_OFFICIAL_DOMAIN_INSTRUCTIONS,
+} from './brand-official-domain.prompt';
+import { BrandOfficialDomainCache } from './brand-official-domain.cache';
+import {
   assertAllowedSellerUrl,
   assertSellerMatchesUrl,
+  brandNameMismatchWarning,
   FIXED_SELLER_DOMAINS,
+  foreignStorefrontWarning,
+  gateBrandOfficialDomainCandidate,
+  normalizeDomain,
   normalizeSellerPageUrl,
-  parseBrandOfficialDomainRegistry,
 } from '../ai-contracts/seller-domain.policy';
-import { ProductIdentity } from '../ai-contracts/product-data.schema';
+import { ProductIdentity, Seller, sellerSchema } from '../ai-contracts/product-data.schema';
+
+const SAMPLE_DATA_WARNING = 'This is sample data, not a real seller result (PRODUCT_DATA_MODE=sample).';
+const SAMPLE_BRAND_OFFICIAL_WARNING = 'Brand-official domain discovery does not run in sample mode (PRODUCT_DATA_MODE=sample); BRAND_OFFICIAL is always reported as UNKNOWN.';
+
+// Brand names come from AI-extracted page data, not from a trusted registry,
+// so an absurdly long one is a sign of junk or a crafted input rather than a
+// real brand. Skipping discovery for those keeps garbage out of the cache
+// (whose key is this same text) and out of the discovery prompt.
+const MAX_DISCOVERY_BRAND_LENGTH = 100;
 
 export type SearchProviderFailureCode =
   | 'SEARCH_CREDENTIALS_MISSING'
@@ -33,12 +55,28 @@ export type SearchProviderFailureCode =
 export class ProductSearchService {
   private readonly logger = new Logger(ProductSearchService.name);
 
+  // In-process, self-populating cache of brand-official domains that have
+  // already passed gateBrandOfficialDomainCandidate, keyed by normalized
+  // brand name. No persistence, no database — it exists only to avoid
+  // re-running the discovery call for a brand already resolved earlier in
+  // this process's lifetime (T5 point 6), and it is bounded by TTL and size
+  // so a single wrong discovery cannot be reused indefinitely.
+  private readonly brandOfficialDomainCache = new BrandOfficialDomainCache();
+
   constructor(private readonly config: ConfigService) {}
 
   async searchSameProduct(rawInput: unknown): Promise<ProductSearchResult> {
     const input = productSearchInputSchema.parse(rawInput);
-    if (this.config.get<string>('PRODUCT_DATA_MODE', 'sample') !== 'web_search') {
-      throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be web_search');
+    const relaxedFieldWarnings = collectAnchorProductWarnings(input.anchor_product);
+
+    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
+    if (mode === 'sample') {
+      const allowedDomains = buildAllowedSearchDomains(null);
+      assertAllowedSellerUrl(input.product_url, allowedDomains);
+      return this.createSampleSearchResult(input, relaxedFieldWarnings);
+    }
+    if (mode !== 'web_search') {
+      throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be sample or web_search');
     }
 
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
@@ -49,20 +87,25 @@ export class ProductSearchService {
       );
     }
 
-    const officialDomainRegistry = parseBrandOfficialDomainRegistry(
-      this.config.get<string>('BRAND_OFFICIAL_DOMAINS_JSON'),
-    );
-    const registeredBrandOfficialDomain = input.brand_id
-      ? officialDomainRegistry.get(input.brand_id) ?? null
-      : null;
-    const allowedDomains = buildAllowedSearchDomains(registeredBrandOfficialDomain);
-    assertAllowedSellerUrl(input.product_url, allowedDomains);
-
     const client = new OpenAI({
       apiKey,
       timeout: Number(this.config.get<string>('OPENAI_TIMEOUT_MS', '20000')),
       maxRetries: 0,
     });
+
+    // T5: brand-official domain is no longer a human-curated registry keyed
+    // by brand_id (Core no longer supplies a meaningful one). It is
+    // discovered from the identified brand name and gated in code before it
+    // is ever added to the search allowlist.
+    const brandDiscovery = input.anchor_product.brand
+      ? await this.discoverBrandOfficialDomain(client, input.anchor_product.brand)
+      : { domain: null as string | null, warnings: [] as string[] };
+    const allowedDomains = buildAllowedSearchDomains(brandDiscovery.domain);
+    assertAllowedSellerUrl(input.product_url, allowedDomains);
+    const preSearchWarnings = mergeWarnings(
+      relaxedFieldWarnings,
+      brandDiscovery.warnings,
+    );
 
     try {
       const response = await client.responses.parse({
@@ -71,7 +114,7 @@ export class ProductSearchService {
         input: buildProductSearchPrompt(
           input,
           allowedDomains,
-          registeredBrandOfficialDomain,
+          brandDiscovery.domain,
         ),
         tools: [
           {
@@ -94,39 +137,28 @@ export class ProductSearchService {
       const searchSourceUrls = collectWebSearchSourceUrls(response.output);
       const parsedResult = productSearchAiResultSchema.parse(response.output_parsed);
       assertAnchorProductUnchanged(input.anchor_product, parsedResult.anchor_product);
-      for (const sellerResult of parsedResult.seller_results) {
-        if (!sellerResult.source) {
-          continue;
-        }
-        if (sellerResult.source.verification_status !== 'UNVERIFIED') {
-          throw new Error('AI cannot pre-approve source verification');
-        }
-        assertAllowedSellerUrl(sellerResult.source.source_url, allowedDomains);
-        assertSellerMatchesUrl(
-          sellerResult.seller,
-          sellerResult.source.source_url,
-          registeredBrandOfficialDomain,
-        );
-        assertUrlWasReturnedByWebSearch(
-          sellerResult.source.source_url,
-          searchSourceUrls,
-        );
-      }
+
       const observedAt = new Date().toISOString();
+      const promoted = parsedResult.seller_results.map((sellerResult) => verifyAndPromoteSellerResult(
+        sellerResult,
+        {
+          allowedDomains,
+          brandOfficialDomain: brandDiscovery.domain,
+          searchSourceUrls,
+          observedAt,
+        },
+      ));
+      const screened = promoted.map(({ result }) => screenCandidateIdentity(input.anchor_product, result));
+
       const verifiedResult = {
         ...parsedResult,
-        seller_results: parsedResult.seller_results.map((sellerResult) => ({
-          ...screenCandidateIdentity(input.anchor_product, {
-            ...sellerResult,
-            source: sellerResult.source
-            ? {
-                ...sellerResult.source,
-                observed_at: observedAt,
-                verification_status: 'URL_VERIFIED' as const,
-              }
-            : null,
-          }),
-        })),
+        warnings: mergeWarnings(
+          parsedResult.warnings,
+          preSearchWarnings,
+          promoted.map((entry) => entry.warning).filter((warning): warning is string => Boolean(warning)),
+          screened.flatMap((entry) => entry.warnings),
+        ),
+        seller_results: screened.map((entry) => entry.result),
       };
       return productSearchResultSchema.parse(verifiedResult);
     } catch (error) {
@@ -149,6 +181,216 @@ export class ProductSearchService {
       });
     }
   }
+
+  // T5 discovery step: a separate, tool-free OpenAI call asking the model to
+  // recall (not search) a candidate brand-official domain from the brand
+  // name alone. Never throws — any failure (no candidate, malformed output,
+  // network/API error, or a candidate that fails the rule-based gate)
+  // degrades to "no domain discovered", which is a normal, handled outcome
+  // for the caller (BRAND_OFFICIAL stays UNKNOWN), not a search failure.
+  private async discoverBrandOfficialDomain(
+    client: OpenAI,
+    brand: string,
+  ): Promise<{ domain: string | null; warnings: string[] }> {
+    const cacheKey = normalizeBrandCacheKey(brand);
+    if (!cacheKey || brand.length > MAX_DISCOVERY_BRAND_LENGTH) {
+      return { domain: null, warnings: [] };
+    }
+    const cachedDomain = this.brandOfficialDomainCache.get(cacheKey);
+    if (cachedDomain) {
+      return { domain: cachedDomain, warnings: buildBrandOfficialDomainWarnings(brand, cachedDomain) };
+    }
+
+    try {
+      const response = await client.responses.parse({
+        model: this.config.get<string>('OPENAI_SEARCH_MODEL', this.config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+        instructions: CATCHCATCH_BRAND_OFFICIAL_DOMAIN_INSTRUCTIONS,
+        input: buildBrandOfficialDomainCandidatePrompt(brand),
+        store: false,
+        text: {
+          format: zodTextFormat(brandOfficialDomainCandidateSchema, 'catchcatch_brand_official_domain_candidate'),
+        },
+      });
+
+      const candidate = response.output_parsed?.candidate_domain;
+      if (!candidate) {
+        return { domain: null, warnings: [] };
+      }
+
+      const gate = gateBrandOfficialDomainCandidate(candidate);
+      if (!gate.accepted) {
+        this.logger.warn(
+          `Rejected brand-official domain candidate "${candidate}" for brand "${brand}": ${gate.reason}`,
+        );
+        return { domain: null, warnings: [] };
+      }
+
+      this.brandOfficialDomainCache.set(cacheKey, gate.domain);
+      this.logger.log(`Promoted brand-official domain ${gate.domain} for brand "${brand}"`);
+      return { domain: gate.domain, warnings: buildBrandOfficialDomainWarnings(brand, gate.domain) };
+    } catch (error) {
+      this.logger.warn(
+        `Brand-official domain discovery failed for brand "${brand}": ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return { domain: null, warnings: [] };
+    }
+  }
+
+  // Deterministic, non-network fixture path used when PRODUCT_DATA_MODE is
+  // "sample" (the .env.example default). It fills seller_results the same
+  // shape the real OpenAI web_search path produces and runs it through the
+  // same AI-result schema, anchor-unchanged assertion, and identity
+  // screening, so it exercises the same output contract Core relies on
+  // without requiring OPENAI_API_KEY. Sample mode never calls OpenAI, so
+  // brand-official discovery never runs here — BRAND_OFFICIAL is always
+  // reported as an honest UNKNOWN, not a fabricated match.
+  private createSampleSearchResult(
+    input: ProductSearchInput,
+    relaxedFieldWarnings: string[],
+  ): ProductSearchResult {
+    const matchedSeller = identifySellerForUrl(input.product_url, null) ?? sellerSchema.options[0];
+    const sampleOffer = buildSampleOfferFromAnchor(input.anchor_product);
+
+    const rawAiResult: ProductSearchAiResult = {
+      anchor_product: input.anchor_product,
+      warnings: [SAMPLE_DATA_WARNING, SAMPLE_BRAND_OFFICIAL_WARNING],
+      seller_results: sellerSchema.options.map((seller) => {
+        if (seller === matchedSeller) {
+          return {
+            seller,
+            availability: 'AVAILABLE' as const,
+            candidate_offer: sampleOffer,
+            match_evidence: ['Sample data filled for the seller matching the input URL'],
+            mismatch_reasons: [],
+            source: {
+              source_type: 'SELLER_PAGE' as const,
+              source_url: input.product_url,
+              acquisition_method: 'AI_WEB_SEARCH' as const,
+              verification_status: 'UNVERIFIED' as const,
+            },
+          };
+        }
+        if (seller === 'BRAND_OFFICIAL') {
+          return {
+            seller,
+            availability: 'UNKNOWN' as const,
+            candidate_offer: null,
+            match_evidence: [],
+            mismatch_reasons: [],
+            source: null,
+          };
+        }
+        return {
+          seller,
+          availability: 'NOT_AVAILABLE' as const,
+          candidate_offer: null,
+          match_evidence: [],
+          mismatch_reasons: [],
+          source: null,
+        };
+      }),
+    };
+
+    const parsedResult = productSearchAiResultSchema.parse(rawAiResult);
+    assertAnchorProductUnchanged(input.anchor_product, parsedResult.anchor_product);
+    const observedAt = new Date().toISOString();
+    const screened = parsedResult.seller_results.map((sellerResult) => screenCandidateIdentity(input.anchor_product, {
+      ...sellerResult,
+      source: sellerResult.source
+        ? {
+            ...sellerResult.source,
+            observed_at: observedAt,
+            verification_status: 'URL_VERIFIED' as const,
+          }
+        : null,
+    }));
+    const verifiedResult = {
+      ...parsedResult,
+      warnings: mergeWarnings(
+        parsedResult.warnings,
+        relaxedFieldWarnings,
+        screened.flatMap((entry) => entry.warnings),
+      ),
+      seller_results: screened.map((entry) => entry.result),
+    };
+    return productSearchResultSchema.parse(verifiedResult);
+  }
+}
+
+// Warnings attached to every request whose search used a discovered
+// brand-official domain, on a fresh discovery and on a cache hit alike.
+// The first one is unconditional and deliberately so: passing the gate only
+// means the candidate was not one of the classes we can recognise as wrong
+// (tenancy host, fixed seller, IDN, malformed). Nothing in the pipeline
+// checks that the domain is really the brand's, so the result must not be
+// handed downstream as if it were a verified fact. The foreign-storefront
+// warning stays a separate, conditional line.
+export function buildBrandOfficialDomainWarnings(
+  brand: string,
+  domain: string,
+): string[] {
+  const warnings = [
+    `BRAND_OFFICIAL domain ${domain} was proposed by the model for brand "${brand}" and passed rule-based checks only; it is not verified to be operated by the brand.`,
+  ];
+  for (const conditionalWarning of [
+    brandNameMismatchWarning(brand, domain),
+    foreignStorefrontWarning(domain),
+  ]) {
+    if (conditionalWarning) {
+      warnings.push(conditionalWarning);
+    }
+  }
+  return warnings;
+}
+
+// Normalizes a brand name into a cache key. Mirrors the identity-text
+// normalization used elsewhere in this file (NFKC + strip whitespace/case)
+// so "Innisfree" and "이니스프리 " reliably collide with themselves across
+// requests without pulling in a separate normalization scheme.
+function normalizeBrandCacheKey(brand: string): string {
+  return brand.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
+// Resolves which registered seller a product URL belongs to, using the same
+// fixed domain map and brand-official domain the real search flow validates
+// against. Returns null only if the URL matches neither, which should not
+// happen once assertAllowedSellerUrl has already accepted the URL.
+export function identifySellerForUrl(
+  url: string,
+  registeredBrandOfficialDomain: string | null,
+): Seller | null {
+  const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  for (const [seller, domain] of Object.entries(FIXED_SELLER_DOMAINS) as Array<[Seller, string]>) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+      return seller;
+    }
+  }
+  if (registeredBrandOfficialDomain) {
+    const officialHost = normalizeDomain(registeredBrandOfficialDomain);
+    if (hostname === officialHost || hostname.endsWith(`.${officialHost}`)) {
+      return 'BRAND_OFFICIAL';
+    }
+  }
+  return null;
+}
+
+export function buildSampleOfferFromAnchor(anchor: ProductIdentity) {
+  return {
+    product_name: anchor.normalized_product_name,
+    brand: anchor.brand,
+    product_type: anchor.product_type,
+    option: anchor.option,
+    shade_or_scent: anchor.shade_or_scent,
+    version_or_renewal: anchor.version_or_renewal,
+    list_price: 10000,
+    listed_sale_price: 9000,
+    public_coupon_amount: null,
+    automatic_discount_amount: null,
+    shipping_fee: 0,
+    discount_conditions: [] as string[],
+    shipping_condition: null,
+    components: anchor.components,
+  };
 }
 
 export function classifyOpenAISearchFailure(
@@ -229,7 +471,7 @@ export function collectWebSearchSourceUrls(output: unknown): Set<string> {
 
 function assertUrlWasReturnedByWebSearch(
   value: string,
-  sourceUrls: Set<string>,
+  sourceUrls: ReadonlySet<string>,
 ): void {
   if (!sourceUrls.has(normalizeSellerPageUrl(value))) {
     throw new Error('Source URL was not returned by web search');
@@ -245,17 +487,82 @@ export function assertAnchorProductUnchanged(
   }
 }
 
+type AiSellerResult = ProductSearchAiResult['seller_results'][number];
 type SellerSearchResult = ProductSearchResult['seller_results'][number];
+
+// T6: assertSellerMatchesUrl is a strict, throwing assertion (correct for
+// its other caller, product-identification, which has only one result to
+// accept or reject). Here there are up to four independent seller entries
+// in one response, and one of them citing a domain that does not match its
+// seller code — most commonly BRAND_OFFICIAL when no brand-official domain
+// was discovered/gated this request — must not discard the other, good
+// entries. So the mismatch is caught locally and downgrades only this one
+// entry to UNKNOWN with a warning, the same shape screenCandidateIdentity
+// already uses for identity mismatches. assertAllowedSellerUrl and
+// assertUrlWasReturnedByWebSearch stay hard, request-level failures: they
+// signal the model cited something entirely outside what web_search was
+// even allowed to touch, a stronger and more general trust violation than
+// "this one seller's URL doesn't match its own domain."
+export function verifyAndPromoteSellerResult(
+  sellerResult: AiSellerResult,
+  context: {
+    allowedDomains: readonly string[];
+    brandOfficialDomain: string | null;
+    searchSourceUrls: ReadonlySet<string>;
+    observedAt: string;
+  },
+): { result: SellerSearchResult; warning: string | null } {
+  if (!sellerResult.source) {
+    return { result: { ...sellerResult, source: null }, warning: null };
+  }
+  if (sellerResult.source.verification_status !== 'UNVERIFIED') {
+    throw new Error('AI cannot pre-approve source verification');
+  }
+  assertAllowedSellerUrl(sellerResult.source.source_url, context.allowedDomains);
+  try {
+    assertSellerMatchesUrl(
+      sellerResult.seller,
+      sellerResult.source.source_url,
+      context.brandOfficialDomain,
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'seller domain mismatch';
+    return {
+      result: {
+        ...sellerResult,
+        availability: 'UNKNOWN',
+        candidate_offer: null,
+        match_evidence: [],
+        mismatch_reasons: [...sellerResult.mismatch_reasons, reason],
+        source: null,
+      },
+      warning: `Seller result for ${sellerResult.seller} was downgraded to UNKNOWN: ${reason}`,
+    };
+  }
+  assertUrlWasReturnedByWebSearch(sellerResult.source.source_url, context.searchSourceUrls);
+  return {
+    result: {
+      ...sellerResult,
+      source: {
+        ...sellerResult.source,
+        observed_at: context.observedAt,
+        verification_status: 'URL_VERIFIED' as const,
+      },
+    },
+    warning: null,
+  };
+}
 
 export function screenCandidateIdentity(
   anchor: ProductIdentity,
   sellerResult: SellerSearchResult,
-): SellerSearchResult {
+): { result: SellerSearchResult; warnings: string[] } {
   if (sellerResult.availability !== 'AVAILABLE' || !sellerResult.candidate_offer) {
-    return sellerResult;
+    return { result: sellerResult, warnings: [] };
   }
   const candidate = sellerResult.candidate_offer;
   const issues: string[] = [];
+  const warnings: string[] = [];
   compareRequiredIdentity('brand', anchor.brand, candidate.brand, issues);
   compareRequiredIdentity(
     'product_name',
@@ -264,7 +571,20 @@ export function screenCandidateIdentity(
     issues,
     true,
   );
-  compareRequiredIdentity('product_type', anchor.product_type, candidate.product_type, issues);
+  // T7: a null anchor product_type is not evidence of anything — it means
+  // identification never resolved one (T4), not that the candidate's
+  // product_type is wrong. Treat it as non-discriminating: skip the
+  // comparison instead of counting the anchor's own gap as a candidate
+  // mismatch, and say so via a warning. A null on the candidate side with a
+  // known anchor product_type is unchanged: that is still a real gap in the
+  // candidate's own data and keeps counting as a mismatch.
+  if (anchor.product_type === null) {
+    warnings.push(
+      `${sellerResult.seller}: candidate product_type was not compared because the anchor product_type is unknown`,
+    );
+  } else {
+    compareRequiredIdentity('product_type', anchor.product_type, candidate.product_type, issues);
+  }
   compareAnchorSpecificIdentity('option', anchor.option, candidate.option, issues);
   compareAnchorSpecificIdentity(
     'shade_or_scent',
@@ -279,14 +599,17 @@ export function screenCandidateIdentity(
     issues,
   );
   if (issues.length === 0) {
-    return sellerResult;
+    return { result: sellerResult, warnings };
   }
   return {
-    ...sellerResult,
-    availability: 'UNKNOWN',
-    candidate_offer: null,
-    match_evidence: [],
-    mismatch_reasons: [...sellerResult.mismatch_reasons, ...issues],
+    result: {
+      ...sellerResult,
+      availability: 'UNKNOWN',
+      candidate_offer: null,
+      match_evidence: [],
+      mismatch_reasons: [...sellerResult.mismatch_reasons, ...issues],
+    },
+    warnings,
   };
 }
 

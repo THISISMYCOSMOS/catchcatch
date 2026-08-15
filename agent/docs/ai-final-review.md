@@ -16,9 +16,9 @@ CatchCatch AI의 프롬프트, 구조화 출력 스키마, 백엔드 검증 경�
 | 조건부 상품 식별 | `catchcatch-product-identification-v3` | `src/product-identification/product-identification.prompt.ts` |
 | 동일상품 검색 | `catchcatch-product-search-v6` | `src/product-search/product-search.prompt.ts` |
 | 최종 구매 판단 | `catchcatch-judgment-v7` | `src/ai-judgment/ai-judgment.prompt.ts` |
-| 유사상품 검색 | `catchcatch-similar-product-search-v3` | `src/similar-product-search/similar-product-search.prompt.ts` |
+| 유사상품 검색 (삭제됨, 설계 이력만 남음) | `catchcatch-similar-product-search-v3` | ~~`src/similar-product-search/similar-product-search.prompt.ts`~~ |
 
-사람이 읽는 전문은 `docs/ai-prompts.md`에 있다.
+사람이 읽는 전문은 `docs/ai-prompts.md`에 있다. 유사상품 검색은 서비스·컨트롤러로 이어지지 않은 미연결 코드여서 이후 삭제했다.
 
 ## 3. 실제 위험으로 판단해 반영한 항목
 
@@ -171,7 +171,7 @@ eval/ai-judgment-evaluation.md
 다음은 프롬프트·스키마가 아니라 API·저장 파이프라인 구현 영역이다.
 
 1. 조건부 상품 식별 OpenAI 호출 서비스와 컨트롤러
-2. 유사상품 검색 OpenAI 호출 서비스와 컨트롤러
+2. ~~유사상품 검색 OpenAI 호출 서비스와 컨트롤러~~ (미연결 코드였던 프롬프트·스키마를 삭제했으므로 재설계 필요)
 3. 판매 페이지 실제 콘텐츠 검증기와 `CONTENT_VERIFIED` 승격
 4. 상품·오퍼·출처·가격 이력 영속 저장 및 사용자 데이터 격리
 5. 백엔드 가격·할인·용량 계산기

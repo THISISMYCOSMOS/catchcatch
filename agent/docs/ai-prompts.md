@@ -133,7 +133,7 @@
 </exact_product_search_json>
 ```
 
-외부 요청에는 공식몰 도메인을 받지 않는다. 외부 입력은 `brand_id`만 받고, 서비스가 `BRAND_OFFICIAL_DOMAINS_JSON` 또는 향후 브랜드 저장소에서 도메인을 조회한 뒤 프롬프트를 만든다.
+외부 요청에는 공식몰 도메인을 받지 않는다. (T5 갱신) 서비스가 식별된 브랜드명으로 공식몰 도메인 후보를 별도 프롬프트로 발견하고, 규칙 기반 게이트를 통과한 도메인만 검색 프롬프트의 `registered_brand_official_domain`에 채워 넣는다. `brand_id` 입력은 하위 호환을 위해 남아 있지만 이 과정에 쓰이지 않는다.
 
 ## 3. 최종 구매 판단
 
@@ -230,10 +230,12 @@
 </verified_analysis_json>
 ```
 
-## 4. 유사상품 검색
+## 4. 유사상품 검색 (설계 이력 — 삭제됨)
+
+> 이 프롬프트와 스키마는 서비스·컨트롤러·`app.module.ts` 등록 없이 남아 있던 미연결 코드였으므로 `src/similar-product-search/`를 삭제했다. 아래 내용은 향후 재설계를 위한 설계 이력으로만 남긴다. 실행 파일은 더 이상 존재하지 않는다.
 
 - 버전: `catchcatch-similar-product-search-v3`
-- 실행 파일: `src/similar-product-search/similar-product-search.prompt.ts`
+- (삭제된) 실행 파일: `src/similar-product-search/similar-product-search.prompt.ts`
 - 호출 조건: 사용자가 유사상품 보기 기능을 명시적으로 요청한 경우
 
 ### 시스템 지시문

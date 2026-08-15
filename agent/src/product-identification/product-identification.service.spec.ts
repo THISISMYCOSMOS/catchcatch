@@ -1,4 +1,3 @@
-import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ProductIdentificationService } from './product-identification.service';
 
@@ -8,11 +7,36 @@ const input = {
 };
 
 describe('ProductIdentificationService', () => {
-  it('does not silently use sample data', async () => {
+  it('returns schema-valid, clearly-labeled sample data without calling OpenAI', async () => {
     const service = new ProductIdentificationService(config({
       PRODUCT_DATA_MODE: 'sample',
     }));
-    await expect(service.identify(input)).rejects.toThrow(ServiceUnavailableException);
+    const result = await service.identify(input);
+    expect(result).toMatchObject({
+      identification_status: 'IDENTIFIED',
+      source: {
+        source_url: input.product_url,
+        verification_status: 'URL_VERIFIED',
+      },
+    });
+    expect(result.warnings.some((warning) => warning.includes('sample data'))).toBe(true);
+  });
+
+  it('defaults to sample mode when PRODUCT_DATA_MODE is unset, matching .env.example', async () => {
+    const service = new ProductIdentificationService(config({}));
+    await expect(service.identify(input)).resolves.toMatchObject({
+      identification_status: 'IDENTIFIED',
+    });
+  });
+
+  it('still enforces the seller-domain allowlist in sample mode', async () => {
+    const service = new ProductIdentificationService(config({
+      PRODUCT_DATA_MODE: 'sample',
+    }));
+    await expect(service.identify({
+      product_url: 'https://forged.example/product',
+      allowed_domains: ['coupang.com'],
+    })).rejects.toThrow('URL is outside registered seller domains');
   });
 
   it('fails closed when web search credentials are missing', async () => {
