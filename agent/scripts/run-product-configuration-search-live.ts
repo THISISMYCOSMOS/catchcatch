@@ -1,11 +1,13 @@
 import 'reflect-metadata';
 import 'dotenv/config';
+import { readFile } from 'node:fs/promises';
 import { ConfigService } from '@nestjs/config';
 import { FIXED_SELLER_DOMAINS } from '../src/ai-contracts/seller-domain.policy';
+import { productIdentitySchema, sellerSchema } from '../src/ai-contracts/product-data.schema';
 import { ProductIdentificationService } from '../src/product-identification/product-identification.service';
 import { ProductSearchService } from '../src/product-search/product-search.service';
 
-const USAGE = 'npm run test:configurations:live -- <https-product-url>';
+const USAGE = 'npm run test:configurations:live -- <https-product-url> [--sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,BRAND_OFFICIAL] [--max-candidates=1] [--anchor-file=path.json] [--brand-domain=example.com]';
 
 async function main(): Promise<void> {
   const rawUrl = process.argv[2];
@@ -32,19 +34,43 @@ async function main(): Promise<void> {
   const config = new ConfigService({
     ...process.env,
     PRODUCT_DATA_MODE: 'web_search',
+    OPENAI_LOG_USAGE: 'true',
   });
-  const identificationService = new ProductIdentificationService(config);
+  const sellersArgument = process.argv.slice(3)
+    .find((argument) => argument.startsWith('--sellers='))
+    ?.slice('--sellers='.length);
+  const maxCandidatesArgument = process.argv.slice(3)
+    .find((argument) => argument.startsWith('--max-candidates='))
+    ?.slice('--max-candidates='.length);
+  const anchorFile = process.argv.slice(3)
+    .find((argument) => argument.startsWith('--anchor-file='))
+    ?.slice('--anchor-file='.length);
+  const registeredBrandOfficialDomain = process.argv.slice(3)
+    .find((argument) => argument.startsWith('--brand-domain='))
+    ?.slice('--brand-domain='.length);
+  const targetSellers = sellersArgument
+    ? sellersArgument.split(',').map((seller) => sellerSchema.parse(seller.trim()))
+    : undefined;
+  const maxCandidatesPerSeller = maxCandidatesArgument
+    ? Number(maxCandidatesArgument)
+    : undefined;
   const searchService = new ProductSearchService(config);
   const startedAt = Date.now();
-  const identification = await identificationService.identify({
-    product_url: productUrl.toString(),
-    allowed_domains: [allowedDomain],
-  });
+  const reusedAnchor = anchorFile
+    ? productIdentitySchema.parse(JSON.parse(await readFile(anchorFile, 'utf8')))
+    : null;
+  const identification = reusedAnchor
+    ? null
+    : await new ProductIdentificationService(config).identify({
+      product_url: productUrl.toString(),
+      allowed_domains: [allowedDomain],
+    });
+  const anchorProduct = reusedAnchor ?? identification?.anchor_product ?? null;
 
-  if (identification.identification_status !== 'IDENTIFIED' || !identification.anchor_product) {
+  if (!anchorProduct) {
     process.stdout.write(`${JSON.stringify({
       testMode: 'configuration_web_search',
-      model: config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+      model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6'))),
       elapsedMs: Date.now() - startedAt,
       input: { productUrl: productUrl.toString(), allowedDomain },
       identification,
@@ -56,22 +82,31 @@ async function main(): Promise<void> {
 
   const configurationSearch = await searchService.searchAlternativeConfigurations({
     product_url: productUrl.toString(),
-    anchor_product: identification.anchor_product,
+    anchor_product: anchorProduct,
     brand_id: null,
+    ...(targetSellers ? { target_sellers: targetSellers } : {}),
+    ...(maxCandidatesPerSeller !== undefined
+      ? { max_candidates_per_seller: maxCandidatesPerSeller }
+      : {}),
+    ...(registeredBrandOfficialDomain
+      ? { registered_brand_official_domain: registeredBrandOfficialDomain }
+      : {}),
   });
 
   process.stdout.write(`${JSON.stringify({
     testMode: 'configuration_web_search',
-    model: config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+    model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6'))),
     elapsedMs: Date.now() - startedAt,
     input: { productUrl: productUrl.toString(), allowedDomain },
     identification,
+    anchorReused: Boolean(reusedAnchor),
     configurationSearch,
     summary: configurationSearch.seller_results.map((seller) => ({
       seller: seller.seller,
       availability: seller.availability,
       candidateCount: seller.candidates.length,
       candidates: seller.candidates.map((candidate) => ({
+        relationType: candidate.relation_type,
         configuration: candidate.configuration_summary,
         sourceUrl: candidate.source.source_url,
         basisPrice: candidate.basis_price,
@@ -80,6 +115,7 @@ async function main(): Promise<void> {
         candidateMainTotal: candidate.candidate_main_total_amount,
         unit: candidate.capacity_unit,
         equivalentPrice: candidate.equivalent_price,
+        equivalentPriceScope: candidate.equivalent_price_scope,
         comparisonStatus: candidate.comparison_status,
       })),
     })),

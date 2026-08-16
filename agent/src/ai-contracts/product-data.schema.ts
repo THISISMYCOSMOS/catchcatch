@@ -57,8 +57,10 @@ export const sourceCandidateMetadataSchema = z.object({
   verification_status: z.literal('UNVERIFIED'),
 }).strict();
 
-export const sourceMetadataSchema = sourceCandidateMetadataSchema.extend({
+export const sourceMetadataSchema = z.object({
+  source_type: z.literal('SELLER_PAGE'),
   source_url: z.string().url(),
+  acquisition_method: z.enum(['AI_WEB_SEARCH', 'DIRECT_HTTP']),
   observed_at: z.string().datetime({ offset: true }),
   verification_status: z.enum([
     'UNVERIFIED',
@@ -66,7 +68,7 @@ export const sourceMetadataSchema = sourceCandidateMetadataSchema.extend({
     'CONTENT_VERIFIED',
     'REJECTED',
   ]),
-});
+}).strict();
 
 export type Seller = z.infer<typeof sellerSchema>;
 export type ProductIdentity = z.infer<typeof productIdentitySchema>;

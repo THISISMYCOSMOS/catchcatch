@@ -15,6 +15,9 @@ import {
   buildAllowedSearchDomainsForSellers,
   buildConfigurationCandidateResult,
   calculateMainCapacityTotal,
+  extractMusinsaProductUrls,
+  extractMusinsaSellerPageFacts,
+  parseMusinsaTitleComponents,
   resolveConfigurationTargetSellers,
   screenAlternativeConfigurationCandidate,
   verifyAndPromoteConfigurationCandidate,
@@ -43,6 +46,7 @@ const input = {
 };
 
 const aiCandidate = {
+  relation_type: 'SAME_PRODUCT_CONFIGURATION' as const,
   candidate_offer: {
     product_name: '1025 독도 선크림',
     brand: '라운드랩',
@@ -65,7 +69,7 @@ const aiCandidate = {
       quantity: 1,
     }],
   },
-  same_product_evidence: ['브랜드와 상품명이 동일함'],
+  relation_evidence: ['브랜드와 상품명이 동일함'],
   configuration_difference_evidence: ['70ml 단품 구성'],
   source: {
     source_type: 'SELLER_PAGE' as const,
@@ -103,7 +107,7 @@ describe('product configuration search contract', () => {
   it('rejects candidates without same-product or configuration-difference evidence', () => {
     expect(configurationCandidateAiSchema.safeParse({
       ...aiCandidate,
-      same_product_evidence: [],
+      relation_evidence: [],
     }).success).toBe(false);
     expect(configurationCandidateAiSchema.safeParse({
       ...aiCandidate,
@@ -152,13 +156,13 @@ describe('product configuration search contract', () => {
 describe('product configuration search prompt', () => {
   it('searches only another configuration of the same product and prohibits AI price conversion', () => {
     expect(PRODUCT_CONFIGURATION_SEARCH_PROMPT_VERSION).toBe(
-      'catchcatch-product-configuration-search-v1',
+      'catchcatch-product-configuration-search-v2',
     );
     expect(CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS).toContain(
-      '다른 용량·구성 검색기',
+      '다른 용량·구성 및 같은 제품 라인의 다른 버전 검색기',
     );
     expect(CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS).toContain(
-      '유사상품이나 대체상품',
+      'SAME_LINE_VARIANT',
     );
     expect(CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS).toContain(
       '환산 가격, 용량당 가격, 최저가, 추천을 계산하지 않는다',
@@ -171,6 +175,7 @@ describe('product configuration search prompt', () => {
       2,
     );
     expect(prompt).toContain('"target_sellers":["COUPANG"]');
+    expect(prompt).toContain('"preferred_search_queries":["쿠팡 라운드랩 1025 독도 선크림"]');
     expect(prompt).toContain('"max_candidates_per_seller":2');
     expect(prompt).toContain('"normalized_product_name":"1025 독도 선크림"');
   });
@@ -186,7 +191,7 @@ describe('deterministic alternative-configuration screening and conversion', () 
     },
   };
 
-  it('sums MAIN capacity only', () => {
+  it('counts same-product refills but excludes unrelated mini gifts', () => {
     expect(calculateMainCapacityTotal([
       ...anchor.components,
       {
@@ -196,7 +201,14 @@ describe('deterministic alternative-configuration screening and conversion', () 
         capacity_unit: 'ML',
         quantity: 5,
       },
-    ])).toEqual({ unit: 'ML', totalAmount: 100 });
+      {
+        type: 'REFILL',
+        name: '1025 독도 선크림 리필',
+        capacity_value: 30,
+        capacity_unit: 'ML',
+        quantity: 1,
+      },
+    ], anchor.normalized_product_name)).toEqual({ unit: 'ML', totalAmount: 130 });
   });
 
   it('calculates an anchor-capacity equivalent price from the displayed price', () => {
@@ -260,6 +272,47 @@ describe('deterministic alternative-configuration screening and conversion', () 
     expect(screened).toEqual({ accepted: true, reasons: [], warnings: [] });
   });
 
+  it('accepts a same-line variant but labels its equivalent price as reference-only', () => {
+    const candidate = {
+      ...aiCandidate,
+      relation_type: 'SAME_LINE_VARIANT' as const,
+      candidate_offer: {
+        ...aiCandidate.candidate_offer,
+        product_name: '아토베리어365 크림',
+        brand: '에스트라',
+        product_type: '크림',
+        option: '80ml 1개',
+        components: [{
+          type: 'MAIN' as const,
+          name: '아토베리어365 크림',
+          capacity_value: 80,
+          capacity_unit: 'ML' as const,
+          quantity: 1,
+        }],
+      },
+    };
+    const plusAnchor = {
+      ...anchor,
+      brand: '에스트라',
+      normalized_product_name: '아토베리어365 크림 플러스',
+      product_type: '크림',
+    };
+
+    expect(screenAlternativeConfigurationCandidate(
+      plusAnchor,
+      candidate.candidate_offer,
+      candidate.relation_type,
+    )).toMatchObject({ accepted: true });
+    expect(buildConfigurationCandidateResult(plusAnchor, {
+      ...candidate,
+      source: promoted.source,
+    })).toMatchObject({
+      relation_type: 'SAME_LINE_VARIANT',
+      comparison_status: 'UNIT_COMPARABLE',
+      equivalent_price_scope: 'REFERENCE_ONLY',
+    });
+  });
+
   it('promotes only a seller-matching URL returned by web search', () => {
     const sourceUrl = aiCandidate.source.source_url;
     expect(verifyAndPromoteConfigurationCandidate(aiCandidate, 'COUPANG', {
@@ -276,13 +329,66 @@ describe('deterministic alternative-configuration screening and conversion', () 
       observedAt: '2026-08-16T03:00:00.000Z',
     }).result).toBeNull();
   });
+
+  it('rejects a Coupang alternative that reuses the anchor option identifiers', () => {
+    const inputProductUrl = 'https://www.coupang.com/vp/products/123?itemId=1&vendorItemId=2';
+    const candidate = {
+      ...aiCandidate,
+      source: { ...aiCandidate.source, source_url: inputProductUrl },
+    };
+    expect(verifyAndPromoteConfigurationCandidate(candidate, 'COUPANG', {
+      allowedDomains: ['coupang.com'],
+      brandOfficialDomain: null,
+      searchSourceUrls: new Set([inputProductUrl]),
+      observedAt: '2026-08-16T03:00:00.000Z',
+      inputProductUrl,
+    })).toMatchObject({
+      result: null,
+      reason: expect.stringContaining('different option-specific'),
+    });
+  });
 });
 
 describe('ProductSearchService alternative-configuration mode', () => {
-  it('defaults to the source seller plus one comparison seller', () => {
+  it('extracts direct Musinsa search URLs and current product metadata', () => {
+    expect(extractMusinsaProductUrls(`
+      <a href="https://www.musinsa.com/products/2782655">one</a>
+      <script>{"url":"https:\\/\\/www.musinsa.com\\/products\\/5364290"}</script>
+      <a href="https://www.musinsa.com/products/2782655">duplicate</a>
+    `)).toEqual([
+      'https://www.musinsa.com/products/2782655',
+      'https://www.musinsa.com/products/5364290',
+    ]);
+    expect(extractMusinsaSellerPageFacts(`
+      <meta content="17900" property="product:price:amount">
+      <meta property="product:price:normal_price" content="25000">
+      <meta property="product:availability" content="주문가능">
+      <meta property="og:title" content="라운드랩 1025 독도 선크림 50ml - 후기 | 무신사">
+    `)).toEqual({
+      productName: '라운드랩 1025 독도 선크림 50ml',
+      listedSalePrice: 17900,
+      listPrice: 25000,
+      available: true,
+    });
+    expect(parseMusinsaTitleComponents(
+      '라운드랩(ROUNDLAB) 1025 독도 선크림 50ml (+클렌저 40ml)',
+      '1025 독도 선크림',
+    )).toEqual([
+      expect.objectContaining({ type: 'MAIN', capacity_value: 50, quantity: 1 }),
+      expect.objectContaining({
+        type: 'OTHER_COSMETIC',
+        name: '클렌저',
+        capacity_value: 40,
+        quantity: 1,
+      }),
+    ]);
+  });
+
+  it('defaults to every registered comparison seller except the input seller', () => {
     expect(resolveConfigurationTargetSellers(input)).toEqual([
-      'COUPANG',
+      'OLIVE_YOUNG',
       'MUSINSA_BEAUTY',
+      'BRAND_OFFICIAL',
     ]);
     expect(buildAllowedSearchDomainsForSellers(
       ['COUPANG', 'MUSINSA_BEAUTY'],
@@ -290,10 +396,14 @@ describe('ProductSearchService alternative-configuration mode', () => {
     )).toEqual(['coupang.com', 'musinsa.com']);
   });
 
-  it('honors an explicit later-load seller selection', () => {
+  it('honors an explicit later-load seller selection and still skips the input seller', () => {
     expect(resolveConfigurationTargetSellers({
       ...input,
       target_sellers: ['OLIVE_YOUNG'],
+    })).toEqual(['OLIVE_YOUNG']);
+    expect(resolveConfigurationTargetSellers({
+      ...input,
+      target_sellers: ['COUPANG', 'OLIVE_YOUNG'],
     })).toEqual(['OLIVE_YOUNG']);
   });
 
@@ -302,14 +412,13 @@ describe('ProductSearchService alternative-configuration mode', () => {
       new ConfigService({ PRODUCT_DATA_MODE: 'sample' }),
     );
     const result = await service.searchAlternativeConfigurations(input);
-    expect(result.seller_results).toHaveLength(2);
+    expect(result.seller_results).toHaveLength(3);
     expect(result.seller_results.map((entry) => entry.seller)).toEqual([
-      'COUPANG',
+      'OLIVE_YOUNG',
       'MUSINSA_BEAUTY',
+      'BRAND_OFFICIAL',
     ]);
-    expect(result.seller_results.find((entry) => entry.seller === 'COUPANG')).toMatchObject({
-      availability: 'AVAILABLE',
-    });
+    expect(result.seller_results.every((entry) => entry.availability === 'UNKNOWN')).toBe(true);
     expect(result.warnings.some((warning) => warning.includes('sample data'))).toBe(true);
   });
 });

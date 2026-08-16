@@ -19,6 +19,7 @@ import {
   validateProductIdentificationResult,
 } from './product-identification.schema';
 import { parseRequestInput } from '../ai-contracts/request-input';
+import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real identification result (PRODUCT_DATA_MODE=sample).';
 
@@ -63,16 +64,18 @@ export class ProductIdentificationService {
       maxRetries: 0,
     });
 
+    const model = this.config.get<string>(
+      'OPENAI_SEARCH_MODEL',
+      this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
+    );
     try {
       const response = await client.responses.parse({
-        model: this.config.get<string>(
-          'OPENAI_SEARCH_MODEL',
-          this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
-        ),
+        model,
         instructions: CATCHCATCH_PRODUCT_IDENTIFICATION_INSTRUCTIONS,
         input: buildProductIdentificationPrompt(input),
         tools: [{
           type: 'web_search',
+          search_context_size: resolveWebSearchContextSize(this.config),
           filters: { allowed_domains: input.allowed_domains },
         }],
         tool_choice: 'required',
@@ -85,6 +88,7 @@ export class ProductIdentificationService {
           ),
         },
       });
+      logOpenAIUsage(this.config, this.logger, 'product_identification', model, response);
 
       if (!response.output_parsed) {
         throw new Error('OpenAI returned no parsed identification output');
@@ -146,6 +150,13 @@ export class ProductIdentificationService {
     };
     return validateProductIdentificationResult(input, sampleAiResult);
   }
+}
+
+function resolveWebSearchContextSize(
+  config: ConfigService,
+): 'low' | 'medium' | 'high' {
+  const value = config.get<string>('OPENAI_WEB_SEARCH_CONTEXT_SIZE', 'low');
+  return value === 'medium' || value === 'high' ? value : 'low';
 }
 
 function assertInputUrlWasSearched(

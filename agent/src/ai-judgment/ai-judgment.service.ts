@@ -14,6 +14,7 @@ import {
   CATCHCATCH_JUDGMENT_INSTRUCTIONS,
 } from './ai-judgment.prompt';
 import { parseRequestInput } from '../ai-contracts/request-input';
+import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
 
 @Injectable()
 export class AiJudgmentService {
@@ -47,6 +48,7 @@ export class AiJudgmentService {
       timeout: Number(this.config.get<string>('OPENAI_TIMEOUT_MS', '20000')),
       maxRetries: 0,
     });
+    const model = this.config.get<string>('OPENAI_MODEL', 'gpt-5.6');
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -54,7 +56,7 @@ export class AiJudgmentService {
           ? `\n\n${CATCHCATCH_JUDGMENT_CORRECTION_INSTRUCTIONS}`
           : '';
         const response = await client.responses.parse({
-          model: this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
+          model,
           instructions: `${CATCHCATCH_JUDGMENT_INSTRUCTIONS}${correction}`,
           input: buildJudgmentPrompt(input),
           store: false,
@@ -62,6 +64,7 @@ export class AiJudgmentService {
             format: zodTextFormat(aiJudgmentSchema, 'catchcatch_judgment'),
           },
         });
+        logOpenAIUsage(this.config, this.logger, `judgment_attempt_${attempt + 1}`, model, response);
 
         if (!response.output_parsed) {
           throw new Error('OpenAI returned no parsed output');

@@ -11,7 +11,6 @@ const COSMETIC_COMPONENT_TYPES = new Set<ProductComponent['type']>([
   'REFILL',
   'MINI',
   'TRAVEL',
-  'OTHER_COSMETIC',
 ]);
 
 export type MarketEffectivePriceInput = {

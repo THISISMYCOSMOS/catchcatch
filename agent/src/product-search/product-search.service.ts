@@ -20,6 +20,7 @@ import {
 import {
   ConfigurationCandidateAi,
   ConfigurationCandidateResult,
+  ConfigurationSellerAiResult,
   ProductConfigurationSearchAiResult,
   ProductConfigurationSearchInput,
   ProductConfigurationSearchResult,
@@ -54,6 +55,7 @@ import {
   sellerSchema,
 } from '../ai-contracts/product-data.schema';
 import { parseRequestInput } from '../ai-contracts/request-input';
+import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real seller result (PRODUCT_DATA_MODE=sample).';
 const SAMPLE_BRAND_OFFICIAL_WARNING = 'Brand-official domain discovery does not run in sample mode (PRODUCT_DATA_MODE=sample); BRAND_OFFICIAL is always reported as UNKNOWN.';
@@ -128,9 +130,10 @@ export class ProductSearchService {
       brandDiscovery.warnings,
     );
 
+    const model = this.resolveSearchModel();
     try {
       const response = await client.responses.parse({
-        model: this.config.get<string>('OPENAI_SEARCH_MODEL', this.config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+        model,
         instructions: CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS,
         input: buildProductSearchPrompt(
           input,
@@ -140,6 +143,7 @@ export class ProductSearchService {
         tools: [
           {
             type: 'web_search',
+            search_context_size: this.resolveWebSearchContextSize(),
             filters: { allowed_domains: allowedDomains },
           },
         ],
@@ -150,6 +154,7 @@ export class ProductSearchService {
           format: zodTextFormat(productSearchAiResultSchema, 'catchcatch_product_search'),
         },
       });
+      logOpenAIUsage(this.config, this.logger, 'same_product_search', model, response);
 
       if (!response.output_parsed) {
         throw new Error('OpenAI returned no parsed product search output');
@@ -209,6 +214,12 @@ export class ProductSearchService {
     const input = parseRequestInput(productConfigurationSearchInputSchema, rawInput);
     const relaxedFieldWarnings = collectAnchorProductWarnings(input.anchor_product);
     const targetSellers = resolveConfigurationTargetSellers(input);
+    if (targetSellers.length === 0) {
+      throw new ServiceUnavailableException({
+        code: 'PRODUCT_CONFIGURATION_SEARCH_TARGET_UNAVAILABLE',
+        retryable: false,
+      });
+    }
     const maxCandidatesPerSeller = input.max_candidates_per_seller ?? 2;
     const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
 
@@ -233,121 +244,172 @@ export class ProductSearchService {
     const client = new OpenAI({
       apiKey,
       timeout: Number(this.config.get<string>(
-        'OPENAI_CONFIGURATION_SEARCH_TIMEOUT_MS',
-        '25000',
+        'OPENAI_CONFIGURATION_PRIMARY_TIMEOUT_MS',
+        '18000',
       )),
       maxRetries: 0,
     });
-    const brandDiscovery = targetSellers.includes('BRAND_OFFICIAL') && input.anchor_product.brand
-      ? await this.discoverBrandOfficialDomain(client, input.anchor_product.brand)
-      : { domain: null as string | null, warnings: [] as string[] };
+    const providedBrandDomain = resolveProvidedBrandOfficialDomain(
+      input.registered_brand_official_domain,
+    );
+    const brandDiscovery = providedBrandDomain.domain
+      ? providedBrandDomain
+      : targetSellers.includes('BRAND_OFFICIAL') && input.anchor_product.brand
+        ? await this.discoverBrandOfficialDomain(
+          client,
+          input.anchor_product.brand,
+          this.resolveConfigurationSearchModel(),
+        )
+        : providedBrandDomain;
     assertAllowedSellerUrl(
       input.product_url,
       buildAllowedSearchDomains(brandDiscovery.domain),
     );
-    const allowedDomains = buildAllowedSearchDomainsForSellers(
-      targetSellers,
-      brandDiscovery.domain,
-    );
-    if (allowedDomains.length === 0) {
-      throw new ServiceUnavailableException({
-        code: 'PRODUCT_CONFIGURATION_SEARCH_TARGET_UNAVAILABLE',
-        retryable: false,
-      });
-    }
-
+    const model = this.resolveConfigurationSearchModel();
+    const reasoningEffort = this.resolveConfigurationReasoningEffort();
+    const maxOutputTokens = this.resolveConfigurationMaxOutputTokens();
+    const fallbackModel = this.resolveConfigurationFallbackModel();
+    const fallbackClient = fallbackModel && fallbackModel !== model
+      ? new OpenAI({
+        apiKey,
+        timeout: this.resolveConfigurationFallbackTimeout(),
+        maxRetries: 0,
+      })
+      : null;
     try {
-      const response = await client.responses.parse({
-        model: this.config.get<string>(
-          'OPENAI_SEARCH_MODEL',
-          this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
-        ),
-        instructions: CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS,
-        input: buildProductConfigurationSearchPrompt(
-          input,
-          allowedDomains,
-          brandDiscovery.domain,
-          targetSellers,
-          maxCandidatesPerSeller,
-        ),
-        tools: [{
-          type: 'web_search',
-          filters: { allowed_domains: allowedDomains },
-        }],
-        tool_choice: 'required',
-        include: ['web_search_call.action.sources'],
-        store: false,
-        text: {
-          format: zodTextFormat(
-            productConfigurationSearchAiResultSchema,
-            'catchcatch_product_configuration_search',
-          ),
-        },
-      });
-
-      if (!response.output_parsed) {
-        throw new Error('OpenAI returned no parsed product configuration search output');
-      }
-
-      const parsedResult = productConfigurationSearchAiResultSchema.parse(response.output_parsed);
-      assertAnchorProductUnchanged(input.anchor_product, parsedResult.anchor_product);
-      const searchSourceUrls = collectWebSearchSourceUrls(response.output);
-      const observedAt = new Date().toISOString();
-      const resultWarnings: string[] = [];
-      const parsedResultsBySeller = new Map(
-        parsedResult.seller_results.map((sellerResult) => [sellerResult.seller, sellerResult]),
-      );
-      const missingSellers = targetSellers.filter((seller) => !parsedResultsBySeller.has(seller));
-      if (missingSellers.length > 0) {
-        throw new Error(`Requested seller results missing: ${missingSellers.join(', ')}`);
-      }
-      const sellerResults = targetSellers.map((seller) => {
-        const sellerResult = parsedResultsBySeller.get(seller)!;
-        const candidates: ConfigurationCandidateResult[] = [];
-        const notes = [...sellerResult.notes];
-        for (const candidate of sellerResult.candidates.slice(0, maxCandidatesPerSeller)) {
-          const promoted = verifyAndPromoteConfigurationCandidate(candidate, sellerResult.seller, {
-            allowedDomains,
-            brandOfficialDomain: brandDiscovery.domain,
-            searchSourceUrls,
-            observedAt,
-          });
-          if (!promoted.result) {
-            notes.push(promoted.reason);
-            resultWarnings.push(`${sellerResult.seller}: ${promoted.reason}`);
-            continue;
-          }
-          const screened = screenAlternativeConfigurationCandidate(
-            input.anchor_product,
-            promoted.result.candidate_offer,
+      const searches = await Promise.allSettled(targetSellers.map(async (seller) => {
+        if (seller === 'MUSINSA_BEAUTY') {
+          const directResult = await this.searchMusinsaDirect(
+            input,
+            maxCandidatesPerSeller,
           );
-          resultWarnings.push(...screened.warnings.map((warning) => `${sellerResult.seller}: ${warning}`));
-          if (!screened.accepted) {
-            const reason = screened.reasons.join('; ');
-            notes.push(reason);
-            resultWarnings.push(`${sellerResult.seller}: rejected configuration candidate: ${reason}`);
-            continue;
+          if (directResult) {
+            return directResult;
           }
-          candidates.push(buildConfigurationCandidateResult(input.anchor_product, promoted.result));
+        }
+        const sellerSearchContextSize = this.resolveConfigurationWebSearchContextSize(seller);
+        const allowedDomains = buildAllowedSearchDomainsForSellers(
+          [seller],
+          brandDiscovery.domain,
+        );
+        if (allowedDomains.length === 0) {
+          return {
+            sellerResult: {
+              seller,
+              availability: 'UNKNOWN' as const,
+              candidates: [],
+              notes: ['No verified domain is available for this seller'],
+            },
+            warnings: [`${seller}: no verified seller domain was available; web search was skipped`],
+          };
         }
 
+        const executeSearch = async (
+          activeClient: OpenAI,
+          activeModel: string,
+          attempt: 'primary' | 'fallback',
+        ) => {
+          const response = await activeClient.responses.parse({
+            model: activeModel,
+            instructions: CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS,
+            input: buildProductConfigurationSearchPrompt(
+              input,
+              allowedDomains,
+              brandDiscovery.domain,
+              [seller],
+              maxCandidatesPerSeller,
+            ),
+            reasoning: { effort: reasoningEffort },
+            max_output_tokens: maxOutputTokens,
+            tools: [{
+              type: 'web_search',
+              search_context_size: sellerSearchContextSize,
+              filters: { allowed_domains: allowedDomains },
+            }],
+            tool_choice: 'required',
+            include: ['web_search_call.action.sources'],
+            store: false,
+            text: {
+              format: zodTextFormat(
+                productConfigurationSearchAiResultSchema,
+                'catchcatch_product_configuration_search',
+              ),
+            },
+          });
+          logOpenAIUsage(
+            this.config,
+            this.logger,
+            `configuration_search:${seller}:${attempt}`,
+            activeModel,
+            response,
+          );
+
+          if (!response.output_parsed) {
+            throw new Error('OpenAI returned no parsed product configuration search output');
+          }
+          const parsedResult = productConfigurationSearchAiResultSchema.parse(response.output_parsed);
+          assertAnchorProductUnchanged(input.anchor_product, parsedResult.anchor_product);
+          if (
+            parsedResult.seller_results.length !== 1 ||
+            parsedResult.seller_results[0].seller !== seller
+          ) {
+            throw new Error(`Expected exactly one ${seller} result`);
+          }
+        const verified = await this.verifyConfigurationSellerResult(
+            input,
+            parsedResult.seller_results[0],
+            allowedDomains,
+            brandDiscovery.domain,
+            collectWebSearchSourceUrls(response.output),
+            maxCandidatesPerSeller,
+          );
+          return {
+            ...verified,
+            warnings: mergeWarnings(parsedResult.warnings, verified.warnings),
+          };
+        };
+
+        try {
+          return await executeSearch(client, model, 'primary');
+        } catch (primaryError) {
+          if (!fallbackClient || !fallbackModel) {
+            throw primaryError;
+          }
+          this.logger.warn(
+            `${seller} ${model} configuration search failed; retrying once with ${fallbackModel}: ${describeConfigurationSearchFailure(primaryError)}`,
+          );
+          const fallback = await executeSearch(fallbackClient, fallbackModel, 'fallback');
+          return {
+            ...fallback,
+            warnings: mergeWarnings(
+              fallback.warnings,
+              [`${seller}: primary ${model} search failed; ${fallbackModel} fallback was used`],
+            ),
+          };
+        }
+      }));
+
+      const resultWarnings: string[] = [];
+      const sellerResults = searches.map((search, index) => {
+        const seller = targetSellers[index];
+        if (search.status === 'fulfilled') {
+          resultWarnings.push(...search.value.warnings);
+          return search.value.sellerResult;
+        }
+        const reason = describeConfigurationSearchFailure(search.reason);
+        resultWarnings.push(`${seller}: ${reason}`);
         return {
-          seller: sellerResult.seller,
-          availability: candidates.length > 0
-            ? 'AVAILABLE' as const
-            : sellerResult.availability === 'NOT_AVAILABLE'
-              ? 'NOT_AVAILABLE' as const
-              : 'UNKNOWN' as const,
-          candidates,
-          notes,
+          seller,
+          availability: 'UNKNOWN' as const,
+          candidates: [],
+          notes: [reason],
         };
       });
 
       return productConfigurationSearchResultSchema.parse({
-        anchor_product: parsedResult.anchor_product,
+        anchor_product: input.anchor_product,
         seller_results: sellerResults,
         warnings: mergeWarnings(
-          parsedResult.warnings,
           relaxedFieldWarnings,
           brandDiscovery.warnings,
           resultWarnings,
@@ -372,6 +434,237 @@ export class ProductSearchService {
     }
   }
 
+  private async verifyConfigurationSellerResult(
+    input: ProductConfigurationSearchInput,
+    sellerResult: ConfigurationSellerAiResult,
+    allowedDomains: string[],
+    brandOfficialDomain: string | null,
+    searchSourceUrls: Set<string>,
+    maxCandidatesPerSeller: number,
+  ): Promise<{ sellerResult: ProductConfigurationSearchResult['seller_results'][number]; warnings: string[] }> {
+    const candidates: ConfigurationCandidateResult[] = [];
+    const notes = [...sellerResult.notes];
+    const warnings: string[] = [];
+    const observedAt = new Date().toISOString();
+    for (const candidate of sellerResult.candidates.slice(0, maxCandidatesPerSeller)) {
+      const promoted = verifyAndPromoteConfigurationCandidate(candidate, sellerResult.seller, {
+        allowedDomains,
+        brandOfficialDomain,
+        searchSourceUrls,
+        observedAt,
+        inputProductUrl: input.product_url,
+      });
+      if (!promoted.result) {
+        notes.push(promoted.reason);
+        warnings.push(`${sellerResult.seller}: ${promoted.reason}`);
+        continue;
+      }
+      const screened = screenAlternativeConfigurationCandidate(
+        input.anchor_product,
+        promoted.result.candidate_offer,
+        promoted.result.relation_type,
+      );
+      warnings.push(...screened.warnings.map((warning) => `${sellerResult.seller}: ${warning}`));
+      if (!screened.accepted) {
+        const reason = screened.reasons.join('; ');
+        notes.push(reason);
+        warnings.push(`${sellerResult.seller}: rejected configuration candidate: ${reason}`);
+        continue;
+      }
+      const directVerification = await this.verifyDynamicSellerPage(
+        sellerResult.seller,
+        promoted.result,
+      );
+      warnings.push(...directVerification.warnings.map((warning) => `${sellerResult.seller}: ${warning}`));
+      if (!directVerification.candidate) {
+        notes.push('Direct seller-page verification reported that the offer is not purchasable');
+        continue;
+      }
+      candidates.push(buildConfigurationCandidateResult(
+        input.anchor_product,
+        directVerification.candidate,
+      ));
+    }
+    return {
+      sellerResult: {
+        seller: sellerResult.seller,
+        availability: candidates.length > 0
+          ? 'AVAILABLE'
+          : sellerResult.availability === 'NOT_AVAILABLE'
+            ? 'NOT_AVAILABLE'
+            : 'UNKNOWN',
+        candidates,
+        notes,
+      },
+      warnings,
+    };
+  }
+
+  private async searchMusinsaDirect(
+    input: ProductConfigurationSearchInput,
+    maxCandidatesPerSeller: number,
+  ): Promise<{
+    sellerResult: ProductConfigurationSearchResult['seller_results'][number];
+    warnings: string[];
+  } | null> {
+    try {
+      const query = [input.anchor_product.brand, input.anchor_product.normalized_product_name]
+        .filter(Boolean)
+        .join(' ');
+      const searchUrl = `https://www.musinsa.com/search/goods?keyword=${encodeURIComponent(query)}`;
+      const searchResponse = await fetch(searchUrl, {
+        signal: AbortSignal.timeout(this.resolveSellerPageVerificationTimeout()),
+        headers: { 'user-agent': 'CatchCatch/1.0 seller-search-adapter' },
+      });
+      if (!searchResponse.ok) {
+        throw new Error(`search HTTP ${searchResponse.status}`);
+      }
+      const productUrls = extractMusinsaProductUrls(await searchResponse.text(), 5);
+      if (productUrls.length === 0) {
+        throw new Error('no product URLs were present in the search page');
+      }
+
+      const detailResults = await Promise.allSettled(productUrls.map(async (sourceUrl) => {
+        const response = await fetch(sourceUrl, {
+          redirect: 'manual',
+          signal: AbortSignal.timeout(this.resolveSellerPageVerificationTimeout()),
+          headers: { 'user-agent': 'CatchCatch/1.0 seller-search-adapter' },
+        });
+        if (!response.ok) {
+          throw new Error(`detail HTTP ${response.status}`);
+        }
+        return { sourceUrl, facts: extractMusinsaSellerPageFacts(await response.text()) };
+      }));
+      const successfulDetails = detailResults.flatMap((result) => (
+        result.status === 'fulfilled' ? [result.value] : []
+      ));
+      if (successfulDetails.length === 0) {
+        throw new Error('all product detail requests failed');
+      }
+
+      const observedAt = new Date().toISOString();
+      const candidates: ConfigurationCandidateResult[] = [];
+      for (const detail of successfulDetails) {
+        if (
+          detail.facts.available !== true ||
+          !detail.facts.productName ||
+          detail.facts.listedSalePrice === null
+        ) {
+          continue;
+        }
+        const directCandidate = buildMusinsaDirectConfigurationCandidate(
+          input.anchor_product,
+          detail.sourceUrl,
+          detail.facts,
+          observedAt,
+        );
+        if (!directCandidate) {
+          continue;
+        }
+        const screened = screenAlternativeConfigurationCandidate(
+          input.anchor_product,
+          directCandidate.candidate_offer,
+          directCandidate.relation_type,
+        );
+        if (!screened.accepted) {
+          continue;
+        }
+        candidates.push(buildConfigurationCandidateResult(
+          input.anchor_product,
+          directCandidate,
+        ));
+        if (candidates.length >= maxCandidatesPerSeller) {
+          break;
+        }
+      }
+
+      return {
+        sellerResult: {
+          seller: 'MUSINSA_BEAUTY',
+          availability: candidates.length > 0 ? 'AVAILABLE' : 'UNKNOWN',
+          candidates,
+          notes: candidates.length > 0
+            ? ['Direct Musinsa search and product metadata were used']
+            : ['Direct Musinsa search found no verified alternative configuration'],
+        },
+        warnings: ['MUSINSA_BEAUTY: direct seller search succeeded; OpenAI web search was skipped'],
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Direct Musinsa search failed; falling back to OpenAI web search: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return null;
+    }
+  }
+
+  private async verifyDynamicSellerPage(
+    seller: Seller,
+    candidate: PromotedConfigurationCandidate,
+  ): Promise<{
+    candidate: PromotedConfigurationCandidate | null;
+    warnings: string[];
+  }> {
+    if (seller !== 'MUSINSA_BEAUTY') {
+      return { candidate, warnings: [] };
+    }
+
+    try {
+      const response = await fetch(candidate.source.source_url, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(this.resolveSellerPageVerificationTimeout()),
+        headers: { 'user-agent': 'CatchCatch/1.0 seller-page-verifier' },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const contentLength = Number(response.headers.get('content-length') ?? '0');
+      if (contentLength > 2_000_000) {
+        throw new Error('seller page exceeded the 2 MB verification limit');
+      }
+      const facts = extractMusinsaSellerPageFacts(await response.text());
+      if (facts.available === false) {
+        return { candidate: null, warnings: ['direct seller page reports the offer is not purchasable'] };
+      }
+      if (facts.listedSalePrice === null) {
+        throw new Error('current public sale price was not present in page metadata');
+      }
+      const corrected = candidate.candidate_offer.listed_sale_price !== facts.listedSalePrice;
+      return {
+        candidate: {
+          ...candidate,
+          candidate_offer: {
+            ...candidate.candidate_offer,
+            listed_sale_price: facts.listedSalePrice,
+            list_price: facts.listPrice,
+          },
+          source: {
+            ...candidate.source,
+            verification_status: 'CONTENT_VERIFIED',
+          },
+        },
+        warnings: corrected
+          ? [`direct seller page corrected the AI sale price to ${facts.listedSalePrice}`]
+          : [],
+      };
+    } catch (error) {
+      return {
+        candidate: {
+          ...candidate,
+          candidate_offer: {
+            ...candidate.candidate_offer,
+            list_price: null,
+            listed_sale_price: null,
+            public_coupon_amount: null,
+            automatic_discount_amount: null,
+          },
+        },
+        warnings: [
+          `direct seller-page price verification failed; AI price was cleared (${error instanceof Error ? error.message : 'unknown error'})`,
+        ],
+      };
+    }
+  }
+
   // T5 discovery step: a separate, tool-free OpenAI call asking the model to
   // recall (not search) a candidate brand-official domain from the brand
   // name alone. Never throws — any failure (no candidate, malformed output,
@@ -381,6 +674,7 @@ export class ProductSearchService {
   private async discoverBrandOfficialDomain(
     client: OpenAI,
     brand: string,
+    model = this.resolveSearchModel(),
   ): Promise<{ domain: string | null; warnings: string[] }> {
     const cacheKey = normalizeBrandCacheKey(brand);
     if (!cacheKey || brand.length > MAX_DISCOVERY_BRAND_LENGTH) {
@@ -393,7 +687,7 @@ export class ProductSearchService {
 
     try {
       const response = await client.responses.parse({
-        model: this.config.get<string>('OPENAI_SEARCH_MODEL', this.config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+        model,
         instructions: CATCHCATCH_BRAND_OFFICIAL_DOMAIN_INSTRUCTIONS,
         input: buildBrandOfficialDomainCandidatePrompt(brand),
         store: false,
@@ -401,6 +695,7 @@ export class ProductSearchService {
           format: zodTextFormat(brandOfficialDomainCandidateSchema, 'catchcatch_brand_official_domain_candidate'),
         },
       });
+      logOpenAIUsage(this.config, this.logger, 'brand_official_discovery', model, response);
 
       const candidate = response.output_parsed?.candidate_domain;
       if (!candidate) {
@@ -424,6 +719,78 @@ export class ProductSearchService {
       );
       return { domain: null, warnings: [] };
     }
+  }
+
+  private resolveSearchModel(): string {
+    return this.config.get<string>(
+      'OPENAI_SEARCH_MODEL',
+      this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
+    );
+  }
+
+  private resolveConfigurationSearchModel(): string {
+    return this.config.get<string>(
+      'OPENAI_CONFIGURATION_SEARCH_MODEL',
+      this.resolveSearchModel(),
+    );
+  }
+
+  private resolveConfigurationFallbackModel(): string | null {
+    const value = this.config.get<string>(
+      'OPENAI_CONFIGURATION_FALLBACK_MODEL',
+      'gpt-5.6-sol',
+    ).trim();
+    return value || null;
+  }
+
+  private resolveConfigurationFallbackTimeout(): number {
+    const configured = Number(this.config.get<string>(
+      'OPENAI_CONFIGURATION_FALLBACK_TIMEOUT_MS',
+      '10000',
+    ));
+    return Number.isFinite(configured) && configured >= 1000
+      ? configured
+      : 10000;
+  }
+
+  private resolveSellerPageVerificationTimeout(): number {
+    const configured = Number(this.config.get<string>(
+      'SELLER_PAGE_VERIFICATION_TIMEOUT_MS',
+      '3000',
+    ));
+    return Number.isFinite(configured) && configured >= 500
+      ? configured
+      : 3000;
+  }
+
+  private resolveWebSearchContextSize(): 'low' | 'medium' | 'high' {
+    const value = this.config.get<string>('OPENAI_WEB_SEARCH_CONTEXT_SIZE', 'low');
+    return value === 'medium' || value === 'high' ? value : 'low';
+  }
+
+  private resolveConfigurationWebSearchContextSize(
+    seller: Seller,
+  ): 'low' | 'medium' | 'high' {
+    const value = this.config.get<string>(
+      `OPENAI_WEB_SEARCH_CONTEXT_SIZE_${seller}`,
+      this.resolveWebSearchContextSize(),
+    );
+    return value === 'medium' || value === 'high' ? value : 'low';
+  }
+
+  private resolveConfigurationReasoningEffort(): 'none' | 'low' | 'medium' | 'high' {
+    const value = this.config.get<string>('OPENAI_CONFIGURATION_REASONING_EFFORT', 'low');
+    return value === 'none' || value === 'medium' || value === 'high' ? value : 'low';
+  }
+
+  private resolveConfigurationMaxOutputTokens(): number {
+    const configured = Number(this.config.get<string>(
+      'OPENAI_CONFIGURATION_MAX_OUTPUT_TOKENS',
+      '4000',
+    ));
+    return Number.isInteger(configured) && configured >= 1000 && configured <= 16000
+      ? configured
+      : 4000;
   }
 
   // Deterministic, non-network fixture path used when PRODUCT_DATA_MODE is
@@ -526,7 +893,8 @@ export class ProductSearchService {
         availability: seller === matchedSeller ? 'AVAILABLE' as const : 'UNKNOWN' as const,
         candidates: seller === matchedSeller ? [{
           candidate_offer: candidateOffer,
-          same_product_evidence: ['Sample candidate copied from the verified anchor identity'],
+          relation_type: 'SAME_PRODUCT_CONFIGURATION' as const,
+          relation_evidence: ['Sample candidate copied from the verified anchor identity'],
           configuration_difference_evidence: ['Sample candidate quantity or option differs from the anchor'],
           source: {
             source_type: 'SELLER_PAGE' as const,
@@ -666,6 +1034,7 @@ export function verifyAndPromoteConfigurationCandidate(
     brandOfficialDomain: string | null;
     searchSourceUrls: ReadonlySet<string>;
     observedAt: string;
+    inputProductUrl?: string;
   },
 ): { result: PromotedConfigurationCandidate | null; reason: string } {
   if (candidate.source.verification_status !== 'UNVERIFIED') {
@@ -681,6 +1050,20 @@ export function verifyAndPromoteConfigurationCandidate(
     };
   }
   assertUrlWasReturnedByWebSearch(candidate.source.source_url, context.searchSourceUrls);
+  if (
+    seller === 'COUPANG' &&
+    context.inputProductUrl &&
+    !isCoupangConfigurationUrlBoundToDifferentOption(
+      context.inputProductUrl,
+      candidate.source.source_url,
+      context.searchSourceUrls,
+    )
+  ) {
+    return {
+      result: null,
+      reason: 'Coupang configuration candidate is not bound to a different option-specific itemId/vendorItemId',
+    };
+  }
   return {
     result: {
       ...candidate,
@@ -699,6 +1082,7 @@ type SearchedConfigurationOffer = ConfigurationCandidateAi['candidate_offer'];
 export function screenAlternativeConfigurationCandidate(
   anchor: ProductIdentity,
   candidate: SearchedConfigurationOffer,
+  relationType: ConfigurationCandidateAi['relation_type'] = 'SAME_PRODUCT_CONFIGURATION',
 ): { accepted: boolean; reasons: string[]; warnings: string[] } {
   const reasons: string[] = [];
   const warnings: string[] = [];
@@ -720,12 +1104,16 @@ export function screenAlternativeConfigurationCandidate(
     );
   }
   compareAnchorSpecificIdentity('shade_or_scent', anchor.shade_or_scent, candidate.shade_or_scent, reasons);
-  compareAnchorSpecificIdentity(
-    'version_or_renewal',
-    anchor.version_or_renewal,
-    candidate.version_or_renewal,
-    reasons,
-  );
+  if (relationType === 'SAME_PRODUCT_CONFIGURATION') {
+    compareAnchorSpecificIdentity(
+      'version_or_renewal',
+      anchor.version_or_renewal,
+      candidate.version_or_renewal,
+      reasons,
+    );
+  } else {
+    warnings.push('same-line variant may have a different formula or version; equivalent price is reference-only');
+  }
 
   const optionChanged = normalizeNullableIdentityText(anchor.option) !==
     normalizeNullableIdentityText(candidate.option);
@@ -736,12 +1124,59 @@ export function screenAlternativeConfigurationCandidate(
   return { accepted: reasons.length === 0, reasons, warnings };
 }
 
+function isCoupangConfigurationUrlBoundToDifferentOption(
+  inputProductUrl: string,
+  candidateUrl: string,
+  searchSourceUrls: ReadonlySet<string>,
+): boolean {
+  const input = new URL(normalizeSellerPageUrl(inputProductUrl));
+  const candidate = new URL(normalizeSellerPageUrl(candidateUrl));
+  if (
+    input.hostname.toLowerCase().replace(/^www\./, '') !== 'coupang.com' ||
+    candidate.hostname.toLowerCase().replace(/^www\./, '') !== 'coupang.com' ||
+    input.pathname !== candidate.pathname
+  ) {
+    return true;
+  }
+
+  const optionKeys = ['itemId', 'vendorItemId'] as const;
+  const candidateHasOptionId = optionKeys.some((key) => candidate.searchParams.has(key));
+  const differsFromInput = optionKeys.some((key) => {
+    const inputValue = input.searchParams.get(key);
+    const candidateValue = candidate.searchParams.get(key);
+    return inputValue !== null && candidateValue !== null && inputValue !== candidateValue;
+  });
+  if (!candidateHasOptionId || !differsFromInput) {
+    return false;
+  }
+
+  return [...searchSourceUrls].some((rawSourceUrl) => {
+    const source = new URL(normalizeSellerPageUrl(rawSourceUrl));
+    if (source.hostname.toLowerCase().replace(/^www\./, '') !== 'coupang.com') {
+      return false;
+    }
+    if (source.pathname !== candidate.pathname) {
+      return false;
+    }
+    return optionKeys.some((key) => {
+      const candidateValue = candidate.searchParams.get(key);
+      return candidateValue !== null && source.searchParams.get(key) === candidateValue;
+    });
+  });
+}
+
 export function buildConfigurationCandidateResult(
   anchor: ProductIdentity,
   candidate: PromotedConfigurationCandidate,
 ): ConfigurationCandidateResult {
-  const anchorTotal = calculateMainCapacityTotal(anchor.components);
-  const candidateTotal = calculateMainCapacityTotal(candidate.candidate_offer.components);
+  const anchorTotal = calculateMainCapacityTotal(
+    anchor.components,
+    anchor.normalized_product_name,
+  );
+  const candidateTotal = calculateMainCapacityTotal(
+    candidate.candidate_offer.components,
+    candidate.candidate_offer.product_name,
+  );
   const basis = candidate.candidate_offer.listed_sale_price !== null
     ? { price_basis: 'LISTED_SALE_PRICE' as const, price: candidate.candidate_offer.listed_sale_price }
     : candidate.candidate_offer.list_price !== null
@@ -777,19 +1212,45 @@ export function buildConfigurationCandidateResult(
     anchor_main_total_amount: anchorTotal?.totalAmount ?? null,
     candidate_main_total_amount: candidateTotal?.totalAmount ?? null,
     equivalent_price: equivalentPrice,
+    equivalent_price_scope: equivalentPrice === null
+      ? null
+      : candidate.relation_type === 'SAME_LINE_VARIANT'
+        ? 'REFERENCE_ONLY'
+        : 'DIRECT',
   };
 }
 
 export function calculateMainCapacityTotal(
   components: ProductIdentity['components'],
+  expectedProductName?: string | null,
 ): { unit: 'ML' | 'G'; totalAmount: number } | null {
-  const mainComponents = components.filter((component) => component.type === 'MAIN');
-  if (mainComponents.length === 0) {
+  const comparableNames = [
+    expectedProductName,
+    ...components
+      .filter((component) => component.type === 'MAIN')
+      .map((component) => component.name),
+  ]
+    .filter((name): name is string => Boolean(name))
+    .map(normalizeComparableComponentName)
+    .filter(Boolean);
+  const comparableComponents = components.filter((component) => {
+    if (component.type === 'MAIN') {
+      return true;
+    }
+    if (!['REFILL', 'MINI', 'TRAVEL'].includes(component.type) || !component.name) {
+      return false;
+    }
+    const componentName = normalizeComparableComponentName(component.name);
+    return comparableNames.some((name) => (
+      componentName.includes(name) || name.includes(componentName)
+    ));
+  });
+  if (comparableComponents.length === 0) {
     return null;
   }
   let unit: 'ML' | 'G' | null = null;
   let totalAmount = 0;
-  for (const component of mainComponents) {
+  for (const component of comparableComponents) {
     if (
       component.capacity_value === null ||
       component.capacity_unit === null ||
@@ -804,6 +1265,11 @@ export function calculateMainCapacityTotal(
     totalAmount += component.capacity_value * component.quantity;
   }
   return unit && totalAmount > 0 ? { unit, totalAmount } : null;
+}
+
+function normalizeComparableComponentName(value: string): string {
+  return normalizeConfigurationProductName(value)
+    .replace(/(?:리필|미니|여행용|트래블|본품|증정|기획|세트|더블)/g, '');
 }
 
 function summarizeConfiguration(offer: SearchedConfigurationOffer): string {
@@ -907,14 +1373,9 @@ export function buildAllowedSearchDomains(
 export function resolveConfigurationTargetSellers(
   input: Pick<ProductConfigurationSearchInput, 'product_url' | 'target_sellers'>,
 ): Seller[] {
-  if (input.target_sellers) {
-    return [...input.target_sellers];
-  }
-  const sourceSeller = identifySellerForUrl(input.product_url, null) ?? 'BRAND_OFFICIAL';
-  const comparisonSeller: Seller = sourceSeller === 'COUPANG'
-    ? 'MUSINSA_BEAUTY'
-    : 'COUPANG';
-  return [sourceSeller, comparisonSeller];
+  const sourceSeller = identifySellerForUrl(input.product_url, null);
+  const requested = input.target_sellers ?? sellerSchema.options;
+  return requested.filter((seller) => seller !== sourceSeller);
 }
 
 export function buildAllowedSearchDomainsForSellers(
@@ -931,6 +1392,181 @@ export function buildAllowedSearchDomainsForSellers(
     }
   }
   return domains;
+}
+
+function resolveProvidedBrandOfficialDomain(
+  candidate: string | null | undefined,
+): { domain: string | null; warnings: string[] } {
+  if (!candidate) {
+    return { domain: null, warnings: [] };
+  }
+  const gate = gateBrandOfficialDomainCandidate(candidate);
+  if (!gate.accepted) {
+    return {
+      domain: null,
+      warnings: [`Ignored unverified brand-official domain: ${gate.reason}`],
+    };
+  }
+  return {
+    domain: gate.domain,
+    warnings: [`Reused verified brand-official domain ${gate.domain}; discovery call was skipped`],
+  };
+}
+
+function describeConfigurationSearchFailure(error: unknown): string {
+  if (error instanceof OpenAI.APIError) {
+    const failure = classifyOpenAISearchFailure(error.status);
+    return `web search failed (${failure.code}, retryable=${failure.retryable})`;
+  }
+  return `configuration search failed (${error instanceof Error ? error.message : 'unknown error'})`;
+}
+
+export function extractMusinsaSellerPageFacts(html: string): {
+  productName: string | null;
+  listedSalePrice: number | null;
+  listPrice: number | null;
+  available: boolean | null;
+} {
+  const metadata = new Map<string, string>();
+  for (const match of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = match[0];
+    const property = readHtmlAttribute(tag, 'property');
+    const content = readHtmlAttribute(tag, 'content');
+    if (property && content !== null) {
+      metadata.set(property.toLowerCase(), content.trim());
+    }
+  }
+  const salePrice = parsePositiveInteger(metadata.get('product:price:amount'));
+  const listPrice = parsePositiveInteger(metadata.get('product:price:normal_price'));
+  const availability = metadata.get('product:availability');
+  const rawTitle = metadata.get('og:title') ?? null;
+  return {
+    productName: rawTitle?.replace(/\s*-\s*후기\s*\|\s*무신사\s*$/i, '').trim() || null,
+    listedSalePrice: salePrice,
+    listPrice,
+    available: availability === undefined
+      ? null
+      : /^(?:주문가능|in stock|available)$/i.test(availability),
+  };
+}
+
+export function extractMusinsaProductUrls(html: string, limit = 5): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/(?:https?:\\?\/\\?\/www\.musinsa\.com)?\\?\/products\\?\/(\d+)/gi)) {
+    const url = `https://www.musinsa.com/products/${match[1]}`;
+    if (!seen.has(url)) {
+      seen.add(url);
+      urls.push(url);
+    }
+    if (urls.length >= limit) {
+      break;
+    }
+  }
+  return urls;
+}
+
+function buildMusinsaDirectConfigurationCandidate(
+  anchor: ProductIdentity,
+  sourceUrl: string,
+  facts: ReturnType<typeof extractMusinsaSellerPageFacts>,
+  observedAt: string,
+): PromotedConfigurationCandidate | null {
+  if (!facts.productName || facts.listedSalePrice === null) {
+    return null;
+  }
+  const components = parseMusinsaTitleComponents(
+    facts.productName,
+    anchor.normalized_product_name,
+  );
+  if (components.length === 0) {
+    return null;
+  }
+  return {
+    relation_type: 'SAME_PRODUCT_CONFIGURATION',
+    candidate_offer: {
+      product_name: facts.productName,
+      brand: anchor.brand,
+      product_type: anchor.product_type,
+      option: facts.productName,
+      shade_or_scent: anchor.shade_or_scent,
+      version_or_renewal: anchor.version_or_renewal,
+      list_price: facts.listPrice,
+      listed_sale_price: facts.listedSalePrice,
+      public_coupon_amount: null,
+      automatic_discount_amount: null,
+      shipping_fee: null,
+      discount_conditions: [],
+      shipping_condition: null,
+      components,
+    },
+    relation_evidence: ['Musinsa product metadata contains the anchor product name'],
+    configuration_difference_evidence: ['Musinsa product title provides a different capacity or bundle'],
+    source: {
+      source_type: 'SELLER_PAGE',
+      source_url: sourceUrl,
+      acquisition_method: 'DIRECT_HTTP',
+      verification_status: 'CONTENT_VERIFIED',
+      observed_at: observedAt,
+    },
+  };
+}
+
+export function parseMusinsaTitleComponents(
+  productName: string,
+  anchorProductName: string | null,
+): ProductIdentity['components'] {
+  if (!anchorProductName) {
+    return [];
+  }
+  const normalizedTitle = normalizeConfigurationProductName(productName);
+  const normalizedAnchor = normalizeConfigurationProductName(anchorProductName);
+  if (!normalizedTitle.includes(normalizedAnchor)) {
+    return [];
+  }
+  const mainMatch = productName.match(/(\d+(?:\.\d+)?)\s*(ml|g)\b/i);
+  if (!mainMatch) {
+    return [];
+  }
+  const lowered = productName.toLowerCase();
+  const mainQuantity = /(?:1\s*\+\s*1|더블)/.test(lowered)
+    ? 2
+    : Number(lowered.match(/\b(?:x|×|\*)\s*(\d+)\b/i)?.[1] ?? '1');
+  const unit = mainMatch[2].toUpperCase() as 'ML' | 'G';
+  const components: ProductIdentity['components'] = [{
+    type: 'MAIN',
+    name: anchorProductName,
+    capacity_value: Number(mainMatch[1]),
+    capacity_unit: unit,
+    quantity: mainQuantity,
+  }];
+  const giftText = [...productName.matchAll(/\((?:\+)?([^)]*)\)/g)]
+    .map((match) => match[1])
+    .find((text) => /\d+(?:\.\d+)?\s*(?:ml|g)\b/i.test(text)) ?? '';
+  const giftMatch = giftText.match(/([^+,(]*?)\s*(\d+(?:\.\d+)?)\s*(ml|g)\b/i);
+  if (giftMatch) {
+    components.push({
+      type: 'OTHER_COSMETIC',
+      name: giftMatch[1].trim() || '추가 화장품',
+      capacity_value: Number(giftMatch[2]),
+      capacity_unit: giftMatch[3].toUpperCase() as 'ML' | 'G',
+      quantity: 1,
+    });
+  }
+  return components;
+}
+
+function readHtmlAttribute(tag: string, name: string): string | null {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, 'i'));
+  return match?.[2] ?? null;
+}
+
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (!value || !/^\d+$/.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 type WebSearchOutputItem = {

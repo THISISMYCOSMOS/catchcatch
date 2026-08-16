@@ -11,9 +11,15 @@ import { searchedOfferSchema, productSearchInputSchema } from './product-search.
 
 export const MAX_CONFIGURATION_OFFERS_PER_SELLER = 3;
 
+export const configurationRelationTypeSchema = z.enum([
+  'SAME_PRODUCT_CONFIGURATION',
+  'SAME_LINE_VARIANT',
+]);
+
 const configurationCandidateShape = {
+  relation_type: configurationRelationTypeSchema,
   candidate_offer: searchedOfferSchema,
-  same_product_evidence: z.array(z.string()),
+  relation_evidence: z.array(z.string()),
   configuration_difference_evidence: z.array(z.string()),
 };
 
@@ -21,11 +27,11 @@ export const configurationCandidateAiSchema = z.object({
   ...configurationCandidateShape,
   source: sourceCandidateMetadataSchema,
 }).superRefine((candidate, context) => {
-  if (candidate.same_product_evidence.length === 0) {
+  if (candidate.relation_evidence.length === 0) {
     context.addIssue({
       code: 'custom',
-      path: ['same_product_evidence'],
-      message: 'A configuration candidate requires same-product evidence',
+      path: ['relation_evidence'],
+      message: 'A configuration candidate requires product-relation evidence',
     });
   }
   if (candidate.configuration_difference_evidence.length === 0) {
@@ -48,6 +54,7 @@ export const configurationCandidateResultSchema = z.object({
   anchor_main_total_amount: z.number().positive().nullable(),
   candidate_main_total_amount: z.number().positive().nullable(),
   equivalent_price: z.number().int().nonnegative().nullable(),
+  equivalent_price_scope: z.enum(['DIRECT', 'REFERENCE_ONLY']).nullable(),
 });
 
 function addConfigurationSellerIssues(
@@ -118,6 +125,7 @@ export const productConfigurationSearchResultSchema = z.object({
 export const productConfigurationSearchInputSchema = productSearchInputSchema.safeExtend({
   target_sellers: z.array(sellerSchema).min(1).max(sellerSchema.options.length).optional(),
   max_candidates_per_seller: z.number().int().min(1).max(MAX_CONFIGURATION_OFFERS_PER_SELLER).optional(),
+  registered_brand_official_domain: z.string().trim().min(1).nullable().optional(),
 }).superRefine((input, context) => {
   if (
     input.target_sellers &&
@@ -134,5 +142,6 @@ export const productConfigurationSearchInputSchema = productSearchInputSchema.sa
 export type ProductConfigurationSearchInput = z.infer<typeof productConfigurationSearchInputSchema>;
 export type ProductConfigurationSearchAiResult = z.infer<typeof productConfigurationSearchAiResultSchema>;
 export type ProductConfigurationSearchResult = z.infer<typeof productConfigurationSearchResultSchema>;
+export type ConfigurationSellerAiResult = z.infer<typeof configurationSellerAiResultSchema>;
 export type ConfigurationCandidateAi = z.infer<typeof configurationCandidateAiSchema>;
 export type ConfigurationCandidateResult = z.infer<typeof configurationCandidateResultSchema>;

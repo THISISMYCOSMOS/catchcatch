@@ -98,7 +98,7 @@ describe('AnalysesService', () => {
       offerCount: 2,
       unitPriceComparison: {
         ml: { id: 'offer-lowest', unitPrice: 200 },
-        g: { id: 'offer-lowest', unitPrice: 500 },
+        g: null,
       },
     });
     expect(await analysisOffers.findByAnalysisId(result.id)).toHaveLength(2);

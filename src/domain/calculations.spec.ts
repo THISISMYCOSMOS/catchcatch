@@ -498,16 +498,16 @@ describe('domain calculations', () => {
       expect(totals).toEqual({ ml: 50, g: 0 });
     });
 
-    it('returns null for the affected unit when capacity is unclear', () => {
+    it('returns null for the affected unit and excludes other-cosmetic gifts', () => {
       const totals = calculateCosmeticCapacityTotals([
         component('MAIN', 50, 'ML', 1),
         component('REFILL', null, 'ML', 1),
         component('OTHER_COSMETIC', 20, 'G', 1),
       ]);
 
-      expect(totals).toEqual({ ml: null, g: 20 });
+      expect(totals).toEqual({ ml: null, g: 0 });
       expect(calculateUnitPrice(10000, totals.ml)).toBeNull();
-      expect(calculateUnitPrice(10000, totals.g)).toBe(500);
+      expect(calculateUnitPrice(10000, totals.g)).toBeNull();
     });
 
     it('returns null for unit price when quantity is unclear', () => {

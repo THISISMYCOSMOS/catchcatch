@@ -101,20 +101,61 @@ npm run test:search:live -- "https://www.musinsa.com/..."
 ### 다른 용량·구성 검색
 
 `POST /internal/v1/product-search/configurations`는 검증된 기준 상품과 같은 제품의
-다른 용량·수량·세트 구성만 검색합니다. 기본값은 링크를 받은 판매처와 비교 판매처
-한 곳, 판매처당 후보 2개이며 `target_sellers`와 `max_candidates_per_seller`로 후속
-검색 범위를 지정할 수 있습니다. 환산가는 AI가 아니라 서비스 코드가 본품(`MAIN`)
-용량과 공개 표시가를 사용해 계산합니다. 기본 검색 제한시간은 25초입니다.
+다른 용량·수량·세트 구성뿐 아니라 같은 핵심 제품 라인의 다른 버전도 검색합니다.
+기본값은 링크를 받은 판매처를 제외한 등록 판매처 전체, 판매처당 후보 2개이며
+`target_sellers`와 `max_candidates_per_seller`로 후속 검색 범위를 지정할 수 있습니다.
+명시적인 `target_sellers`에도 입력 판매처가 들어 있으면 이미 확보한 링크를 다시
+검색하지 않고 제외합니다. 각 판매처는 별도 `web_search`로 동시에 조회하므로 한
+판매처의 지연이나 실패는 해당 판매처만 `UNKNOWN`으로 남깁니다. 환산가는 AI가
+아니라 서비스 코드가 같은 제품의 `MAIN`과 이름이 일치하는 `REFILL`/`MINI`/`TRAVEL`
+용량 및 공개 표시가를 사용해 계산합니다. 다른 화장품 사은품은 합산하지 않습니다. 동일 제품 구성은
+`SAME_PRODUCT_CONFIGURATION`, 같은 라인의 다른 버전은 `SAME_LINE_VARIANT`이며,
+다른 버전의 환산가는 `equivalent_price_scope=REFERENCE_ONLY`로 표시됩니다. 기본
+검색 제한시간은 25초입니다.
 
 ```sh
 npm run test:configurations:live -- "https://www.coupang.com/vp/products/..."
 ```
 
+네 판매처를 후보 1개씩 조회하면서 실제 토큰 사용량을 확인하려면 다음처럼 실행합니다.
+각 OpenAI 응답은 `OPENAI_USAGE` 로그에 토큰과 웹 검색 호출 수를 남기며 공개 API
+응답에는 이 진단값을 포함하지 않습니다.
+
+```sh
+npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,BRAND_OFFICIAL --max-candidates=1
+```
+
+이미 저장한 기준 상품 JSON이 있으면 식별 호출 없이 재사용할 수 있습니다. 공식몰
+도메인도 Backend에서 검증·저장한 값을 전달하면 발견 호출을 건너뜁니다. 두 값 모두
+Agent에서 스키마와 도메인 게이트를 다시 통과해야 합니다.
+
+```sh
+npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --anchor-file=anchor.json --brand-domain=roundlab.com --max-candidates=1
+```
+
+구성 검색은 기본적으로 `OPENAI_CONFIGURATION_SEARCH_MODEL=gpt-5.6-luna`,
+`OPENAI_WEB_SEARCH_CONTEXT_SIZE=low`, `OPENAI_CONFIGURATION_REASONING_EFFORT=low`,
+`OPENAI_CONFIGURATION_MAX_OUTPUT_TOKENS=4000`을 사용합니다. 최종 AI 판정 모델
+`OPENAI_MODEL`과 분리되어 있어 가격·구성 추출만 저비용 모델로 운영할 수 있습니다.
+Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처만
+`OPENAI_CONFIGURATION_FALLBACK_MODEL=gpt-5.6-sol`로 한 번 재시도합니다. 정상적인
+`UNKNOWN`에는 재시도하지 않습니다. 기본 시간 예산은 Luna 18초, Sol 10초입니다.
+동적 가격 추출이 까다로운 무신사만
+`OPENAI_WEB_SEARCH_CONTEXT_SIZE_MUSINSA_BEAUTY=medium`을 사용하고 나머지는 `low`를
+유지합니다.
+
+무신사 구성 검색은 이보다 먼저 무신사 검색 페이지와 상품 상세 메타데이터를 직접
+조회합니다. 직접 검색이 성공하면 OpenAI 호출 없이 현재 판매가·정상가·재고·상품명을
+읽어 `DIRECT_HTTP`/`CONTENT_VERIFIED` 출처로 반환합니다. 직접 검색 페이지 형식이
+바뀌거나 네트워크 오류가 나면 그때만 위 Luna 웹 검색 경로로 폴백합니다. 현재
+올리브영 검색 페이지는 접속 확인 화면, 쿠팡 검색 페이지는 서버 접근 거부가 있어
+두 판매처는 Luna 웹 검색 경로를 유지합니다.
+
 ### 브랜드 공식몰 도메인 발견 (`web_search` 모드 전용)
 
 네 판매처 중 올리브영·무신사 뷰티·쿠팡은 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.
 
-**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 검색 호출 **이전에** OpenAI `responses.parse` 호출이 1회 추가됩니다. 즉 캐시 미스는 검색 1건당 OpenAI 호출 2회, 캐시 히트는 1회입니다. 발견 호출은 `web_search` 도구를 붙이지 않고(모델이 이미 아는 지식만 사용) 출력도 `candidate_domain` 하나뿐이라 검색 호출보다 훨씬 작지만, 지연 시간은 왕복 1회만큼 늘어납니다. 모델과 클라이언트 설정은 검색 호출과 동일합니다(`OPENAI_SEARCH_MODEL` → 없으면 `OPENAI_MODEL`, `OPENAI_TIMEOUT_MS`, `maxRetries: 0`, `store: false`).
+**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 검색 호출 **이전에** OpenAI `responses.parse` 호출이 1회 추가됩니다. 다만 `registered_brand_official_domain`으로 게이트를 통과한 저장값을 전달하면 발견 호출을 생략합니다. 발견 호출은 `web_search` 도구를 붙이지 않고 출력도 `candidate_domain` 하나뿐입니다. 일반 검색에서는 `OPENAI_SEARCH_MODEL`, 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
 
 **캐시 키와 수명.** 프로세스 메모리 안의 `Map` 하나입니다(`ProductSearchService.brandOfficialDomainCache`).
 
