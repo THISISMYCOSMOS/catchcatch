@@ -11,4 +11,9 @@ export class ProductSearchController {
   search(@Body() body: unknown) {
     return this.service.searchSameProduct(body);
   }
+
+  @Post('configurations')
+  searchConfigurations(@Body() body: unknown) {
+    return this.service.searchAlternativeConfigurations(body);
+  }
 }

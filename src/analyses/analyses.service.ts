@@ -270,6 +270,20 @@ export class AnalysesService {
     }));
   }
 
+  async deleteForUser(id: string, userId: string): Promise<void> {
+    const row = await this.analyses.findById(id);
+    if (!row) {
+      throw new NotFoundException(`Analysis not found: ${id}`);
+    }
+    if (row.user_id !== userId) {
+      throw new ForbiddenException('Cannot delete another user analysis');
+    }
+    const deleted = await this.analyses.deleteByIdForUser(id, userId);
+    if (!deleted) {
+      throw new NotFoundException(`Analysis not found: ${id}`);
+    }
+  }
+
   private async calculateResult(product: Row<'products'>, userId: string): Promise<{
     allowedConclusions: Row<'analyses'>['allowed_conclusions'];
     warningCodes: Row<'analyses'>['warning_codes'];

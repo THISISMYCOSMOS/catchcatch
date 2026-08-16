@@ -159,6 +159,27 @@ describe('AnalysesService', () => {
     expect(new Set([first.id, second.id, third.id]).size).toBe(3);
   });
 
+  it('deletes only the owning user analysis and its history snapshots', async () => {
+    const product = await seedAnalysisReadyProduct('deletable-product');
+    const created = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/deletable',
+      productId: product.id,
+    });
+
+    await expect(service.deleteForUser(created.id, 'user-2'))
+      .rejects
+      .toBeInstanceOf(ForbiddenException);
+    await expect(service.deleteForUser(created.id, 'user-1')).resolves.toBeUndefined();
+
+    expect(await analyses.findById(created.id)).toBeNull();
+    expect(database.store.analysisOffers.some((row) => row.analysis_id === created.id)).toBe(false);
+    expect(database.store.priceHistory.some((row) => row.analysis_id === created.id)).toBe(false);
+    await expect(service.deleteForUser(created.id, 'user-1'))
+      .rejects
+      .toBeInstanceOf(NotFoundException);
+  });
+
   it('uses existing calculation functions in the analysis flow', async () => {
     const marketSpy = jest.spyOn(calculations, 'calculateMarketEffectivePriceBreakdown');
     const userSpy = jest.spyOn(calculations, 'calculateUserEffectivePriceBreakdown');

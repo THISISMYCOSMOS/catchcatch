@@ -410,9 +410,29 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
 
   async findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]> {
     return this.database.store.analyses
-      .filter((row) => row.user_id === userId)
-      .sort((left, right) => right.created_at.localeCompare(left.created_at))
-      .slice(0, limit);
+      .map((row, insertionIndex) => ({ row, insertionIndex }))
+      .filter(({ row }) => row.user_id === userId)
+      .sort((left, right) => (
+        right.row.created_at.localeCompare(left.row.created_at) ||
+        right.insertionIndex - left.insertionIndex
+      ))
+      .slice(0, limit)
+      .map(({ row }) => row);
+  }
+
+  async deleteByIdForUser(id: string, userId: string): Promise<boolean> {
+    const index = this.database.store.analyses.findIndex((row) => (
+      row.id === id && row.user_id === userId
+    ));
+    if (index < 0) {
+      return false;
+    }
+    this.database.store.analyses.splice(index, 1);
+    this.database.store.analysisOffers = this.database.store.analysisOffers
+      .filter((row) => row.analysis_id !== id);
+    this.database.store.priceHistory = this.database.store.priceHistory
+      .filter((row) => row.analysis_id !== id);
+    return true;
   }
 
   async updateResult(

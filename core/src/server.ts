@@ -1,12 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
-import { AnalysisRequest, AnalysisResult } from './contracts.js';
+import {
+  AnalysisAccessRequest,
+  AnalysisRequest,
+  AnalysisResult,
+  BackendAnalysis,
+  RecentAnalysesRequest,
+} from './contracts.js';
 import { CoreError } from './errors.js';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
 export type AnalysisHandler = {
   analyze(request: AnalysisRequest): Promise<AnalysisResult>;
+  findRecentAnalyses(request: RecentAnalysesRequest): Promise<BackendAnalysis[]>;
+  findAnalysis(request: AnalysisAccessRequest): Promise<BackendAnalysis>;
+  deleteAnalysis(request: AnalysisAccessRequest): Promise<void>;
 };
 
 export function createCoreServer(
@@ -19,10 +28,11 @@ export function createCoreServer(
     if (!applyCors(request, response, allowedOrigins)) return;
 
     try {
-      if (request.method === 'GET' && request.url === '/health') {
+      const requestUrl = new URL(request.url ?? '/', 'http://core.local');
+      if (request.method === 'GET' && requestUrl.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' });
       }
-      if (request.method === 'POST' && request.url === '/api/v1/analyses') {
+      if (request.method === 'POST' && requestUrl.pathname === '/api/v1/analyses') {
         const authorization = requireBearerToken(request);
         requireJsonContentType(request);
         const body = await readJsonBody(request);
@@ -35,6 +45,28 @@ export function createCoreServer(
           authorization,
         });
         return sendJson(response, 201, result);
+      }
+      if (request.method === 'GET' && requestUrl.pathname === '/api/v1/analyses/recent') {
+        const authorization = requireBearerToken(request);
+        const limit = optionalSingleQueryParameter(requestUrl, 'limit');
+        const result = await orchestrator.findRecentAnalyses({
+          authorization,
+          ...(limit === undefined ? {} : { limit }),
+        });
+        return sendJson(response, 200, result);
+      }
+      const analysisId = matchAnalysisId(requestUrl.pathname);
+      if (request.method === 'GET' && analysisId !== null) {
+        const authorization = requireBearerToken(request);
+        const result = await orchestrator.findAnalysis({ analysisId, authorization });
+        return sendJson(response, 200, result);
+      }
+      if (request.method === 'DELETE' && analysisId !== null) {
+        const authorization = requireBearerToken(request);
+        await orchestrator.deleteAnalysis({ analysisId, authorization });
+        response.statusCode = 204;
+        response.end();
+        return;
       }
       return sendJson(response, 404, {
         code: 'ROUTE_NOT_FOUND',
@@ -68,7 +100,7 @@ function applyCors(
     response.setHeader('access-control-allow-origin', origin);
     response.setHeader('vary', 'Origin');
     response.setHeader('access-control-allow-headers', 'authorization, content-type, x-request-id');
-    response.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+    response.setHeader('access-control-allow-methods', 'GET,POST,DELETE,OPTIONS');
   }
   if (request.method === 'OPTIONS') {
     response.statusCode = origin && allowedOrigins.includes(origin) ? 204 : 403;
@@ -146,6 +178,26 @@ function rejectUnknownKeys(
   const allowed = new Set(allowedKeys);
   if (Object.keys(body).some((key) => !allowed.has(key))) {
     throw new CoreError(400, 'UNKNOWN_REQUEST_FIELD', '지원하지 않는 요청 필드가 있습니다.');
+  }
+}
+
+function optionalSingleQueryParameter(url: URL, key: string): string | undefined {
+  const values = url.searchParams.getAll(key);
+  if (values.length > 1) {
+    throw new CoreError(400, 'INVALID_REQUEST', `${key} must be provided once`);
+  }
+  return values[0];
+}
+
+function matchAnalysisId(pathname: string): string | null {
+  const match = /^\/api\/v1\/analyses\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  const encodedAnalysisId = match[1];
+  if (!encodedAnalysisId) return null;
+  try {
+    return decodeURIComponent(encodedAnalysisId);
+  } catch {
+    throw new CoreError(400, 'INVALID_REQUEST', 'analysisId is invalid');
   }
 }
 

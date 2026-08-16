@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -32,11 +44,28 @@ export class AnalysesController {
     return this.service.findRecentByUserId(userId, limit);
   }
 
+  @Get('recent')
+  findRecent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.findRecentByUserId(user.id, limit);
+  }
+
   @Get(':analysisId')
   findById(
     @Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.service.findByIdForUser(analysisId, user.id);
+  }
+
+  @Delete(':analysisId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteById(
+    @Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.deleteForUser(analysisId, user.id);
   }
 }

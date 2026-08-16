@@ -49,12 +49,16 @@ export const productIdentitySchema = z.object({
 
 export const sourceCandidateMetadataSchema = z.object({
   source_type: z.literal('SELLER_PAGE'),
-  source_url: z.string().url(),
+  // Provider-facing structured output cannot include JSON Schema
+  // format: "uri". Strict URL validation is applied when the candidate is
+  // promoted into sourceMetadataSchema below.
+  source_url: z.string().min(1),
   acquisition_method: z.literal('AI_WEB_SEARCH'),
   verification_status: z.literal('UNVERIFIED'),
 }).strict();
 
 export const sourceMetadataSchema = sourceCandidateMetadataSchema.extend({
+  source_url: z.string().url(),
   observed_at: z.string().datetime({ offset: true }),
   verification_status: z.enum([
     'UNVERIFIED',

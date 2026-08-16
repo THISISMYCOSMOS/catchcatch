@@ -1,8 +1,11 @@
 import {
   AgentClient,
+  AnalysisAccessRequest,
   AnalysisRequest,
   AnalysisResult,
+  BackendAnalysis,
   BackendClient,
+  RecentAnalysesRequest,
 } from './contracts.js';
 import { CoreError } from './errors.js';
 import { resolveAllowedProductDomains } from './product-url.policy.js';
@@ -71,6 +74,13 @@ export class AnalysisOrchestrator {
       judgment,
       authorization: request.authorization,
     });
+    if (finalized.status !== 'COMPLETED') {
+      throw new CoreError(
+        502,
+        'ANALYSIS_FINALIZATION_INCOMPLETE',
+        '최종 분석 결과가 저장되지 않았습니다.',
+      );
+    }
 
     return {
       analysisId: finalized.id,
@@ -78,5 +88,17 @@ export class AnalysisOrchestrator {
       analysis: finalized,
       judgment,
     };
+  }
+
+  findRecentAnalyses(request: RecentAnalysesRequest): Promise<BackendAnalysis[]> {
+    return this.backend.findRecentAnalyses(request);
+  }
+
+  findAnalysis(request: AnalysisAccessRequest): Promise<BackendAnalysis> {
+    return this.backend.findAnalysis(request);
+  }
+
+  deleteAnalysis(request: AnalysisAccessRequest): Promise<void> {
+    return this.backend.deleteAnalysis(request);
   }
 }

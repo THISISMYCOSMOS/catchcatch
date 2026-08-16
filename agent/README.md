@@ -85,6 +85,31 @@ AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 
 
 `agent/.env.example`을 그대로 `.env`로 복사하고 `INTERNAL_API_TOKEN`만 채우면(`PRODUCT_DATA_MODE=sample`, `AI_JUDGMENT_MODE=mock`이 기본값이므로) `OPENAI_API_KEY` 없이도 세 엔드포인트 모두 스키마를 통과하는 응답을 반환합니다. Core↔Agent 연동을 로컬에서 확인할 때는 이 기본값을 그대로 쓰면 됩니다. 실제 판매처 데이터와 실제 AI 판단이 필요할 때만 두 값을 각각 `web_search`, `real`로 바꾸고 `OPENAI_API_KEY`를 채웁니다.
 
+### 단일 상품 링크 실검색 점검
+
+`OPENAI_API_KEY`가 설정된 환경에서 아래 명령은 Backend 저장 없이 Agent의 상품 식별과
+판매처 검색만 순서대로 실행합니다. 출력에는 전체 검색 결과와 무신사 결과를 따로 뽑은
+`targetSeller`가 포함되며 API 키나 내부 토큰은 출력하지 않습니다.
+
+```sh
+npm run test:search:live -- "https://www.musinsa.com/..."
+```
+
+판정 시에는 `availability`만 보지 말고 `source.source_url`, `verification_status`,
+`matchEvidence`, 상품 옵션·구성 및 가격 필드를 함께 확인합니다.
+
+### 다른 용량·구성 검색
+
+`POST /internal/v1/product-search/configurations`는 검증된 기준 상품과 같은 제품의
+다른 용량·수량·세트 구성만 검색합니다. 기본값은 링크를 받은 판매처와 비교 판매처
+한 곳, 판매처당 후보 2개이며 `target_sellers`와 `max_candidates_per_seller`로 후속
+검색 범위를 지정할 수 있습니다. 환산가는 AI가 아니라 서비스 코드가 본품(`MAIN`)
+용량과 공개 표시가를 사용해 계산합니다. 기본 검색 제한시간은 25초입니다.
+
+```sh
+npm run test:configurations:live -- "https://www.coupang.com/vp/products/..."
+```
+
 ### 브랜드 공식몰 도메인 발견 (`web_search` 모드 전용)
 
 네 판매처 중 올리브영·무신사 뷰티·쿠팡은 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.

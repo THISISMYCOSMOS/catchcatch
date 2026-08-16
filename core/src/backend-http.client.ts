@@ -1,8 +1,10 @@
 import {
+  AnalysisAccessRequest,
   BackendAnalysis,
   BackendClient,
   ProductIdentificationResult,
   ProductSearchResult,
+  RecentAnalysesRequest,
   ResolvedProduct,
 } from './contracts.js';
 import { HttpJsonClient } from './http-json.client.js';
@@ -89,6 +91,28 @@ export class BackendHttpClient implements BackendClient {
         },
       },
     );
+  }
+
+  findRecentAnalyses(input: RecentAnalysesRequest): Promise<BackendAnalysis[]> {
+    const query = input.limit === undefined
+      ? ''
+      : `?limit=${encodeURIComponent(input.limit)}`;
+    return this.http.request(`/analyses/recent${query}`, {
+      headers: authorizationHeader(input.authorization),
+    });
+  }
+
+  findAnalysis(input: AnalysisAccessRequest): Promise<BackendAnalysis> {
+    return this.http.request(`/analyses/${encodeURIComponent(input.analysisId)}`, {
+      headers: authorizationHeader(input.authorization),
+    });
+  }
+
+  async deleteAnalysis(input: AnalysisAccessRequest): Promise<void> {
+    await this.http.request(`/analyses/${encodeURIComponent(input.analysisId)}`, {
+      method: 'DELETE',
+      headers: authorizationHeader(input.authorization),
+    });
   }
 }
 

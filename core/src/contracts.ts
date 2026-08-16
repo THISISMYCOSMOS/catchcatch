@@ -62,6 +62,16 @@ export type AnalysisResult = {
   judgment: unknown;
 };
 
+export type AnalysisAccessRequest = {
+  analysisId: string;
+  authorization: string;
+};
+
+export type RecentAnalysesRequest = {
+  authorization: string;
+  limit?: string;
+};
+
 export interface AgentClient {
   identify(input: {
     product_url: string;
@@ -103,4 +113,7 @@ export interface BackendClient {
     judgment: unknown;
     authorization: string;
   }): Promise<BackendAnalysis>;
+  findRecentAnalyses(input: RecentAnalysesRequest): Promise<BackendAnalysis[]>;
+  findAnalysis(input: AnalysisAccessRequest): Promise<BackendAnalysis>;
+  deleteAnalysis(input: AnalysisAccessRequest): Promise<void>;
 }

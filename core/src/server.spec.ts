@@ -90,6 +90,9 @@ test('passes a validated analysis request to the orchestrator', async (context) 
         judgment: {},
       };
     },
+    async findRecentAnalyses() { return []; },
+    async findAnalysis() { throw new Error('must not be called'); },
+    async deleteAnalysis() { throw new Error('must not be called'); },
   } satisfies AnalysisHandler;
   const server = createCoreServer(orchestrator, []);
   context.after(() => server.close());
@@ -115,9 +118,77 @@ test('passes a validated analysis request to the orchestrator', async (context) 
   });
 });
 
+test('proxies authenticated recent, detail, and delete requests', async (context) => {
+  const calls: Array<{ operation: string; input: unknown }> = [];
+  const analysis = {
+    id: '11111111-1111-4111-8111-111111111111',
+    status: 'COMPLETED',
+    productId: 'product-1',
+    allowedConclusions: [],
+    selectedCriteria: [],
+    warningCodes: [],
+    result: {},
+  };
+  const orchestrator: AnalysisHandler = {
+    async analyze() { throw new Error('must not be called'); },
+    async findRecentAnalyses(input) {
+      calls.push({ operation: 'recent', input });
+      return [analysis];
+    },
+    async findAnalysis(input) {
+      calls.push({ operation: 'detail', input });
+      return analysis;
+    },
+    async deleteAnalysis(input) {
+      calls.push({ operation: 'delete', input });
+    },
+  };
+  const server = createCoreServer(orchestrator, []);
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const headers = { authorization: 'Bearer access-token' };
+
+  const recent = await fetch(`${baseUrl}/api/v1/analyses/recent?limit=5`, { headers });
+  const detail = await fetch(`${baseUrl}/api/v1/analyses/${analysis.id}`, { headers });
+  const deleted = await fetch(`${baseUrl}/api/v1/analyses/${analysis.id}`, {
+    method: 'DELETE',
+    headers,
+  });
+
+  assert.equal(recent.status, 200);
+  assert.deepEqual(await recent.json(), [analysis]);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(await detail.json(), analysis);
+  assert.equal(deleted.status, 204);
+  assert.equal(await deleted.text(), '');
+  assert.deepEqual(calls, [
+    {
+      operation: 'recent',
+      input: { authorization: 'Bearer access-token', limit: '5' },
+    },
+    {
+      operation: 'detail',
+      input: { analysisId: analysis.id, authorization: 'Bearer access-token' },
+    },
+    {
+      operation: 'delete',
+      input: { analysisId: analysis.id, authorization: 'Bearer access-token' },
+    },
+  ]);
+});
+
 function fakeOrchestrator(): AnalysisHandler {
   return {
     async analyze() {
+      throw new Error('must not be called');
+    },
+    async findRecentAnalyses() {
+      throw new Error('must not be called');
+    },
+    async findAnalysis() {
+      throw new Error('must not be called');
+    },
+    async deleteAnalysis() {
       throw new Error('must not be called');
     },
   };

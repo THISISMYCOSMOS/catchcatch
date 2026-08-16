@@ -2,7 +2,11 @@ import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
-import { assertAllowedSellerUrl, normalizeSellerPageUrl } from '../ai-contracts/seller-domain.policy';
+import {
+  assertAllowedSellerUrl,
+  normalizeSellerPageUrl,
+  sellerPageUrlsReferToSameProduct,
+} from '../ai-contracts/seller-domain.policy';
 import {
   buildProductIdentificationPrompt,
   CATCHCATCH_PRODUCT_IDENTIFICATION_INSTRUCTIONS,
@@ -90,7 +94,7 @@ export class ProductIdentificationService {
     } catch (error) {
       if (error instanceof OpenAI.APIError) {
         this.logger.error(
-          `OpenAI product identification failed: status=${error.status}, request_id=${error.requestID ?? 'unknown'}`,
+          `OpenAI product identification failed: status=${error.status}, code=${error.code ?? 'unknown'}, request_id=${error.requestID ?? 'unknown'}, message=${error.message}`,
         );
         throw new ServiceUnavailableException({
           code: 'PRODUCT_IDENTIFICATION_PROVIDER_UNAVAILABLE',
@@ -98,7 +102,9 @@ export class ProductIdentificationService {
           retryable: error.status === 429 || error.status === undefined || error.status >= 500,
         });
       }
-      this.logger.error('Product identification output validation failed');
+      this.logger.error(
+        `Product identification output validation failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
       throw new ServiceUnavailableException({
         code: 'PRODUCT_IDENTIFICATION_OUTPUT_INVALID',
         retryable: false,
@@ -147,7 +153,7 @@ function assertInputUrlWasSearched(
   output: unknown,
 ): void {
   const searchedUrls = collectSearchUrls(output);
-  if (!searchedUrls.has(normalizeSellerPageUrl(input.product_url))) {
+  if (![...searchedUrls].some((url) => sellerPageUrlsReferToSameProduct(url, input.product_url))) {
     throw new Error('Input product URL was not returned by web search');
   }
 }

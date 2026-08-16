@@ -41,6 +41,18 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
     return data ?? [];
   }
 
+  async deleteByIdForUser(id: string, userId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('analyses')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    throwOnSupabaseError('delete analysis by id and user_id', error);
+    return data !== null;
+  }
+
   async updateResult(
     id: string,
     input: Pick<

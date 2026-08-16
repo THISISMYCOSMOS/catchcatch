@@ -53,6 +53,9 @@ test('orchestrates identification, persistence, calculation, and judgment in ord
     async createAnalysis() { calls.push('calculate'); return initial; },
     async getJudgmentInput() { calls.push('context'); return { facts: [] }; },
     async finalizeJudgment() { calls.push('finalize'); return finalized; },
+    async findRecentAnalyses() { return []; },
+    async findAnalysis() { return finalized; },
+    async deleteAnalysis() {},
   };
   const orchestrator = new AnalysisOrchestrator(agent, backend, ['coupang.com']);
 
@@ -104,6 +107,40 @@ test('fails closed before persistence when identification is ambiguous', async (
     (error: unknown) => error instanceof CoreError && error.code === 'PRODUCT_IDENTIFICATION_INCOMPLETE',
   );
   assert.equal(backendCalled, false);
+});
+
+test('does not report completion when final backend persistence fails', async () => {
+  const identification: ProductIdentificationResult = {
+    identification_status: 'IDENTIFIED',
+    anchor_product: identity,
+    preview: null,
+    source: null,
+    warnings: [],
+  };
+  const agent: AgentClient = {
+    async identify() { return identification; },
+    async search() {
+      return { anchor_product: identity, seller_results: [], warnings: [] };
+    },
+    async judge() { return { decision_status: 'DECIDED' }; },
+  };
+  const backend: BackendClient = {
+    async resolveProduct() { return { productId: 'product-1', brandId: null }; },
+    async ingestOffers() {},
+    async createAnalysis() { return analysis('analysis-1', null); },
+    async getJudgmentInput() { return { facts: [] }; },
+    async finalizeJudgment() { throw new Error('persistence failed'); },
+    async findRecentAnalyses() { return []; },
+    async findAnalysis() { return analysis('analysis-1', null); },
+    async deleteAnalysis() {},
+  };
+  const orchestrator = new AnalysisOrchestrator(agent, backend, ['coupang.com']);
+
+  await assert.rejects(orchestrator.analyze({
+    sourceUrl: 'https://www.coupang.com/vp/products/1',
+    idempotencyKey: 'request-3',
+    authorization: 'Bearer test-token',
+  }), /persistence failed/);
 });
 
 function analysis(id: string, verdict: string | null): BackendAnalysis {

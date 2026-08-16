@@ -61,6 +61,7 @@ export interface AnalysisRepository {
   create(input: Insert<'analyses'>): Promise<Row<'analyses'>>;
   findById(id: string): Promise<Row<'analyses'> | null>;
   findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]>;
+  deleteByIdForUser(id: string, userId: string): Promise<boolean>;
   updateResult(
     id: string,
     input: Pick<

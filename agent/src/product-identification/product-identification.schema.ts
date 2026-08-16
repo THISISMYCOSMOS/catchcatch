@@ -9,7 +9,7 @@ import {
   assertAllowedSellerUrl,
   assertSellerMatchesUrl,
   inferBrandOfficialDomain,
-  normalizeSellerPageUrl,
+  sellerPageUrlsReferToSameProduct,
 } from '../ai-contracts/seller-domain.policy';
 import {
   addArrayLimitIssue,
@@ -39,21 +39,35 @@ const productIdentificationResultShape = {
     'UNKNOWN',
   ]),
   anchor_product: productIdentitySchema.nullable(),
-  preview: z.object({
-    seller: sellerSchema.nullable(),
-    listed_price: z.number().int().nonnegative().nullable(),
-    image_url: z.string().url().nullable(),
-  }).nullable(),
   warnings: z.array(z.string()),
 };
 
+const productIdentificationAiPreviewSchema = z.object({
+  seller: sellerSchema.nullable(),
+  listed_price: z.number().int().nonnegative().nullable(),
+  // OpenAI Structured Outputs rejects JSON Schema format: "uri". The
+  // provider-facing schema accepts a non-empty candidate and the final
+  // result schema below still performs the strict URL validation.
+  image_url: z.string().min(1).nullable(),
+});
+
+const productIdentificationPreviewSchema = z.object({
+  seller: sellerSchema.nullable(),
+  listed_price: z.number().int().nonnegative().nullable(),
+  image_url: z.string().url().nullable(),
+});
+
 export const productIdentificationAiResultSchema = z.object({
   ...productIdentificationResultShape,
+  preview: productIdentificationAiPreviewSchema.nullable(),
   source: sourceCandidateMetadataSchema.nullable(),
 }).superRefine(addIdentificationIssues);
 
 export const productIdentificationResultSchema = z.object({
   ...productIdentificationResultShape,
+  preview: z.object({
+    ...productIdentificationPreviewSchema.shape,
+  }).nullable(),
   source: sourceMetadataSchema.extend({
     verification_status: z.literal('URL_VERIFIED'),
   }).nullable(),
@@ -109,8 +123,7 @@ export function validateProductIdentificationResult(
   if (result.source) {
     assertAllowedSellerUrl(result.source.source_url, input.allowed_domains);
     if (
-      normalizeSellerPageUrl(result.source.source_url) !==
-      normalizeSellerPageUrl(input.product_url)
+      !sellerPageUrlsReferToSameProduct(result.source.source_url, input.product_url)
     ) {
       throw new Error('Identification source must match input product URL');
     }

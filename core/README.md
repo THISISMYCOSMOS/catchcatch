@@ -8,6 +8,18 @@ Core는 공개 프론트엔드와 내부 Backend·Agent 사이의 오케스트�
 - Agent는 상품 식별, 판매처 검색, 판단 설명만 담당합니다.
 - Core와 내부 서비스 사이 요청은 `x-internal-api-token`으로 인증합니다.
 
+## 공개 분석 API
+
+모든 경로는 `Authorization: Bearer <access token>`이 필요합니다.
+
+- `POST /api/v1/analyses`
+- `GET /api/v1/analyses/recent?limit=1`
+- `GET /api/v1/analyses/{analysisId}`
+- `DELETE /api/v1/analyses/{analysisId}`
+
+새 사용자 검색은 새 요청 ID를 사용하므로 기존 분석을 수정하지 않습니다. 같은 요청의
+네트워크 재시도만 동일한 `idempotencyKey`를 재사용합니다.
+
 ## 분석 흐름
 
 1. Agent가 입력 URL의 기준 상품을 식별합니다.
@@ -16,5 +28,9 @@ Core는 공개 프론트엔드와 내부 Backend·Agent 사이의 오케스트�
 4. Backend가 검증 가능한 판매처 데이터를 저장하고 결정적 계산을 실행합니다.
 5. Backend가 사실 기반 판단 입력을 만들고 Agent가 설명을 생성합니다.
 6. Backend가 판단 결과를 저장한 뒤 Core가 최종 응답을 반환합니다.
+
+최종 저장이 실패하거나 Backend가 `COMPLETED` 상태를 확인해 주지 않으면 Core는 완료
+응답을 반환하지 않습니다. Backend·Agent 주소와 `x-internal-api-token`은 Core의 서버
+환경에만 두며 Frontend 환경 변수나 응답에 포함하지 않습니다.
 
 Backend 내부 계약은 `src/contracts.ts`의 `BackendClient` 호출 형태를 기준으로 구현합니다.

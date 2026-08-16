@@ -2,6 +2,7 @@ import { zodTextFormat } from 'openai/helpers/zod';
 import { brandOfficialDomainCandidateSchema, productSearchAiResultSchema } from '../product-search/product-search.schema';
 import { productIdentificationAiResultSchema } from '../product-identification/product-identification.schema';
 import { aiJudgmentSchema } from '../ai-judgment/ai-judgment.schema';
+import { productConfigurationSearchAiResultSchema } from '../product-search/product-configuration-search.schema';
 
 // Regression guard for the class of bug where a schema passed to OpenAI's
 // zodTextFormat() (to build the Responses API structured-output format)
@@ -18,7 +19,17 @@ describe('AI-facing structured-output schemas stay convertible by zodTextFormat'
     ['productIdentificationAiResultSchema', productIdentificationAiResultSchema, 'catchcatch_product_identification'],
     ['aiJudgmentSchema', aiJudgmentSchema, 'catchcatch_judgment'],
     ['brandOfficialDomainCandidateSchema', brandOfficialDomainCandidateSchema, 'catchcatch_brand_official_domain_candidate'],
+    ['productConfigurationSearchAiResultSchema', productConfigurationSearchAiResultSchema, 'catchcatch_product_configuration_search'],
   ] as const)('%s converts to a JSON Schema text format without throwing', (_name, schema, formatName) => {
     expect(() => zodTextFormat(schema, formatName)).not.toThrow();
+  });
+
+  it('does not send unsupported URI formats in the product-identification schema', () => {
+    const format = zodTextFormat(
+      productIdentificationAiResultSchema,
+      'catchcatch_product_identification',
+    );
+
+    expect(JSON.stringify(format)).not.toContain('"format":"uri"');
   });
 });

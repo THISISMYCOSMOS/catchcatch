@@ -5,6 +5,7 @@ import {
   gateBrandOfficialDomainCandidate,
   inferBrandOfficialDomain,
   normalizeSellerPageUrl,
+  sellerPageUrlsReferToSameProduct,
 } from './seller-domain.policy';
 
 describe('seller domain policy', () => {
@@ -28,6 +29,20 @@ describe('seller domain policy', () => {
     expect(normalizeSellerPageUrl(
       'https://example.com/product/1/?utm_source=test&ref=abc&option=2#detail',
     )).toBe('https://example.com/product/1?option=2');
+  });
+
+  it('matches a canonical Coupang product URL to its tracked option URL', () => {
+    expect(sellerPageUrlsReferToSameProduct(
+      'https://www.coupang.com/vp/products/6598003859',
+      'https://www.coupang.com/vp/products/6598003859?itemId=19169008276&vendorItemId=86287276212&searchId=abc',
+    )).toBe(true);
+  });
+
+  it('rejects conflicting explicit Coupang item identifiers', () => {
+    expect(sellerPageUrlsReferToSameProduct(
+      'https://www.coupang.com/vp/products/6598003859?itemId=1',
+      'https://www.coupang.com/vp/products/6598003859?itemId=2',
+    )).toBe(false);
   });
 
   it('infers exactly one non-fixed domain as the official domain', () => {

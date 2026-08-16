@@ -8,6 +8,8 @@
     "start:dev": "nest start --watch",
     "test": "node scripts/run-tests.cjs",
     "test:watch": "jest --watch",
+    "test:search:live": "tsx scripts/run-product-search-live.ts",
+    "test:configurations:live": "tsx scripts/run-product-configuration-search-live.ts",
     "eval:ai:live": "tsx scripts/run-judgment-bias-evals.ts",
     "openai:check": "tsx scripts/openai-check.ts"
   },

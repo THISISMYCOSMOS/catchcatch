@@ -85,6 +85,36 @@ export function normalizeSellerPageUrl(value: string): string {
   return url.toString();
 }
 
+// Search providers often return the canonical Coupang product path while the
+// browser URL contains item/vendor and tracking parameters. Treat those as
+// the same product page only when host and path match. If both sides contain
+// an option-identifying parameter, a conflict still fails closed.
+export function sellerPageUrlsReferToSameProduct(left: string, right: string): boolean {
+  const leftUrl = new URL(normalizeSellerPageUrl(left));
+  const rightUrl = new URL(normalizeSellerPageUrl(right));
+  if (
+    leftUrl.hostname.toLowerCase().replace(/^www\./, '') !==
+      rightUrl.hostname.toLowerCase().replace(/^www\./, '') ||
+    leftUrl.pathname !== rightUrl.pathname
+  ) {
+    return false;
+  }
+
+  const hostname = leftUrl.hostname.toLowerCase().replace(/^www\./, '');
+  if (hostname === 'coupang.com' && /^\/vp\/products\/[^/]+$/.test(leftUrl.pathname)) {
+    for (const key of ['itemId', 'vendorItemId']) {
+      const leftValue = leftUrl.searchParams.get(key);
+      const rightValue = rightUrl.searchParams.get(key);
+      if (leftValue !== null && rightValue !== null && leftValue !== rightValue) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return leftUrl.toString() === rightUrl.toString();
+}
+
 export function assertAllowedSellerUrl(
   value: string,
   allowedDomains: readonly string[],

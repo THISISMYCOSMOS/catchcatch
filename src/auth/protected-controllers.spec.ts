@@ -13,6 +13,7 @@ describe('protected user controllers', () => {
       create: jest.fn().mockResolvedValue({ id: 'analysis-1' }),
       findRecentByUserId: jest.fn(),
       findByIdForUser: jest.fn(),
+      deleteForUser: jest.fn(),
     };
     const controller = new AnalysesController(service as never);
 
@@ -36,12 +37,30 @@ describe('protected user controllers', () => {
       create: jest.fn(),
       findRecentByUserId: jest.fn(),
       findByIdForUser: jest.fn().mockRejectedValue(new ForbiddenException()),
+      deleteForUser: jest.fn(),
     };
     const controller = new AnalysesController(service as never);
 
     await expect(controller.findById('11111111-1111-4111-8111-111111111111', userA))
       .rejects
       .toBeInstanceOf(ForbiddenException);
+  });
+
+  it('uses the authenticated user for recent analysis and deletion', async () => {
+    const service = {
+      create: jest.fn(),
+      findRecentByUserId: jest.fn().mockResolvedValue([]),
+      findByIdForUser: jest.fn(),
+      deleteForUser: jest.fn().mockResolvedValue(undefined),
+    };
+    const controller = new AnalysesController(service as never);
+    const analysisId = '11111111-1111-4111-8111-111111111111';
+
+    await expect(controller.findRecent(userA, '5')).resolves.toEqual([]);
+    await expect(controller.deleteById(analysisId, userA)).resolves.toBeUndefined();
+
+    expect(service.findRecentByUserId).toHaveBeenCalledWith('user-a', '5');
+    expect(service.deleteForUser).toHaveBeenCalledWith(analysisId, 'user-a');
   });
 
   it('allows own saved-products access and blocks another userId', async () => {
