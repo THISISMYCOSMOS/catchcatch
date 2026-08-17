@@ -18,6 +18,7 @@ export type Verdict =
 
 export type AnalysisStatus =
   | 'PENDING'
+  | 'READY_FOR_JUDGMENT'
   | 'FAILED'
   | 'COMPLETED'
   | 'NEEDS_MORE_DATA'

@@ -217,7 +217,7 @@ export class AnalysesService {
         productId: input.productId,
         sourceUrl: input.sourceUrl,
         idempotencyKey: input.idempotencyKey ?? null,
-        status: 'COMPLETED',
+        status: 'READY_FOR_JUDGMENT',
         verdict: null,
         allowedConclusions: result.allowedConclusions,
         selectedCriteria: preferences.selected_criteria,

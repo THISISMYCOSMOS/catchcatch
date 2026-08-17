@@ -487,8 +487,11 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
     this.database.store.analyses.splice(index, 1);
     this.database.store.analysisOffers = this.database.store.analysisOffers
       .filter((row) => row.analysis_id !== id);
-    this.database.store.priceHistory = this.database.store.priceHistory
-      .filter((row) => row.analysis_id !== id);
+    for (const row of this.database.store.priceHistory) {
+      if (row.analysis_id === id) {
+        row.analysis_id = null;
+      }
+    }
     return true;
   }
 

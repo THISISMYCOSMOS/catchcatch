@@ -70,7 +70,7 @@ describe('AnalysesService', () => {
     );
   });
 
-  it('creates a completed analysis without assigning a verdict', async () => {
+  it('creates a READY_FOR_JUDGMENT analysis without assigning a verdict', async () => {
     const product = await seedAnalysisReadyProduct();
 
     const result = await service.create({
@@ -83,7 +83,7 @@ describe('AnalysesService', () => {
       userId: 'user-1',
       sourceUrl: 'https://example.com/product/1',
       productId: product.id,
-      status: 'COMPLETED',
+      status: 'READY_FOR_JUDGMENT',
       verdict: null,
     });
     expect(result.id).toMatch(UUID_V4_PATTERN);
@@ -159,7 +159,7 @@ describe('AnalysesService', () => {
     expect(new Set([first.id, second.id, third.id]).size).toBe(3);
   });
 
-  it('deletes only the owning user analysis and its history snapshots', async () => {
+  it('deletes only the owning user analysis while preserving public price history', async () => {
     const product = await seedAnalysisReadyProduct('deletable-product');
     const created = await service.create({
       userId: 'user-1',
@@ -174,7 +174,8 @@ describe('AnalysesService', () => {
 
     expect(await analyses.findById(created.id)).toBeNull();
     expect(database.store.analysisOffers.some((row) => row.analysis_id === created.id)).toBe(false);
-    expect(database.store.priceHistory.some((row) => row.analysis_id === created.id)).toBe(false);
+    expect(database.store.priceHistory).toHaveLength(5);
+    expect(database.store.priceHistory.every((row) => row.analysis_id === null)).toBe(true);
     await expect(service.deleteForUser(created.id, 'user-1'))
       .rejects
       .toBeInstanceOf(NotFoundException);
@@ -237,7 +238,7 @@ describe('AnalysesService', () => {
       productId: product.id,
     });
 
-    expect(result.status).toBe('COMPLETED');
+    expect(result.status).toBe('READY_FOR_JUDGMENT');
     expect(result.allowedConclusions).toEqual([]);
     expect(result.result).toMatchObject({
       lowestEffectivePriceOffer: null,
@@ -357,7 +358,7 @@ describe('AnalysesService', () => {
 
     expect(persistence.persistAnalysisAtomically).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: 'idem-1',
-      status: 'COMPLETED',
+      status: 'READY_FOR_JUDGMENT',
     }));
     expect(result.id).toBe(generatedId);
   });

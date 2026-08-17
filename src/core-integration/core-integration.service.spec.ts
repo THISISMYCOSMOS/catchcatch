@@ -51,15 +51,59 @@ describe('CoreIntegrationService', () => {
     expect(second).toEqual({ productId: first.productId, brandId: null });
     expect(await products.findById(first.productId)).toMatchObject({
       canonical_name: 'Round Lab Sun Cream',
-      product_key: 'round-lab:round-lab-sun-cream',
+      product_key: expect.stringMatching(/^identity:v2:[0-9a-f]{32}$/),
     });
     expect(await components.findByProductId(first.productId)).toHaveLength(1);
+  });
+
+  it('separates product identity variants while reusing canonical equivalent identities', async () => {
+    const fiftyMl = resolveProductRequest();
+    const hundredMl = resolveProductRequest('request-100ml');
+    hundredMl.identification.anchor_product!.components[0].capacity_value = 100;
+    const sameFiftyDifferentOrder = resolveProductRequest('request-50ml-same');
+    sameFiftyDifferentOrder.identification.anchor_product!.brand = ' round   lab ';
+    (sameFiftyDifferentOrder.identification.anchor_product!.components as unknown[]) = [
+      {
+        type: 'OTHER_COSMETIC',
+        name: 'gift',
+        capacity_value: null,
+        capacity_unit: null,
+        quantity: 1,
+      },
+      sameFiftyDifferentOrder.identification.anchor_product!.components[0],
+    ];
+    const firstFiftyWithGift = resolveProductRequest('request-50ml-gift');
+    (firstFiftyWithGift.identification.anchor_product!.components as unknown[]) = [
+      {
+        type: 'OTHER_COSMETIC',
+        name: 'gift',
+        capacity_value: null,
+        capacity_unit: null,
+        quantity: 1,
+      },
+      firstFiftyWithGift.identification.anchor_product!.components[0],
+    ];
+
+    const first = await service.resolveProduct(firstFiftyWithGift);
+    const same = await service.resolveProduct(sameFiftyDifferentOrder);
+    const different = await service.resolveProduct(hundredMl);
+
+    expect(same.productId).toBe(first.productId);
+    expect(different.productId).not.toBe(first.productId);
   });
 
   it('rejects non-IDENTIFIED products instead of creating a backend product id', async () => {
     const request = resolveProductRequest();
     request.identification.identification_status = 'AMBIGUOUS';
     (request.identification as Record<string, unknown>).anchor_product = null;
+
+    await expect(service.resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
+    expect(database.store.products).toHaveLength(0);
+  });
+
+  it('rejects malformed identification payloads without creating products', async () => {
+    const request = resolveProductRequest();
+    request.identification.anchor_product!.components[0].quantity = 0;
 
     await expect(service.resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
     expect(database.store.products).toHaveLength(0);
@@ -88,6 +132,47 @@ describe('CoreIntegrationService', () => {
       },
     ]);
     expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(1);
+    expect(database.store.priceHistory).toHaveLength(0);
+  });
+
+  it.each([
+    ['invalid seller', (request: ReturnType<typeof ingestOffersRequest>) => {
+      (request.search.seller_results[0] as Record<string, unknown>).seller = 'UNKNOWN_SELLER';
+    }],
+    ['AVAILABLE without candidate_offer', (request: ReturnType<typeof ingestOffersRequest>) => {
+      (request.search.seller_results[0] as Record<string, unknown>).candidate_offer = null;
+    }],
+    ['AVAILABLE without source', (request: ReturnType<typeof ingestOffersRequest>) => {
+      (request.search.seller_results[0] as Record<string, unknown>).source = null;
+    }],
+    ['invalid CONTENT_VERIFIED URL', (request: ReturnType<typeof ingestOffersRequest>) => {
+      request.search.seller_results[0].source!.source_url = 'not a url';
+    }],
+    ['negative price', (request: ReturnType<typeof ingestOffersRequest>) => {
+      request.search.seller_results[0].candidate_offer!.listed_sale_price = -1;
+    }],
+    ['invalid datetime', (request: ReturnType<typeof ingestOffersRequest>) => {
+      request.search.seller_results[0].source!.observed_at = 'not-a-date';
+    }],
+    ['invalid component quantity', (request: ReturnType<typeof ingestOffersRequest>) => {
+      (request.search.seller_results[0].candidate_offer!.components as unknown[]) = [{
+        type: 'MAIN',
+        name: 'main',
+        capacity_value: 50,
+        capacity_unit: 'ML',
+        quantity: 0,
+      }];
+    }],
+    ['duplicated seller', (request: ReturnType<typeof ingestOffersRequest>) => {
+      (request.search.seller_results[1] as Record<string, unknown>).seller = request.search.seller_results[0].seller;
+    }],
+  ])('rejects malformed search payloads without storing offers: %s', async (_name, mutate) => {
+    const product = await service.resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest();
+    mutate(request);
+
+    await expect(service.ingestOffers(product.productId, request)).rejects.toBeInstanceOf(BadRequestException);
+    expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(0);
     expect(database.store.priceHistory).toHaveLength(0);
   });
 
@@ -171,6 +256,24 @@ describe('CoreIntegrationService', () => {
     expect(result.allowed_offer_ids).toEqual(['offer-lowest']);
     expect(result.facts[0].id).toBe('offer:offer-lowest:price');
     expect(result.facts[0].numeric_values).toContain(9000);
+    expect(result.criterion_assessments).toEqual([
+      { criterion: 'FINAL_PAYMENT_AMOUNT', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:price'] },
+      { criterion: 'PURCHASE_TIMING', status: 'UNKNOWN', fact_ids: [] },
+      { criterion: 'UNIT_PRICE', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:price'] },
+    ]);
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('uses PUBLIC comparison basis when only some offers have personalized prices', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis({
+      includeSecondVerifiedOffer: true,
+      lowestResultId: 'offer-public-lowest',
+    });
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+
+    expect(result.comparison_price_basis).toBe('PUBLIC');
+    expect(result.cheapest_offer_id).toBe('offer-public-lowest');
     expectAgentSchemaParse('judgmentInputSchema', result);
   });
 
@@ -252,6 +355,59 @@ describe('CoreIntegrationService', () => {
       .toBeInstanceOf(NotFoundException);
   });
 
+  it.each([
+    ['missing confidence', () => {
+      const judgment = validJudgment() as Record<string, unknown>;
+      delete judgment.confidence;
+      return judgment;
+    }],
+    ['missing evidence_review', () => {
+      const judgment = validJudgment() as Record<string, unknown>;
+      delete judgment.evidence_review;
+      return judgment;
+    }],
+    ['missing conclusion_reason', () => {
+      const judgment = validJudgment() as Record<string, unknown>;
+      delete judgment.conclusion_reason;
+      return judgment;
+    }],
+    ['criteria 4개', () => ({
+      ...validJudgment(),
+      criteria_results: [
+        ...validJudgment().criteria_results,
+        { ...validJudgment().criteria_results[0], criterion: 'FAST_DELIVERY' },
+      ],
+    })],
+    ['unknown status', () => ({
+      ...validJudgment(),
+      criteria_results: [
+        { ...validJudgment().criteria_results[0], status: 'VERY_GOOD' },
+        validJudgment().criteria_results[1],
+        validJudgment().criteria_results[2],
+      ],
+    })],
+    ['invalid decision/conclusion combination', () => ({
+      ...validJudgment(),
+      decision_status: 'INSUFFICIENT_EVIDENCE',
+      conclusion: 'LOW_POINT_BUY',
+    })],
+    ['supporting and contradicting overlap', () => ({
+      ...validJudgment(),
+      evidence_review: {
+        supporting_fact_ids: ['offer:offer-lowest:price'],
+        contradicting_fact_ids: ['offer:offer-lowest:price'],
+        missing_evidence: [],
+      },
+    })],
+  ])('rejects invalid AI judgment shape: %s', async (_name, makeJudgment) => {
+    const { analysisId } = await seedJudgmentReadyAnalysis();
+
+    await expect(service.saveJudgmentResult(analysisId, 'user-1', {
+      schemaVersion: 'ai-judgment.v1',
+      judgment: makeJudgment() as Record<string, unknown>,
+    })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('keeps fixture AI judgment compatible with the latest Agent schema', () => {
     expectAgentSchemaParse('aiJudgmentSchema', validJudgment());
   });
@@ -310,10 +466,22 @@ describe('CoreIntegrationService', () => {
               public_coupon_amount: 1000,
               automatic_discount_amount: null,
               shipping_fee: 0,
+              product_name: 'Round Lab Sun Cream',
+              brand: 'Round Lab',
+              product_type: 'SUNSCREEN',
+              option: null,
+              shade_or_scent: null,
+              version_or_renewal: null,
+              discount_conditions: [],
+              shipping_condition: null,
               components: [],
             },
+            match_evidence: ['same product name'],
+            mismatch_reasons: [],
             source: {
+              source_type: 'SELLER_PAGE',
               source_url: 'https://example.com/coupang',
+              acquisition_method: 'AI_WEB_SEARCH',
               observed_at: '2026-08-10T00:00:00.000Z',
               verification_status: 'CONTENT_VERIFIED',
             },
@@ -327,10 +495,22 @@ describe('CoreIntegrationService', () => {
               public_coupon_amount: null,
               automatic_discount_amount: null,
               shipping_fee: 0,
+              product_name: 'Round Lab Sun Cream',
+              brand: 'Round Lab',
+              product_type: 'SUNSCREEN',
+              option: null,
+              shade_or_scent: null,
+              version_or_renewal: null,
+              discount_conditions: [],
+              shipping_condition: null,
               components: [],
             },
+            match_evidence: ['same product name'],
+            mismatch_reasons: [],
             source: {
+              source_type: 'SELLER_PAGE',
               source_url: 'https://example.com/musinsa',
+              acquisition_method: 'AI_WEB_SEARCH',
               observed_at: '2026-08-10T00:00:00.000Z',
               verification_status: 'URL_VERIFIED',
             },
@@ -383,7 +563,10 @@ describe('CoreIntegrationService', () => {
     };
   }
 
-  async function seedJudgmentReadyAnalysis() {
+  async function seedJudgmentReadyAnalysis(options: {
+    includeSecondVerifiedOffer?: boolean;
+    lowestResultId?: string;
+  } = {}) {
     await preferences.upsert({
       user_id: 'user-1',
       selected_criteria: [
@@ -424,7 +607,7 @@ describe('CoreIntegrationService', () => {
       warning_codes: [],
       result_json: {
         lowestEffectivePriceOffer: {
-          id: 'offer-lowest',
+          id: options.lowestResultId ?? 'offer-lowest',
           userEffectivePrice: 9000,
         },
       },
@@ -453,6 +636,31 @@ describe('CoreIntegrationService', () => {
           verificationStatus: 'CONTENT_VERIFIED',
         },
       },
+      ...(options.includeSecondVerifiedOffer
+        ? [{
+            analysis_id: analysis.id,
+            seller_identifier: 'offer-public-lowest',
+            seller_name: 'MUSINSA_BEAUTY',
+            original_list_price: 12000,
+            sale_price: 8000,
+            market_effective_price: 8000,
+            user_effective_price: 8000,
+            shipping_fee: 0,
+            public_discount: 4000,
+            user_discount: null,
+            quantity: 1,
+            total_amount: 50,
+            unit: 'ML' as const,
+            calculated_unit_price: 160,
+            offer_snapshot: {
+              comparisonStatus: 'DIRECTLY_COMPARABLE',
+              components: [],
+              sourceUrl: 'https://example.com/offer-public-lowest',
+              observedAt: '2026-08-10T00:00:00.000Z',
+              verificationStatus: 'CONTENT_VERIFIED',
+            },
+          }]
+        : []),
       {
         analysis_id: analysis.id,
         seller_identifier: 'offer-unverified',

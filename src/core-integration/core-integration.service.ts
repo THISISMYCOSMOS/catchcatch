@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Json, Row } from '../database/database.types';
 import {
@@ -18,7 +18,7 @@ import {
   USER_PREFERENCE_REPOSITORY,
 } from '../database/repositories/repository.tokens';
 import { calculateMarketEffectivePrice } from '../domain/calculations';
-import { AllowedConclusion, CapacityUnit, ComparisonStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
+import { AllowedConclusion, CapacityUnit, ComparisonStatus, CriterionStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
 import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
 
 type ProductComponentContract = {
@@ -52,11 +52,19 @@ type ProductIdentificationContract = {
 };
 
 type CandidateOfferContract = {
+  product_name: string | null;
+  brand: string | null;
+  product_type: string | null;
+  option: string | null;
+  shade_or_scent: string | null;
+  version_or_renewal: string | null;
   list_price: number | null;
   listed_sale_price: number | null;
   public_coupon_amount: number | null;
   automatic_discount_amount: number | null;
   shipping_fee: number | null;
+  discount_conditions: string[];
+  shipping_condition: string | null;
   components: ProductComponentContract[];
 };
 
@@ -64,10 +72,14 @@ type SellerSearchResultContract = {
   seller: string;
   availability: 'AVAILABLE' | 'NOT_AVAILABLE' | 'UNKNOWN';
   candidate_offer: CandidateOfferContract | null;
+  match_evidence: string[];
+  mismatch_reasons: string[];
   source: {
+    source_type: 'SELLER_PAGE';
     source_url: string;
+    acquisition_method: 'AI_WEB_SEARCH' | 'DIRECT_HTTP';
     observed_at: string;
-    verification_status: string;
+    verification_status: 'UNVERIFIED' | 'URL_VERIFIED' | 'CONTENT_VERIFIED' | 'REJECTED';
   } | null;
 };
 
@@ -154,7 +166,7 @@ export type JudgmentInputResponse = {
   selected_criteria: UserCriterion[];
   criterion_assessments: {
     criterion: UserCriterion;
-    status: 'UNKNOWN';
+    status: CriterionStatus;
     fact_ids: string[];
   }[];
   comparison_price_basis: 'PUBLIC' | 'PERSONALIZED';
@@ -193,7 +205,7 @@ export class CoreIntegrationService {
     }
     const identity = identification.anchor_product;
     const canonicalName = requiredString(identity.normalized_product_name, 'normalized_product_name');
-    const productKey = createProductKey(identity.brand, canonicalName);
+    const productKey = createProductKey(identity);
     const existing = await this.products.findByProductKey(productKey);
     if (existing) {
       return { productId: existing.id, brandId: null };
@@ -315,6 +327,8 @@ export class CoreIntegrationService {
       .filter((snapshot) => isComparable(snapshot))
       .map((snapshot) => snapshot.seller_identifier);
     const facts = buildFacts(analysis, product, verifiedSnapshots);
+    const comparisonBasis = determineComparisonBasis(verifiedSnapshots);
+    const cheapestOfferId = getContextCheapestOfferId(verifiedSnapshots, comparisonBasis);
     const recentAveragePrice = getNumericResultValue(analysis.result_json, 'recentAveragePrice');
     const previousSalePrice = getNumericResultValue(analysis.result_json, 'previousSalePrice');
     return {
@@ -363,15 +377,9 @@ export class CoreIntegrationService {
       })),
       facts,
       selected_criteria: selectedCriteria,
-      criterion_assessments: selectedCriteria.map((criterion) => ({
-        criterion,
-        status: 'UNKNOWN',
-        fact_ids: [],
-      })),
-      comparison_price_basis: verifiedSnapshots.some((snapshot) => snapshot.user_discount !== null)
-        ? 'PERSONALIZED'
-        : 'PUBLIC',
-      cheapest_offer_id: getCheapestOfferId(analysis.result_json),
+      criterion_assessments: buildCriterionAssessments(selectedCriteria, facts, verifiedSnapshots, analysis),
+      comparison_price_basis: comparisonBasis,
+      cheapest_offer_id: cheapestOfferId,
       price_history_status: analysis.warning_codes.includes('PRICE_HISTORY_INSUFFICIENT')
         ? 'INSUFFICIENT'
         : verifiedSnapshots.length === 0 ? 'UNAVAILABLE' : 'SUFFICIENT',
@@ -432,11 +440,51 @@ export class CoreIntegrationService {
 }
 
 function parseIdentification(value: Record<string, unknown>): ProductIdentificationContract {
-  return value as ProductIdentificationContract;
+  if (!isRecord(value)) {
+    throw new BadRequestException('Invalid product identification payload');
+  }
+  const status = value.identification_status;
+  if (!isIdentificationStatus(status)) {
+    throw new BadRequestException('Invalid product identification status');
+  }
+  const anchorProduct = value.anchor_product === null
+    ? null
+    : parseProductIdentity(value.anchor_product, 'anchor_product');
+  const preview = value.preview === null ? null : parseIdentificationPreview(value.preview);
+  if (value.source !== null && value.source !== undefined && !isRecord(value.source)) {
+    throw new BadRequestException('Invalid product identification source');
+  }
+  return {
+    identification_status: status,
+    anchor_product: anchorProduct,
+    preview,
+    source: (value.source ?? null) as Record<string, unknown> | null,
+    warnings: parseStringArray(value.warnings, 'warnings'),
+  };
 }
 
 function parseSearch(value: Record<string, unknown>): ProductSearchContract {
-  return value as ProductSearchContract;
+  if (!isRecord(value)) {
+    throw new BadRequestException('Invalid product search payload');
+  }
+  const anchorProduct = parseProductIdentity(value.anchor_product, 'anchor_product');
+  if (!Array.isArray(value.seller_results)) {
+    throw new BadRequestException('seller_results must be an array');
+  }
+  const seenSellers = new Set<string>();
+  const sellerResults = value.seller_results.map((item, index) => {
+    const result = parseSellerSearchResult(item, `seller_results[${index}]`);
+    if (seenSellers.has(result.seller)) {
+      throw new BadRequestException('A seller cannot appear more than once in seller_results');
+    }
+    seenSellers.add(result.seller);
+    return result;
+  });
+  return {
+    anchor_product: anchorProduct,
+    seller_results: sellerResults,
+    warnings: parseStringArray(value.warnings, 'warnings'),
+  };
 }
 
 function requiredString(value: string | null, name: string): string {
@@ -446,11 +494,270 @@ function requiredString(value: string | null, name: string): string {
   return value;
 }
 
-function createProductKey(brand: string | null, canonicalName: string): string {
-  return [brand, canonicalName]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value.trim().toLowerCase().replace(/[^\p{Letter}\p{Number}]+/gu, '-').replace(/^-+|-+$/g, ''))
-    .join(':');
+function createProductKey(identity: ProductIdentityContract): string {
+  const components = identity.components
+    .map((component) => [
+      normalizeIdentityText(component.type),
+      normalizeNumber(component.capacity_value),
+      component.capacity_unit ?? '',
+      normalizeNumber(component.quantity),
+    ].join('|'))
+    .sort();
+  const canonical = [
+    normalizeIdentityText(identity.brand),
+    normalizeIdentityText(identity.normalized_product_name),
+    normalizeIdentityText(identity.product_type),
+    normalizeIdentityText(identity.option),
+    normalizeIdentityText(identity.shade_or_scent),
+    normalizeIdentityText(identity.version_or_renewal),
+    components.join(';'),
+  ].join('::');
+  return `identity:v2:${createHash('sha256').update(canonical).digest('hex').slice(0, 32)}`;
+}
+
+function normalizeIdentityText(value: string | null): string {
+  return (value ?? '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeNumber(value: number | null): string {
+  return value === null ? '' : String(value);
+}
+
+function parseProductIdentity(value: unknown, path: string): ProductIdentityContract {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  return {
+    brand: parseNullableString(value.brand, `${path}.brand`),
+    normalized_product_name: parseNullableString(value.normalized_product_name, `${path}.normalized_product_name`),
+    product_type: parseNullableString(value.product_type, `${path}.product_type`),
+    option: parseNullableString(value.option, `${path}.option`),
+    shade_or_scent: parseNullableString(value.shade_or_scent, `${path}.shade_or_scent`),
+    version_or_renewal: parseNullableString(value.version_or_renewal, `${path}.version_or_renewal`),
+    components: parseArray(value.components, `${path}.components`).map((component, index) => (
+      parseProductComponent(component, `${path}.components[${index}]`)
+    )),
+  };
+}
+
+function parseProductComponent(value: unknown, path: string): ProductComponentContract {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  const type = value.type;
+  if (
+    type !== 'MAIN' &&
+    type !== 'REFILL' &&
+    type !== 'MINI' &&
+    type !== 'TRAVEL' &&
+    type !== 'OTHER_COSMETIC' &&
+    type !== 'NON_COSMETIC_GIFT'
+  ) {
+    throw new BadRequestException(`${path}.type is invalid`);
+  }
+  const quantity = parseNullableNumber(value.quantity, `${path}.quantity`);
+  if (quantity !== null && (!Number.isInteger(quantity) || quantity <= 0)) {
+    throw new BadRequestException(`${path}.quantity must be a positive integer`);
+  }
+  const capacityUnit = value.capacity_unit;
+  if (capacityUnit !== null && capacityUnit !== 'ML' && capacityUnit !== 'G') {
+    throw new BadRequestException(`${path}.capacity_unit is invalid`);
+  }
+  const capacityValue = parseNullableNumber(value.capacity_value, `${path}.capacity_value`);
+  if (capacityValue !== null && capacityValue <= 0) {
+    throw new BadRequestException(`${path}.capacity_value must be positive`);
+  }
+  return {
+    type,
+    name: parseNullableString(value.name, `${path}.name`),
+    capacity_value: capacityValue,
+    capacity_unit: capacityUnit,
+    quantity,
+  };
+}
+
+function parseIdentificationPreview(value: unknown): ProductIdentificationContract['preview'] {
+  if (!isRecord(value)) {
+    throw new BadRequestException('preview must be an object');
+  }
+  const seller = value.seller;
+  if (
+    seller !== null &&
+    seller !== 'OLIVE_YOUNG' &&
+    seller !== 'MUSINSA_BEAUTY' &&
+    seller !== 'COUPANG' &&
+    seller !== 'BRAND_OFFICIAL'
+  ) {
+    throw new BadRequestException('preview.seller is invalid');
+  }
+  const listedPrice = parseNullableNumber(value.listed_price, 'preview.listed_price');
+  if (listedPrice !== null && (!Number.isInteger(listedPrice) || listedPrice < 0)) {
+    throw new BadRequestException('preview.listed_price must be a nonnegative integer');
+  }
+  return {
+    seller,
+    listed_price: listedPrice,
+    image_url: parseNullableString(value.image_url, 'preview.image_url'),
+  };
+}
+
+function parseSellerSearchResult(value: unknown, path: string): SellerSearchResultContract {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  const seller = value.seller;
+  if (!isSeller(seller)) {
+    throw new BadRequestException(`${path}.seller is invalid`);
+  }
+  const availability = value.availability;
+  if (availability !== 'AVAILABLE' && availability !== 'NOT_AVAILABLE' && availability !== 'UNKNOWN') {
+    throw new BadRequestException(`${path}.availability is invalid`);
+  }
+  const candidateOffer = value.candidate_offer === null
+    ? null
+    : parseCandidateOffer(value.candidate_offer, `${path}.candidate_offer`);
+  const source = value.source === null ? null : parseSource(value.source, `${path}.source`);
+  const matchEvidence = parseStringArray(value.match_evidence, `${path}.match_evidence`);
+  if (availability === 'AVAILABLE') {
+    if (!candidateOffer) throw new BadRequestException(`${path}.candidate_offer is required for AVAILABLE`);
+    if (!source) throw new BadRequestException(`${path}.source is required for AVAILABLE`);
+    if (matchEvidence.length === 0) throw new BadRequestException(`${path}.match_evidence is required for AVAILABLE`);
+  } else if (candidateOffer) {
+    throw new BadRequestException(`${path}.candidate_offer is allowed only for AVAILABLE`);
+  }
+  return {
+    seller,
+    availability,
+    candidate_offer: candidateOffer,
+    match_evidence: matchEvidence,
+    mismatch_reasons: parseStringArray(value.mismatch_reasons, `${path}.mismatch_reasons`),
+    source,
+  };
+}
+
+function parseCandidateOffer(value: unknown, path: string): CandidateOfferContract {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  return {
+    product_name: parseNullableString(value.product_name, `${path}.product_name`),
+    brand: parseNullableString(value.brand, `${path}.brand`),
+    product_type: parseNullableString(value.product_type, `${path}.product_type`),
+    option: parseNullableString(value.option, `${path}.option`),
+    shade_or_scent: parseNullableString(value.shade_or_scent, `${path}.shade_or_scent`),
+    version_or_renewal: parseNullableString(value.version_or_renewal, `${path}.version_or_renewal`),
+    list_price: parseNullableMoney(value.list_price, `${path}.list_price`),
+    listed_sale_price: parseNullableMoney(value.listed_sale_price, `${path}.listed_sale_price`),
+    public_coupon_amount: parseNullableMoney(value.public_coupon_amount, `${path}.public_coupon_amount`),
+    automatic_discount_amount: parseNullableMoney(value.automatic_discount_amount, `${path}.automatic_discount_amount`),
+    shipping_fee: parseNullableMoney(value.shipping_fee, `${path}.shipping_fee`),
+    discount_conditions: parseStringArray(value.discount_conditions, `${path}.discount_conditions`),
+    shipping_condition: parseNullableString(value.shipping_condition, `${path}.shipping_condition`),
+    components: parseArray(value.components, `${path}.components`).map((component, index) => (
+      parseProductComponent(component, `${path}.components[${index}]`)
+    )),
+  };
+}
+
+function parseSource(value: unknown, path: string): SellerSearchResultContract['source'] {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  if (value.source_type !== 'SELLER_PAGE') {
+    throw new BadRequestException(`${path}.source_type is invalid`);
+  }
+  const sourceUrl = parseRequiredUrl(value.source_url, `${path}.source_url`);
+  const acquisitionMethod = value.acquisition_method;
+  if (acquisitionMethod !== 'AI_WEB_SEARCH' && acquisitionMethod !== 'DIRECT_HTTP') {
+    throw new BadRequestException(`${path}.acquisition_method is invalid`);
+  }
+  if (typeof value.observed_at !== 'string' || Number.isNaN(Date.parse(value.observed_at))) {
+    throw new BadRequestException(`${path}.observed_at is invalid`);
+  }
+  const verificationStatus = value.verification_status;
+  if (
+    verificationStatus !== 'UNVERIFIED' &&
+    verificationStatus !== 'URL_VERIFIED' &&
+    verificationStatus !== 'CONTENT_VERIFIED' &&
+    verificationStatus !== 'REJECTED'
+  ) {
+    throw new BadRequestException(`${path}.verification_status is invalid`);
+  }
+  return {
+    source_type: 'SELLER_PAGE',
+    source_url: sourceUrl,
+    acquisition_method: acquisitionMethod,
+    observed_at: value.observed_at,
+    verification_status: verificationStatus,
+  };
+}
+
+function parseArray(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`${path} must be an array`);
+  }
+  return value;
+}
+
+function parseStringArray(value: unknown, path: string): string[] {
+  return parseArray(value, path).map((item, index) => {
+    if (typeof item !== 'string') {
+      throw new BadRequestException(`${path}[${index}] must be a string`);
+    }
+    return item;
+  });
+}
+
+function parseNullableString(value: unknown, path: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new BadRequestException(`${path} must be a non-empty string or null`);
+  }
+  return value;
+}
+
+function parseNullableNumber(value: unknown, path: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new BadRequestException(`${path} must be a finite number or null`);
+  }
+  return value;
+}
+
+function parseNullableMoney(value: unknown, path: string): number | null {
+  const numberValue = parseNullableNumber(value, path);
+  if (numberValue !== null && (!Number.isInteger(numberValue) || numberValue < 0)) {
+    throw new BadRequestException(`${path} must be a nonnegative integer`);
+  }
+  return numberValue;
+}
+
+function parseRequiredUrl(value: unknown, path: string): string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(`${path} must be a URL string`);
+  }
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new BadRequestException(`${path} must be a valid URL`);
+  }
+}
+
+function isIdentificationStatus(value: unknown): value is ProductIdentificationContract['identification_status'] {
+  return value === 'IDENTIFIED' || value === 'AMBIGUOUS' || value === 'UNSUPPORTED' || value === 'UNKNOWN';
+}
+
+function isSeller(value: unknown): value is SellerSearchResultContract['seller'] {
+  return value === 'OLIVE_YOUNG' ||
+    value === 'MUSINSA_BEAUTY' ||
+    value === 'COUPANG' ||
+    value === 'BRAND_OFFICIAL';
 }
 
 function sellerOfferKey(offer: Row<'seller_offers'>): string {
@@ -625,21 +932,103 @@ function getNumericResultValue(resultJson: Json | null, key: string): number | n
   return typeof value === 'number' ? value : null;
 }
 
-function getCheapestOfferId(resultJson: Json | null): string | null {
-  if (!isJsonObject(resultJson)) {
-    return null;
+function determineComparisonBasis(snapshots: readonly Row<'analysis_offers'>[]): 'PUBLIC' | 'PERSONALIZED' {
+  const comparable = snapshots.filter(isComparable);
+  if (comparable.length === 0) {
+    return 'PUBLIC';
   }
-  const lowest = resultJson.lowestEffectivePriceOffer;
-  if (!isJsonObject(lowest)) {
-    return null;
+  return comparable.every((snapshot) => (
+    snapshot.user_discount !== null &&
+    snapshot.user_effective_price !== null
+  ))
+    ? 'PERSONALIZED'
+    : 'PUBLIC';
+}
+
+function getContextCheapestOfferId(
+  snapshots: readonly Row<'analysis_offers'>[],
+  basis: 'PUBLIC' | 'PERSONALIZED',
+): string | null {
+  let cheapest: { id: string; price: number } | null = null;
+  for (const snapshot of snapshots) {
+    if (!isComparable(snapshot)) continue;
+    const price = basis === 'PERSONALIZED'
+      ? snapshot.user_effective_price
+      : snapshot.market_effective_price;
+    if (price === null) continue;
+    if (cheapest === null || price < cheapest.price) {
+      cheapest = { id: snapshot.seller_identifier, price };
+    }
   }
-  return typeof lowest.id === 'string' ? lowest.id : null;
+  return cheapest?.id ?? null;
+}
+
+function buildCriterionAssessments(
+  selectedCriteria: readonly UserCriterion[],
+  facts: readonly JudgmentInputResponse['facts'][number][],
+  snapshots: readonly Row<'analysis_offers'>[],
+  analysis: Row<'analyses'>,
+): JudgmentInputResponse['criterion_assessments'] {
+  return selectedCriteria.map((criterion) => {
+    const factIds = factIdsForCriterion(criterion, facts, snapshots, analysis);
+    return {
+      criterion,
+      status: factIds.length > 0 ? 'NEUTRAL' : 'UNKNOWN',
+      fact_ids: factIds,
+    };
+  });
+}
+
+function factIdsForCriterion(
+  criterion: UserCriterion,
+  facts: readonly JudgmentInputResponse['facts'][number][],
+  snapshots: readonly Row<'analysis_offers'>[],
+  analysis: Row<'analyses'>,
+): string[] {
+  const allFactIds = facts.map((fact) => fact.id);
+  if (criterion === 'FINAL_PAYMENT_AMOUNT' && snapshots.some((snapshot) => snapshot.market_effective_price !== null)) {
+    return allFactIds;
+  }
+  if (criterion === 'UNIT_PRICE' && snapshots.some((snapshot) => snapshot.calculated_unit_price !== null)) {
+    return allFactIds;
+  }
+  if (
+    criterion === 'PURCHASE_TIMING' &&
+    !analysis.warning_codes.includes('PRICE_HISTORY_INSUFFICIENT') &&
+    (getNumericResultValue(analysis.result_json, 'recentAveragePrice') !== null ||
+      getNumericResultValue(analysis.result_json, 'previousSalePrice') !== null)
+  ) {
+    return allFactIds;
+  }
+  if (criterion === 'SET_AND_GIFTS' && snapshots.some((snapshot) => getSnapshotComponents(snapshot).length > 1)) {
+    return allFactIds;
+  }
+  if (
+    criterion === 'RIGHT_SIZED_PURCHASE' &&
+    snapshots.some((snapshot) => snapshot.total_amount !== null && snapshot.unit !== null)
+  ) {
+    return allFactIds;
+  }
+  if (
+    criterion === 'SIMPLE_DISCOUNT' &&
+    snapshots.some((snapshot) => snapshot.original_list_price !== null && snapshot.sale_price !== null)
+  ) {
+    return allFactIds;
+  }
+  if (criterion === 'FAST_DELIVERY' && snapshots.some((snapshot) => typeof getSnapshotValue(snapshot, 'deliveryDays') === 'number')) {
+    return allFactIds;
+  }
+  if (criterion === 'REWARDS_AND_MEMBERSHIP' && snapshots.some((snapshot) => snapshot.user_discount !== null)) {
+    return allFactIds;
+  }
+  return [];
 }
 
 function validateJudgment(
   judgment: Record<string, unknown>,
   context: JudgmentInputResponse,
 ): void {
+  assertJudgmentShape(judgment);
   const conclusion = getJudgmentConclusion(judgment);
   if (conclusion !== null && !context.allowed_conclusions.includes(conclusion)) {
     throw new BadRequestException('Judgment conclusion is not allowed for this analysis');
@@ -686,6 +1075,110 @@ function validateJudgment(
   if (decisionStatus === 'INSUFFICIENT_EVIDENCE' && conclusion !== null) {
     throw new BadRequestException('INSUFFICIENT_EVIDENCE judgment cannot include a conclusion');
   }
+  if (
+    decisionStatus === 'INSUFFICIENT_EVIDENCE' &&
+    isRecord(judgment.confidence) &&
+    judgment.confidence.level !== 'LOW'
+  ) {
+    throw new BadRequestException('INSUFFICIENT_EVIDENCE judgment requires LOW confidence');
+  }
+  if (decisionStatus === 'INSUFFICIENT_EVIDENCE' && recommendedOfferId !== null && recommendedOfferId !== undefined) {
+    throw new BadRequestException('INSUFFICIENT_EVIDENCE judgment cannot recommend an offer');
+  }
+  const evidenceReview = judgment.evidence_review as Record<string, unknown>;
+  assertNoDuplicateStrings(evidenceReview.supporting_fact_ids as string[], 'supporting_fact_ids');
+  assertNoDuplicateStrings(evidenceReview.contradicting_fact_ids as string[], 'contradicting_fact_ids');
+  const supporting = new Set(evidenceReview.supporting_fact_ids as string[]);
+  if ((evidenceReview.contradicting_fact_ids as string[]).some((id) => supporting.has(id))) {
+    throw new BadRequestException('Judgment evidence fact IDs cannot overlap');
+  }
+  assertNoDuplicateStrings(judgment.used_fact_ids as string[], 'used_fact_ids');
+  assertNoDuplicateStrings((judgment.confidence as Record<string, unknown>).used_fact_ids as string[], 'confidence.used_fact_ids');
+}
+
+function assertJudgmentShape(judgment: Record<string, unknown>): void {
+  const evidenceReview = requireRecord(judgment.evidence_review, 'evidence_review');
+  requireStringArray(evidenceReview.supporting_fact_ids, 'evidence_review.supporting_fact_ids');
+  requireStringArray(evidenceReview.contradicting_fact_ids, 'evidence_review.contradicting_fact_ids');
+  requireStringArray(evidenceReview.missing_evidence, 'evidence_review.missing_evidence');
+  if (judgment.decision_status !== 'DECIDED' && judgment.decision_status !== 'INSUFFICIENT_EVIDENCE') {
+    throw new BadRequestException('Unsupported judgment decision status');
+  }
+  if (judgment.conclusion !== null) {
+    getJudgmentConclusion(judgment);
+  }
+  requireNonEmptyString(judgment.conclusion_reason, 'conclusion_reason');
+  const confidence = requireRecord(judgment.confidence, 'confidence');
+  if (confidence.level !== 'HIGH' && confidence.level !== 'MEDIUM' && confidence.level !== 'LOW') {
+    throw new BadRequestException('confidence.level is invalid');
+  }
+  requireNonEmptyString(confidence.reason, 'confidence.reason');
+  if (requireStringArray(confidence.used_fact_ids, 'confidence.used_fact_ids').length === 0) {
+    throw new BadRequestException('confidence.used_fact_ids is required');
+  }
+  const criteriaResults = parseArray(judgment.criteria_results, 'criteria_results');
+  for (const [index, item] of criteriaResults.entries()) {
+    const result = requireRecord(item, `criteria_results[${index}]`);
+    if (!isCriterion(result.criterion)) {
+      throw new BadRequestException(`criteria_results[${index}].criterion is invalid`);
+    }
+    if (!isCriterionStatus(result.status)) {
+      throw new BadRequestException(`criteria_results[${index}].status is invalid`);
+    }
+    requireNonEmptyString(result.reason, `criteria_results[${index}].reason`);
+    requireStringArray(result.used_fact_ids, `criteria_results[${index}].used_fact_ids`);
+  }
+  if (judgment.recommended_offer_id !== null && typeof judgment.recommended_offer_id !== 'string') {
+    throw new BadRequestException('recommended_offer_id must be a string or null');
+  }
+  requireNonEmptyString(judgment.recommendation_reason, 'recommendation_reason');
+  requireStringArray(judgment.warnings, 'warnings');
+  if (requireStringArray(judgment.used_fact_ids, 'used_fact_ids').length === 0) {
+    throw new BadRequestException('used_fact_ids is required');
+  }
+}
+
+function requireRecord(value: unknown, path: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new BadRequestException(`${path} must be an object`);
+  }
+  return value;
+}
+
+function requireNonEmptyString(value: unknown, path: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new BadRequestException(`${path} must be a non-empty string`);
+  }
+  return value;
+}
+
+function requireStringArray(value: unknown, path: string): string[] {
+  const strings = parseStringArray(value, path);
+  if (strings.some((item) => item.length === 0)) {
+    throw new BadRequestException(`${path} cannot contain empty strings`);
+  }
+  return strings;
+}
+
+function assertNoDuplicateStrings(values: string[], path: string): void {
+  if (new Set(values).size !== values.length) {
+    throw new BadRequestException(`${path} cannot contain duplicates`);
+  }
+}
+
+function isCriterion(value: unknown): value is UserCriterion {
+  return value === 'FINAL_PAYMENT_AMOUNT' ||
+    value === 'PURCHASE_TIMING' ||
+    value === 'UNIT_PRICE' ||
+    value === 'SET_AND_GIFTS' ||
+    value === 'RIGHT_SIZED_PURCHASE' ||
+    value === 'SIMPLE_DISCOUNT' ||
+    value === 'FAST_DELIVERY' ||
+    value === 'REWARDS_AND_MEMBERSHIP';
+}
+
+function isCriterionStatus(value: unknown): value is CriterionStatus {
+  return value === 'POSITIVE' || value === 'NEUTRAL' || value === 'NEGATIVE' || value === 'UNKNOWN';
 }
 
 function getJudgmentConclusion(judgment: Record<string, unknown>): Verdict | null {
