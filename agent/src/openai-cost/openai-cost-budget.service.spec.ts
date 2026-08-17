@@ -24,6 +24,16 @@ describe('OpenAICostBudgetService', () => {
     expect(search.id).toBe(identification.id);
   });
 
+  it('uses the lean commercial budget and stage reserves by default', () => {
+    const service = new OpenAICostBudgetService(config({}));
+    expect(service.analysisBudgetUsd()).toBe(0.056);
+    expect(service.searchPipelineBudgetUsd()).toBeCloseTo(0.051, 8);
+    expect(service.stageReserveUsd('product_identification')).toBe(0.012);
+    expect(service.stageReserveUsd('brand_official_discovery')).toBe(0.012);
+    expect(service.stageReserveUsd('same_product_search')).toBe(0.027);
+    expect(service.stageReserveUsd('ai_judgment')).toBe(0.005);
+  });
+
   it('keeps concurrent analyses for the same URL in FIFO sessions', () => {
     const service = new OpenAICostBudgetService(config({}));
     const first = service.begin('https://example.com/product/1');
@@ -34,7 +44,7 @@ describe('OpenAICostBudgetService', () => {
 
   it('protects the required search reserve when optional discovery would exceed the budget', () => {
     const service = new OpenAICostBudgetService(config({
-      OPENAI_ANALYSIS_COST_BUDGET_USD: '0.14',
+      OPENAI_ANALYSIS_COST_BUDGET_USD: '0.05',
     }));
     const session = service.begin('https://example.com/product/1');
     const identification = service.reserve(session, 'product_identification');
@@ -51,7 +61,7 @@ describe('OpenAICostBudgetService', () => {
     )).toBeNull();
   });
 
-  it('keeps the measured successful live-search usage inside the 15-cent search pipeline budget after routing', () => {
+  it('keeps the measured successful live-search usage inside the 5.1-cent search pipeline budget with Luna', () => {
     const service = new OpenAICostBudgetService(config({}));
     const session = service.begin(
       'https://www.musinsa.com/products/2782655',
@@ -69,7 +79,7 @@ describe('OpenAICostBudgetService', () => {
       output_tokens: 91,
       web_search_calls: 1,
     }, service.stageReserveUsd('same_product_search'));
-    settleStage(service, session, 'same_product_search', 'gpt-5.6', {
+    settleStage(service, session, 'same_product_search', 'gpt-5.6-luna', {
       input_tokens: 15_256,
       cached_tokens: 6_137,
       output_tokens: 1_347,
@@ -77,7 +87,7 @@ describe('OpenAICostBudgetService', () => {
     });
 
     expect(service.isExceeded(session)).toBe(false);
-    expect(service.remainingUsd(session)).toBeCloseTo(0.017274, 6);
+    expect(service.remainingUsd(session)).toBeCloseTo(0.003785, 6);
   });
 });
 

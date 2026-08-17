@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   if (identification.identification_status !== 'IDENTIFIED' || !identification.anchor_product) {
     process.stdout.write(`${JSON.stringify({
       testMode: 'web_search',
-      model: config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+      model: config.get<string>('OPENAI_SEARCH_MODEL', 'gpt-5.6-luna'),
       elapsedMs: Date.now() - startedAt,
       input: { productUrl: productUrl.toString(), allowedDomain },
       identification,
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     testMode: 'web_search',
-    model: config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6')),
+    model: config.get<string>('OPENAI_SEARCH_MODEL', 'gpt-5.6-luna'),
     elapsedMs: Date.now() - startedAt,
     input: { productUrl: productUrl.toString(), allowedDomain },
     identification,

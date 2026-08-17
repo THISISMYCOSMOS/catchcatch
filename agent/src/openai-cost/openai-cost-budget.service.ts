@@ -44,16 +44,16 @@ type SessionState = {
   reservedUsd: number;
 };
 
-const DEFAULT_ANALYSIS_BUDGET_USD = 0.17;
+const DEFAULT_ANALYSIS_BUDGET_USD = 0.056;
 const DEFAULT_SESSION_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 1_000;
 const DEFAULT_WEB_SEARCH_CALL_USD = 0.01;
 
 const STAGE_RESERVE_DEFAULTS: Readonly<Record<OpenAICostStage, number>> = {
-  product_identification: 0.02,
-  brand_official_discovery: 0.02,
-  same_product_search: 0.11,
-  ai_judgment: 0.02,
+  product_identification: 0.012,
+  brand_official_discovery: 0.012,
+  same_product_search: 0.027,
+  ai_judgment: 0.005,
 };
 
 const STAGE_RESERVE_ENV: Readonly<Record<OpenAICostStage, string>> = {

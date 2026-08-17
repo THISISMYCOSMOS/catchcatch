@@ -799,10 +799,7 @@ export class ProductSearchService {
   }
 
   private resolveSearchModel(): string {
-    return this.config.get<string>(
-      'OPENAI_SEARCH_MODEL',
-      this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
-    );
+    return this.config.get<string>('OPENAI_SEARCH_MODEL', 'gpt-5.6-luna');
   }
 
   private resolveBrandOfficialModel(): string {
@@ -856,7 +853,7 @@ export class ProductSearchService {
   private resolveConfigurationFallbackModel(): string | null {
     const value = this.config.get<string>(
       'OPENAI_CONFIGURATION_FALLBACK_MODEL',
-      'gpt-5.6-sol',
+      '',
     ).trim();
     return value || null;
   }

@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   if (!anchorProduct) {
     process.stdout.write(`${JSON.stringify({
       testMode: 'configuration_web_search',
-      model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6'))),
+      model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', 'gpt-5.6-luna')),
       elapsedMs: Date.now() - startedAt,
       input: { productUrl: productUrl.toString(), allowedDomain },
       identification,
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     testMode: 'configuration_web_search',
-    model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', config.get<string>('OPENAI_MODEL', 'gpt-5.6'))),
+    model: config.get<string>('OPENAI_CONFIGURATION_SEARCH_MODEL', config.get<string>('OPENAI_SEARCH_MODEL', 'gpt-5.6-luna')),
     elapsedMs: Date.now() - startedAt,
     input: { productUrl: productUrl.toString(), allowedDomain },
     identification,

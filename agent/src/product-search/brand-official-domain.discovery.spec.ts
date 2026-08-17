@@ -137,7 +137,7 @@ describe('brand-official domain discovery (T5)', () => {
       reasoning: { effort: 'low' },
     });
     expect(searchCallBody()).toMatchObject({
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-luna',
       max_tool_calls: 2,
       max_output_tokens: 2500,
       reasoning: { effort: 'low' },
@@ -256,7 +256,7 @@ describe('brand-official domain discovery (T5)', () => {
     const service = new ProductSearchService(new ConfigService({
       PRODUCT_DATA_MODE: 'web_search',
       OPENAI_API_KEY: 'test-key',
-      OPENAI_ANALYSIS_COST_BUDGET_USD: '0.13',
+      OPENAI_ANALYSIS_COST_BUDGET_USD: '0.04',
     }));
 
     const result = await service.searchSameProduct(input);

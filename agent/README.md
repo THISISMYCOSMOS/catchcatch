@@ -87,14 +87,14 @@ AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 
 
 ### 분석당 OpenAI 비용 예산
 
-기본 운영 예산은 `OPENAI_ANALYSIS_COST_BUDGET_USD=0.17`입니다. 환율 1달러
-1,600원과 부가세 10%를 보수적으로 적용하면 약 299원입니다. Agent는 Responses
+기본 운영 예산은 `OPENAI_ANALYSIS_COST_BUDGET_USD=0.056`입니다. 환율 1달러
+1,600원과 부가세 10%를 보수적으로 적용하면 약 99원입니다. Agent는 Responses
 API가 반환한 비캐시 입력, 캐시 입력, 출력 토큰과 `web_search_call` 수를 모델별
 단가로 계산해 `OPENAI_COST` 로그에 남깁니다.
 
-비용 배분 기본값은 상품 식별 $0.02, 공식몰 발견 $0.02, 필수 판매처 검색
-$0.11, AI 판단 $0.02입니다. 식별·공식몰 발견·판단은 기본적으로
-`gpt-5.6-luna`, 필수 판매처 검색은 `gpt-5.6`(Sol)을 사용합니다. 공식몰 발견을
+비용 배분 기본값은 상품 식별 $0.012, 공식몰 발견 $0.012, 필수 판매처 검색
+$0.027, AI 판단 $0.005입니다. 식별·공식몰 발견·필수 판매처 검색·판단은 기본적으로
+`gpt-5.6-luna`를 사용합니다. 공식몰 발견을
 실행하면 필수 검색 예약분을 침범하는 경우 발견을 생략하고
 `BRAND_OFFICIAL=UNKNOWN`으로 남깁니다. 필수 검색 자체의 예약분이 없으면
 `ANALYSIS_COST_BUDGET_EXCEEDED`로 fail closed합니다.
@@ -160,9 +160,11 @@ npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --
 `OPENAI_WEB_SEARCH_CONTEXT_SIZE=low`, `OPENAI_CONFIGURATION_REASONING_EFFORT=low`,
 `OPENAI_CONFIGURATION_MAX_OUTPUT_TOKENS=4000`을 사용합니다. 최종 AI 판정 모델
 `OPENAI_JUDGMENT_MODEL`과 분리되어 있어 가격·구성 추출만 저비용 모델로 운영할 수 있습니다.
-Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처만
-`OPENAI_CONFIGURATION_FALLBACK_MODEL=gpt-5.6-sol`로 한 번 재시도합니다. 정상적인
-`UNKNOWN`에는 재시도하지 않습니다. 기본 시간 예산은 Luna 18초, Sol 10초입니다.
+구성 검색의 고비용 자동 재시도는 기본적으로 비활성화됩니다. 품질 우선 운영이 필요한
+경우에만 `OPENAI_CONFIGURATION_FALLBACK_MODEL=gpt-5.6-sol`을 명시하면 Luna가
+타임아웃·API 오류·구조화 출력 오류로 실패한 판매처를 Sol로 한 번 재시도합니다.
+정상적인 `UNKNOWN`에는 재시도하지 않습니다. 기본 시간 예산은 Luna 18초, 명시적으로
+활성화한 Sol 폴백 10초입니다.
 동적 가격 추출이 까다로운 무신사만
 `OPENAI_WEB_SEARCH_CONTEXT_SIZE_MUSINSA_BEAUTY=medium`을 사용하고 나머지는 `low`를
 유지합니다.
