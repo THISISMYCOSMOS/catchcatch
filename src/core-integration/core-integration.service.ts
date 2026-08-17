@@ -4,7 +4,6 @@ import { Json, Row } from '../database/database.types';
 import {
   AnalysisOfferRepository,
   AnalysisRepository,
-  PriceHistoryRepository,
   ProductComponentRepository,
   ProductRepository,
   SellerOfferRepository,
@@ -13,12 +12,12 @@ import {
 import {
   ANALYSIS_OFFER_REPOSITORY,
   ANALYSIS_REPOSITORY,
-  PRICE_HISTORY_REPOSITORY,
   PRODUCT_COMPONENT_REPOSITORY,
   PRODUCT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
   USER_PREFERENCE_REPOSITORY,
 } from '../database/repositories/repository.tokens';
+import { calculateMarketEffectivePrice } from '../domain/calculations';
 import { AllowedConclusion, CapacityUnit, ComparisonStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
 import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
 
@@ -97,13 +96,16 @@ export type SellerOfferPersistenceResponse = {
 };
 
 export type JudgmentInputResponse = {
-  analysis_id: string;
-  user_id: string;
+  product_data_mode: 'web_search';
   product: {
     product_id: string;
     identity: {
       brand: string | null;
       normalized_product_name: string | null;
+      product_type: string | null;
+      option: string | null;
+      shade_or_scent: string | null;
+      version_or_renewal: string | null;
       components: {
         type: string;
         name: string | null;
@@ -118,9 +120,22 @@ export type JudgmentInputResponse = {
     seller: string;
     product_name: string;
     comparison_status: ComparisonStatus;
+    components: {
+      type: string;
+      name: string | null;
+      capacity_value: number | null;
+      capacity_unit: CapacityUnit | null;
+      quantity: number | null;
+    }[];
     public_effective_price: number | null;
     personalized_effective_price: number | null;
+    personalized_price_status: 'NOT_EVALUATED' | 'VERIFIED_ELIGIBLE' | 'VERIFIED_INELIGIBLE' | 'UNKNOWN_ELIGIBILITY';
     unit_price: number | null;
+    displayed_discount_rate: number | null;
+    recent_average_discount_rate: number | null;
+    previous_sale_discount_rate: number | null;
+    recent_average_price: number | null;
+    previous_sale_price: number | null;
     shipping_fee: number | null;
     source: {
       source_type: 'SELLER_PAGE';
@@ -137,6 +152,11 @@ export type JudgmentInputResponse = {
     source_urls: string[];
   }[];
   selected_criteria: UserCriterion[];
+  criterion_assessments: {
+    criterion: UserCriterion;
+    status: 'UNKNOWN';
+    fact_ids: string[];
+  }[];
   comparison_price_basis: 'PUBLIC' | 'PERSONALIZED';
   cheapest_offer_id: string | null;
   price_history_status: 'SUFFICIENT' | 'INSUFFICIENT' | 'UNAVAILABLE';
@@ -158,8 +178,6 @@ export class CoreIntegrationService {
     private readonly productComponents: ProductComponentRepository,
     @Inject(SELLER_OFFER_REPOSITORY)
     private readonly sellerOffers: SellerOfferRepository,
-    @Inject(PRICE_HISTORY_REPOSITORY)
-    private readonly priceHistory: PriceHistoryRepository,
     @Inject(USER_PREFERENCE_REPOSITORY)
     private readonly preferences: UserPreferenceRepository,
     @Inject(ANALYSIS_REPOSITORY)
@@ -217,11 +235,11 @@ export class CoreIntegrationService {
     ));
 
     const existingOffers = await this.sellerOffers.findByProductId(productId);
-    const existingByKey = new Map(existingOffers.map((offer) => [sellerOfferKey(offer), offer]));
+    const existingKeys = new Set(existingOffers.map(sellerOfferKey));
     const seenInputKeys = new Set<string>();
-    const rowsToCreate = verifiedResults.filter((result) => {
+    const rowsToUpsert = verifiedResults.filter((result) => {
       const key = sellerResultKey(productId, result);
-      if (seenInputKeys.has(key) || existingByKey.has(key)) {
+      if (seenInputKeys.has(key)) {
         seenInputKeys.add(key);
         return false;
       }
@@ -249,22 +267,14 @@ export class CoreIntegrationService {
         observed_at: result.source!.observed_at,
       };
     });
-    const created = await this.sellerOffers.createMany(rowsToCreate);
-    await this.priceHistory.createMany(created
-      .filter((offer) => offer.market_effective_price !== null && offer.observed_at !== null)
-      .map((offer) => ({
-        product_id: productId,
-        seller_offer_id: offer.id,
-        market_effective_price: offer.market_effective_price,
-        observed_at: offer.observed_at!,
-      })));
+    const upserted = await this.sellerOffers.upsertMany(rowsToUpsert);
 
     const allOffersByKey = new Map<string, { row: Row<'seller_offers'>; reusedExisting: boolean }>();
-    for (const offer of existingOffers) {
-      allOffersByKey.set(sellerOfferKey(offer), { row: offer, reusedExisting: true });
-    }
-    for (const offer of created) {
-      allOffersByKey.set(sellerOfferKey(offer), { row: offer, reusedExisting: false });
+    for (const offer of upserted) {
+      allOffersByKey.set(sellerOfferKey(offer), {
+        row: offer,
+        reusedExisting: existingKeys.has(sellerOfferKey(offer)),
+      });
     }
 
     return {
@@ -298,17 +308,26 @@ export class CoreIntegrationService {
     }
     const selectedCriteria = preferences?.selected_criteria ?? analysis.selected_criteria;
     const verifiedSnapshots = snapshots.filter(isContentVerifiedSnapshot);
+    if (verifiedSnapshots.length === 0) {
+      throw new BadRequestException('No CONTENT_VERIFIED offer snapshots are available for judgment');
+    }
     const allowedOfferIds = verifiedSnapshots
       .filter((snapshot) => isComparable(snapshot))
       .map((snapshot) => snapshot.seller_identifier);
+    const facts = buildFacts(analysis, product, verifiedSnapshots);
+    const recentAveragePrice = getNumericResultValue(analysis.result_json, 'recentAveragePrice');
+    const previousSalePrice = getNumericResultValue(analysis.result_json, 'previousSalePrice');
     return {
-      analysis_id: analysis.id,
-      user_id: userId,
+      product_data_mode: 'web_search',
       product: {
         product_id: product.id,
         identity: {
           brand: product.brand,
           normalized_product_name: product.canonical_name,
+          product_type: null,
+          option: null,
+          shade_or_scent: null,
+          version_or_renewal: null,
           components: components.map((component) => ({
             type: component.component_type,
             name: component.name,
@@ -323,9 +342,16 @@ export class CoreIntegrationService {
         seller: toAiSeller(snapshot.seller_name),
         product_name: product.canonical_name,
         comparison_status: getSnapshotComparisonStatus(snapshot),
+        components: getSnapshotComponents(snapshot),
         public_effective_price: snapshot.market_effective_price,
-        personalized_effective_price: snapshot.user_effective_price,
+        personalized_effective_price: snapshot.user_discount !== null ? snapshot.user_effective_price : null,
+        personalized_price_status: getPersonalizedPriceStatus(snapshot),
         unit_price: snapshot.calculated_unit_price,
+        displayed_discount_rate: calculateDisplayedDiscountRate(snapshot),
+        recent_average_discount_rate: getNumericResultValue(analysis.result_json, 'discountRateFromRecentAverage'),
+        previous_sale_discount_rate: getNumericResultValue(analysis.result_json, 'savingRateFromPreviousSale'),
+        recent_average_price: recentAveragePrice,
+        previous_sale_price: previousSalePrice,
         shipping_fee: snapshot.shipping_fee,
         source: {
           source_type: 'SELLER_PAGE',
@@ -335,8 +361,13 @@ export class CoreIntegrationService {
           verification_status: 'CONTENT_VERIFIED',
         },
       })),
-      facts: buildFacts(analysis, product, verifiedSnapshots),
+      facts,
       selected_criteria: selectedCriteria,
+      criterion_assessments: selectedCriteria.map((criterion) => ({
+        criterion,
+        status: 'UNKNOWN',
+        fact_ids: [],
+      })),
       comparison_price_basis: verifiedSnapshots.some((snapshot) => snapshot.user_discount !== null)
         ? 'PERSONALIZED'
         : 'PUBLIC',
@@ -435,14 +466,31 @@ function normalizeUrl(url: string): string {
 }
 
 function calculateCoreMarketEffectivePrice(offer: CandidateOfferContract): number | null {
-  const base = offer.listed_sale_price ?? offer.list_price;
-  if (base === null) {
-    return null;
-  }
-  return base
-    - (offer.public_coupon_amount ?? 0)
-    - (offer.automatic_discount_amount ?? 0)
-    + (offer.shipping_fee ?? 0);
+  const discounts = [
+    offer.public_coupon_amount === null
+      ? null
+      : {
+        id: 'public-coupon',
+        amount: offer.public_coupon_amount,
+        applicationStatus: 'APPLICABLE' as const,
+        exclusiveGroup: null,
+        includedInBasePrice: false,
+      },
+    offer.automatic_discount_amount === null
+      ? null
+      : {
+        id: 'automatic-discount',
+        amount: offer.automatic_discount_amount,
+        applicationStatus: 'APPLICABLE' as const,
+        exclusiveGroup: null,
+        includedInBasePrice: false,
+      },
+  ].filter((discount): discount is NonNullable<typeof discount> => discount !== null);
+  return calculateMarketEffectivePrice({
+    listedSalePrice: offer.listed_sale_price ?? offer.list_price,
+    shippingFee: offer.shipping_fee,
+    discounts,
+  });
 }
 
 function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
@@ -527,6 +575,56 @@ function buildFacts(
   }));
 }
 
+function getSnapshotComponents(snapshot: Row<'analysis_offers'>): JudgmentInputResponse['offers'][number]['components'] {
+  const value = getSnapshotValue(snapshot, 'components');
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isSnapshotComponent);
+}
+
+function isSnapshotComponent(value: unknown): value is JudgmentInputResponse['offers'][number]['components'][number] {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.type === 'string' &&
+    ['MAIN', 'REFILL', 'MINI', 'TRAVEL', 'OTHER_COSMETIC', 'NON_COSMETIC_GIFT'].includes(value.type) &&
+    (value.name === null || typeof value.name === 'string') &&
+    (value.capacity_value === null || typeof value.capacity_value === 'number') &&
+    (value.capacity_unit === null || value.capacity_unit === 'ML' || value.capacity_unit === 'G') &&
+    (value.quantity === null || typeof value.quantity === 'number')
+  );
+}
+
+function getPersonalizedPriceStatus(
+  snapshot: Row<'analysis_offers'>,
+): JudgmentInputResponse['offers'][number]['personalized_price_status'] {
+  if (snapshot.user_discount !== null && snapshot.user_effective_price !== null) {
+    return 'VERIFIED_ELIGIBLE';
+  }
+  return 'NOT_EVALUATED';
+}
+
+function calculateDisplayedDiscountRate(snapshot: Row<'analysis_offers'>): number | null {
+  if (
+    snapshot.original_list_price === null ||
+    snapshot.original_list_price === 0 ||
+    snapshot.sale_price === null
+  ) {
+    return null;
+  }
+  return ((snapshot.original_list_price - snapshot.sale_price) / snapshot.original_list_price) * 100;
+}
+
+function getNumericResultValue(resultJson: Json | null, key: string): number | null {
+  if (!isJsonObject(resultJson)) {
+    return null;
+  }
+  const value = resultJson[key];
+  return typeof value === 'number' ? value : null;
+}
+
 function getCheapestOfferId(resultJson: Json | null): string | null {
   if (!isJsonObject(resultJson)) {
     return null;
@@ -562,12 +660,31 @@ function validateJudgment(
   }
   const selected = new Set(context.selected_criteria);
   const criteriaResults = judgment.criteria_results;
-  if (Array.isArray(criteriaResults)) {
-    for (const result of criteriaResults) {
-      if (!isRecord(result) || typeof result.criterion !== 'string' || !selected.has(result.criterion as UserCriterion)) {
-        throw new BadRequestException('Judgment criteria result is not selected by the user');
-      }
+  if (!Array.isArray(criteriaResults) || criteriaResults.length !== 3) {
+    throw new BadRequestException('Judgment must include exactly three criteria results');
+  }
+  const criteriaResultSet = new Set<string>();
+  for (const result of criteriaResults) {
+    if (!isRecord(result) || typeof result.criterion !== 'string' || !selected.has(result.criterion as UserCriterion)) {
+      throw new BadRequestException('Judgment criteria result is not selected by the user');
     }
+    if (criteriaResultSet.has(result.criterion)) {
+      throw new BadRequestException('Judgment criteria results must be distinct');
+    }
+    criteriaResultSet.add(result.criterion);
+  }
+  if (criteriaResultSet.size !== selected.size) {
+    throw new BadRequestException('Judgment criteria results must match selected criteria');
+  }
+  const decisionStatus = judgment.decision_status;
+  if (decisionStatus !== 'DECIDED' && decisionStatus !== 'INSUFFICIENT_EVIDENCE') {
+    throw new BadRequestException('Unsupported judgment decision status');
+  }
+  if (decisionStatus === 'DECIDED' && conclusion === null) {
+    throw new BadRequestException('DECIDED judgment requires a conclusion');
+  }
+  if (decisionStatus === 'INSUFFICIENT_EVIDENCE' && conclusion !== null) {
+    throw new BadRequestException('INSUFFICIENT_EVIDENCE judgment cannot include a conclusion');
   }
 }
 

@@ -217,6 +217,44 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
     this.database.store.sellerOffers.push(...rows);
     return rows;
   }
+
+  async upsertMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+    if (inputs.some(hasNegativeSellerOfferPrice)) {
+      throw new Error('Seller offer prices cannot be negative');
+    }
+    const rows: Row<'seller_offers'>[] = [];
+    for (const input of inputs) {
+      const existing = this.database.store.sellerOffers.find((row) => (
+        sellerOfferIdentityKey(row) === sellerOfferIdentityKey(input)
+      ));
+      if (existing) {
+        Object.assign(existing, {
+          listed_price: input.listed_price ?? null,
+          listed_sale_price: input.listed_sale_price ?? null,
+          market_effective_price: input.market_effective_price ?? null,
+          user_effective_price: input.user_effective_price ?? null,
+          shipping_fee: input.shipping_fee ?? null,
+          public_discount_amount: input.public_discount_amount ?? null,
+          automatic_discount_amount: input.automatic_discount_amount ?? null,
+          reward_value: input.reward_value ?? null,
+          official_seller_status: input.official_seller_status ?? null,
+          return_policy_status: input.return_policy_status ?? null,
+          delivery_days: input.delivery_days ?? null,
+          comparison_status: input.comparison_status ?? null,
+          observed_at: input.observed_at ?? null,
+        });
+        rows.push(existing);
+        continue;
+      }
+      const row = sellerOfferRow(input, this.database);
+      this.database.store.sellerOffers.push(row);
+      rows.push(row);
+    }
+    return rows;
+  }
 }
 
 export class InMemorySellerOfferBenefitRepository implements SellerOfferBenefitRepository {
@@ -319,11 +357,17 @@ export class InMemoryAnalysisPersistenceRepository implements AnalysisPersistenc
           row.idempotency_key === payload.idempotencyKey
         )) ?? null;
       if (existing) {
-        return existing;
+        if (existing.status !== 'FAILED') {
+          return existing;
+        }
+        this.database.store.analysisOffers = this.database.store.analysisOffers
+          .filter((row) => row.analysis_id !== existing.id);
+        this.database.store.priceHistory = this.database.store.priceHistory
+          .filter((row) => row.analysis_id !== existing.id);
       }
 
       const now = nowIso();
-      const analysis: Row<'analyses'> = {
+      const analysis: Row<'analyses'> = existing ?? {
         id: randomUUID(),
         user_id: payload.userId,
         idempotency_key: payload.idempotencyKey,
@@ -338,7 +382,20 @@ export class InMemoryAnalysisPersistenceRepository implements AnalysisPersistenc
         created_at: now,
         updated_at: now,
       };
-      this.database.store.analyses.push(analysis);
+      analysis.user_id = payload.userId;
+      analysis.idempotency_key = payload.idempotencyKey;
+      analysis.source_url = payload.sourceUrl;
+      analysis.product_id = payload.productId;
+      analysis.status = 'PENDING';
+      analysis.verdict = null;
+      analysis.allowed_conclusions = [];
+      analysis.selected_criteria = validateSelectedCriteria(payload.selectedCriteria);
+      analysis.result_json = null;
+      analysis.warning_codes = [];
+      analysis.updated_at = now;
+      if (!existing) {
+        this.database.store.analyses.push(analysis);
+      }
       if (this.failAfterAnalysisInsert) {
         throw new Error('Injected failure after analysis insert');
       }
@@ -682,6 +739,10 @@ function sellerOfferRow(
     observed_at: input.observed_at ?? null,
     created_at: input.created_at ?? nowIso(),
   };
+}
+
+function sellerOfferIdentityKey(input: Pick<Row<'seller_offers'>, 'product_id' | 'seller_name' | 'seller_url'>): string {
+  return `${input.product_id}:${input.seller_name.trim().toLowerCase()}:${input.seller_url.trim().replace(/\/+$/, '').toLowerCase()}`;
 }
 
 function hasNegativeSellerOfferPrice(input: Insert<'seller_offers'>): boolean {

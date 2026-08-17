@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CatchCatchSupabaseClient, SUPABASE_CLIENT } from '../supabase.client';
-import { Insert, Row } from '../database.types';
+import { Insert, Row, Update } from '../database.types';
 import { SellerOfferRepository } from './repository.interfaces';
-import { throwOnSupabaseError } from './supabase-repository.utils';
+import { requireSupabaseData, throwOnSupabaseError } from './supabase-repository.utils';
 
 @Injectable()
 export class SupabaseSellerOfferRepository implements SellerOfferRepository {
@@ -31,6 +31,105 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
     throwOnSupabaseError('create seller offers', error);
     return data ?? [];
   }
+
+  async upsertMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+    assertNoNegativeOfferPrices(inputs);
+
+    const existing = await this.findExistingOffers(inputs);
+    const existingByKey = new Map(existing.map((row) => [sellerOfferInputKey(row), row]));
+    const rowsByKey = new Map<string, Row<'seller_offers'>>();
+    const toCreate: Insert<'seller_offers'>[] = [];
+
+    for (const input of inputs) {
+      const key = sellerOfferInputKey(input);
+      const existingRow = existingByKey.get(key);
+      if (!existingRow) {
+        toCreate.push(input);
+        continue;
+      }
+      const updated = await this.updateExisting(existingRow.id, input);
+      rowsByKey.set(key, updated);
+    }
+
+    if (toCreate.length > 0) {
+      const insertRows = toCreate.map(({ id: _id, ...input }) => input);
+      const { data, error } = await this.client
+        .from('seller_offers')
+        .upsert(insertRows, { onConflict: 'product_id,seller_name,seller_url' })
+        .select('*');
+      const createdRows = error?.code === '42P10'
+        ? await this.insertWithoutConflictTarget(insertRows)
+        : (() => {
+          throwOnSupabaseError('upsert seller offers', error);
+          return data ?? [];
+        })();
+      for (const row of createdRows) {
+        rowsByKey.set(sellerOfferInputKey(row), row);
+      }
+    }
+
+    return inputs
+      .map((input) => rowsByKey.get(sellerOfferInputKey(input)))
+      .filter((row): row is Row<'seller_offers'> => row !== undefined);
+  }
+
+  private async findExistingOffers(inputs: readonly Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]> {
+    const productIds = Array.from(new Set(inputs.map((input) => input.product_id)));
+    const { data, error } = await this.client
+      .from('seller_offers')
+      .select('*')
+      .in('product_id', productIds);
+    throwOnSupabaseError('find existing seller offers', error);
+    const keys = new Set(inputs.map(sellerOfferInputKey));
+    return (data ?? []).filter((row) => keys.has(sellerOfferInputKey(row)));
+  }
+
+  private async updateExisting(
+    id: string,
+    input: Insert<'seller_offers'>,
+  ): Promise<Row<'seller_offers'>> {
+    const update: Update<'seller_offers'> = {
+      listed_price: input.listed_price ?? null,
+      listed_sale_price: input.listed_sale_price ?? null,
+      market_effective_price: input.market_effective_price ?? null,
+      user_effective_price: input.user_effective_price ?? null,
+      shipping_fee: input.shipping_fee ?? null,
+      public_discount_amount: input.public_discount_amount ?? null,
+      automatic_discount_amount: input.automatic_discount_amount ?? null,
+      reward_value: input.reward_value ?? null,
+      official_seller_status: input.official_seller_status ?? null,
+      return_policy_status: input.return_policy_status ?? null,
+      delivery_days: input.delivery_days ?? null,
+      comparison_status: input.comparison_status ?? null,
+      observed_at: input.observed_at ?? null,
+    };
+    const { data, error } = await this.client
+      .from('seller_offers')
+      .update(update)
+      .eq('id', id)
+      .select('*')
+      .single();
+    throwOnSupabaseError('update seller offer', error);
+    return requireSupabaseData('update seller offer', data);
+  }
+
+  private async insertWithoutConflictTarget(
+    inputs: Omit<Insert<'seller_offers'>, 'id'>[],
+  ): Promise<Row<'seller_offers'>[]> {
+    const { data, error } = await this.client
+      .from('seller_offers')
+      .insert(inputs)
+      .select('*');
+    throwOnSupabaseError('insert seller offers without conflict target', error);
+    return data ?? [];
+  }
+}
+
+function sellerOfferInputKey(input: Pick<Row<'seller_offers'>, 'product_id' | 'seller_name' | 'seller_url'>): string {
+  return `${input.product_id}:${input.seller_name.trim().toLowerCase()}:${input.seller_url.trim().replace(/\/+$/, '').toLowerCase()}`;
 }
 
 function assertNoNegativeOfferPrices(inputs: Insert<'seller_offers'>[]): void {

@@ -88,7 +88,7 @@ export class SavedProductsService {
     const enabledAlertProductIds = new Set(
       alerts.filter((alert) => alert.enabled).map((alert) => alert.product_id),
     );
-    const cards = await Promise.all(rows.map(async (row) => {
+    const cards = await Promise.all(rows.map(async (row, index) => {
       const product = await this.products.findById(row.product_id);
       if (!product) {
         return null;
@@ -111,11 +111,15 @@ export class SavedProductsService {
         sellerName: lowestOffer?.seller_name ?? null,
         isPriceAlertEnabled: enabledAlertProductIds.has(product.id),
         savedAt: row.created_at,
+        sourceIndex: index,
       };
     }));
     return cards
-      .filter((card): card is SavedProductCardResponse => card !== null)
-      .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+      .filter((card): card is SavedProductCardResponse & { sourceIndex: number } => card !== null)
+      .sort((left, right) => (
+        right.savedAt.localeCompare(left.savedAt) || right.sourceIndex - left.sourceIndex
+      ))
+      .map(({ sourceIndex: _sourceIndex, ...card }) => card);
   }
 
   async remove(userId: string, productId: string): Promise<{ removed: true }> {

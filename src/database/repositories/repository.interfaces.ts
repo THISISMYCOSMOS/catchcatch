@@ -19,6 +19,7 @@ export interface ProductComponentRepository {
 export interface SellerOfferRepository {
   findByProductId(productId: string): Promise<Row<'seller_offers'>[]>;
   createMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
+  upsertMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
 }
 
 export interface SellerOfferBenefitRepository {

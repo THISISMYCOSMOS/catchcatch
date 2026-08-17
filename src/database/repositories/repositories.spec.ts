@@ -170,6 +170,39 @@ describe('repository implementations', () => {
     await expect(sellerOffers.createMany([])).resolves.toEqual([]);
   });
 
+  it('upserts seller offers by product, seller, and URL while preserving existing ids', async () => {
+    const first = await sellerOffers.upsertMany([
+      sellerOfferInput({
+        id: 'offer-stable',
+        seller_name: 'COUPANG',
+        seller_url: 'https://example.com/coupang',
+        listed_sale_price: 20000,
+        market_effective_price: 20000,
+      }),
+    ]);
+    const second = await sellerOffers.upsertMany([
+      sellerOfferInput({
+        id: 'offer-new-id-must-not-win',
+        seller_name: 'COUPANG',
+        seller_url: 'https://example.com/coupang',
+        listed_sale_price: 15000,
+        market_effective_price: 15000,
+      }),
+    ]);
+
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({
+      id: first[0].id,
+      listed_sale_price: 15000,
+      market_effective_price: 15000,
+    });
+    await expect(sellerOffers.findByProductId('product-1')).resolves.toHaveLength(1);
+  });
+
+  it('returns an empty array for empty seller offer upsertMany input', async () => {
+    await expect(sellerOffers.upsertMany([])).resolves.toEqual([]);
+  });
+
   it('creates price history and returns it sorted by observed_at', async () => {
     await priceHistory.createMany([
       priceHistoryInput({ observed_at: '2026-07-03T00:00:00.000Z' }),
@@ -385,6 +418,31 @@ describe('repository implementations', () => {
     expect(database.store.priceHistory).toHaveLength(1);
   });
 
+  it('allows a failed idempotent analysis to be retried successfully', async () => {
+    const failed = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'retry-after-failure',
+      status: 'FAILED',
+      offerSnapshots: [],
+      priceHistoryEntries: [],
+    }));
+    const completed = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
+      idempotencyKey: 'retry-after-failure',
+      status: 'COMPLETED',
+      offerSnapshots: [
+        analysisOfferInput({ seller_identifier: 'offer-1' }),
+      ],
+      priceHistoryEntries: [
+        priceHistoryInput({ seller_offer_id: 'offer-1' }),
+      ],
+    }));
+
+    expect(completed.id).toBe(failed.id);
+    expect(completed.status).toBe('COMPLETED');
+    expect(database.store.analyses).toHaveLength(1);
+    expect(await analysisOffers.findByAnalysisId(completed.id)).toHaveLength(1);
+    expect(database.store.priceHistory).toHaveLength(1);
+  });
+
   it('prevents duplicate saved products and removes saved products safely', async () => {
     const first = await savedProducts.save({ user_id: 'user-1', product_id: 'product-1' });
     const second = await savedProducts.save({ user_id: 'user-1', product_id: 'product-1' });
@@ -473,6 +531,14 @@ describe('repository implementations', () => {
     const repository = new SupabaseSellerOfferRepository(client as never);
 
     await expect(repository.createMany([])).resolves.toEqual([]);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it('does not call Supabase for empty seller offer upsertMany input', async () => {
+    const client = { from: jest.fn() };
+    const repository = new SupabaseSellerOfferRepository(client as never);
+
+    await expect(repository.upsertMany([])).resolves.toEqual([]);
     expect(client.from).not.toHaveBeenCalled();
   });
 
@@ -648,6 +714,7 @@ function analysisRow(
 
 function analysisPersistencePayload(overrides: {
   idempotencyKey?: string | null;
+  status?: AnalysisPersistencePayload['status'];
   offerSnapshots?: ReturnType<typeof analysisOfferInput>[];
   priceHistoryEntries?: ReturnType<typeof priceHistoryInput>[];
 } = {}): AnalysisPersistencePayload {
@@ -656,7 +723,7 @@ function analysisPersistencePayload(overrides: {
     productId: 'product-1',
     sourceUrl: 'https://example.com/product',
     idempotencyKey: overrides.idempotencyKey ?? null,
-    status: 'COMPLETED' as const,
+    status: overrides.status ?? 'COMPLETED',
     verdict: null,
     allowedConclusions: ['REASONABLE_BUY' as const],
     selectedCriteria: [

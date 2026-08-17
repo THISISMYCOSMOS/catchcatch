@@ -1,14 +1,16 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { spawnSync } from 'child_process';
+import { join } from 'path';
 import {
   InMemoryAnalysisOfferRepository,
   InMemoryAnalysisRepository,
   InMemoryDatabase,
-  InMemoryPriceHistoryRepository,
   InMemoryProductComponentRepository,
   InMemoryProductRepository,
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
 } from '../database/repositories/in-memory.repositories';
+import { calculateMarketEffectivePrice } from '../domain/calculations';
 import { CoreIntegrationService } from './core-integration.service';
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,7 +20,6 @@ describe('CoreIntegrationService', () => {
   let products: InMemoryProductRepository;
   let components: InMemoryProductComponentRepository;
   let sellerOffers: InMemorySellerOfferRepository;
-  let priceHistory: InMemoryPriceHistoryRepository;
   let preferences: InMemoryUserPreferenceRepository;
   let analyses: InMemoryAnalysisRepository;
   let analysisOffers: InMemoryAnalysisOfferRepository;
@@ -29,7 +30,6 @@ describe('CoreIntegrationService', () => {
     products = new InMemoryProductRepository(database);
     components = new InMemoryProductComponentRepository(database);
     sellerOffers = new InMemorySellerOfferRepository(database);
-    priceHistory = new InMemoryPriceHistoryRepository(database);
     preferences = new InMemoryUserPreferenceRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
     analysisOffers = new InMemoryAnalysisOfferRepository(database);
@@ -37,7 +37,6 @@ describe('CoreIntegrationService', () => {
       products,
       components,
       sellerOffers,
-      priceHistory,
       preferences,
       analyses,
       analysisOffers,
@@ -89,7 +88,52 @@ describe('CoreIntegrationService', () => {
       },
     ]);
     expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(1);
-    expect(await priceHistory.findByProductId(product.productId)).toHaveLength(1);
+    expect(database.store.priceHistory).toHaveLength(0);
+  });
+
+  it('updates an existing seller offer price while preserving the offer id', async () => {
+    const product = await service.resolveProduct(resolveProductRequest());
+
+    const first = await service.ingestOffers(product.productId, ingestOffersRequest());
+    const secondRequest = ingestOffersRequest('updated-price');
+    secondRequest.search.seller_results[0].candidate_offer!.listed_sale_price = 15000;
+    secondRequest.search.seller_results[0].candidate_offer!.public_coupon_amount = 0;
+    const second = await service.ingestOffers(product.productId, secondRequest);
+
+    expect(second.offers).toEqual([
+      {
+        ...first.offers[0],
+        marketEffectivePrice: 15000,
+        reusedExisting: true,
+      },
+    ]);
+    const stored = await sellerOffers.findByProductId(product.productId);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      id: first.offers[0].id,
+      listed_sale_price: 15000,
+      market_effective_price: 15000,
+    });
+  });
+
+  it('uses the domain market effective price calculation for ingested offers', async () => {
+    const product = await service.resolveProduct(resolveProductRequest());
+
+    const result = await service.ingestOffers(product.productId, ingestOffersRequest());
+
+    expect(result.offers[0].marketEffectivePrice).toBe(calculateMarketEffectivePrice({
+      listedSalePrice: 11000,
+      shippingFee: 0,
+      discounts: [
+        {
+          id: 'public-coupon',
+          amount: 1000,
+          applicationStatus: 'APPLICABLE',
+          exclusiveGroup: null,
+          includedInBasePrice: false,
+        },
+      ],
+    }));
   });
 
   it('builds judgment context from real snapshots and excludes non CONTENT_VERIFIED snapshots', async () => {
@@ -98,12 +142,12 @@ describe('CoreIntegrationService', () => {
     const result = await service.buildJudgmentInput(analysisId, 'user-1');
 
     expect(result).toMatchObject({
-      analysis_id: analysisId,
-      user_id: 'user-1',
+      product_data_mode: 'web_search',
       product: {
         product_id: productId,
         identity: {
           normalized_product_name: 'Round Lab Sun Cream',
+          product_type: null,
         },
       },
       selected_criteria: [
@@ -127,6 +171,7 @@ describe('CoreIntegrationService', () => {
     expect(result.allowed_offer_ids).toEqual(['offer-lowest']);
     expect(result.facts[0].id).toBe('offer:offer-lowest:price');
     expect(result.facts[0].numeric_values).toContain(9000);
+    expectAgentSchemaParse('judgmentInputSchema', result);
   });
 
   it('validates and saves AI judgment results into the existing analysis row', async () => {
@@ -180,9 +225,35 @@ describe('CoreIntegrationService', () => {
     }))
       .rejects
       .toBeInstanceOf(BadRequestException);
+    await expect(service.saveJudgmentResult(analysisId, 'user-1', {
+      schemaVersion: 'ai-judgment.v1',
+      judgment: {
+        ...validJudgment(),
+        criteria_results: validJudgment().criteria_results.slice(0, 2),
+      },
+    }))
+      .rejects
+      .toBeInstanceOf(BadRequestException);
+    await expect(service.saveJudgmentResult(analysisId, 'user-1', {
+      schemaVersion: 'ai-judgment.v1',
+      judgment: {
+        ...validJudgment(),
+        criteria_results: [
+          validJudgment().criteria_results[0],
+          validJudgment().criteria_results[0],
+          validJudgment().criteria_results[2],
+        ],
+      },
+    }))
+      .rejects
+      .toBeInstanceOf(BadRequestException);
     await expect(service.buildJudgmentInput('00000000-0000-4000-8000-000000000000', 'user-1'))
       .rejects
       .toBeInstanceOf(NotFoundException);
+  });
+
+  it('keeps fixture AI judgment compatible with the latest Agent schema', () => {
+    expectAgentSchemaParse('aiJudgmentSchema', validJudgment());
   });
 
   function resolveProductRequest(idempotencyKey = 'request-1') {
@@ -292,6 +363,18 @@ describe('CoreIntegrationService', () => {
           reason: 'Lowest offer.',
           used_fact_ids: ['offer:offer-lowest:price'],
         },
+        {
+          criterion: 'PURCHASE_TIMING',
+          status: 'UNKNOWN',
+          reason: 'No timing decision in fixture.',
+          used_fact_ids: ['offer:offer-lowest:price'],
+        },
+        {
+          criterion: 'UNIT_PRICE',
+          status: 'POSITIVE',
+          reason: 'Unit price fact is present.',
+          used_fact_ids: ['offer:offer-lowest:price'],
+        },
       ],
       recommended_offer_id: 'offer-lowest',
       recommendation_reason: 'Lowest verified offer.',
@@ -364,6 +447,7 @@ describe('CoreIntegrationService', () => {
         calculated_unit_price: 180,
         offer_snapshot: {
           comparisonStatus: 'DIRECTLY_COMPARABLE',
+          components: [],
           sourceUrl: 'https://example.com/offer-lowest',
           observedAt: '2026-08-10T00:00:00.000Z',
           verificationStatus: 'CONTENT_VERIFIED',
@@ -385,3 +469,34 @@ describe('CoreIntegrationService', () => {
     return { analysisId: analysis.id, productId: product.id };
   }
 });
+
+function expectAgentSchemaParse(schemaName: 'judgmentInputSchema' | 'aiJudgmentSchema', payload: unknown): void {
+  const command = process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : 'npm';
+  const code = [
+    "const schema = require('./src/ai-judgment/ai-judgment.schema.ts');",
+    'const payload = JSON.parse(process.env.CATCHCATCH_SCHEMA_PAYLOAD ?? "null");',
+    `schema.${schemaName}.parse(payload);`,
+  ].join(' ');
+  const args = process.platform === 'win32'
+    ? ['/c', 'npm.cmd', 'exec', '--', 'tsx', '-e', code]
+    : ['exec', '--', 'tsx', '-e', code];
+  const result = spawnSync(command, args, {
+    cwd: join(process.cwd(), 'agent'),
+    env: {
+      ...process.env,
+      CATCHCATCH_SCHEMA_PAYLOAD: JSON.stringify(payload),
+    },
+    encoding: 'utf8',
+  });
+  expect({
+    status: result.status,
+    error: result.error?.message,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }).toEqual({
+    status: 0,
+    error: undefined,
+    stdout: '',
+    stderr: '',
+  });
+}
