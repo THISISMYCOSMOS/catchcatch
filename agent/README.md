@@ -155,7 +155,7 @@ Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처
 
 네 판매처 중 올리브영·무신사 뷰티·쿠팡은 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.
 
-**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 검색 호출 **이전에** OpenAI `responses.parse` 호출이 1회 추가됩니다. 다만 `registered_brand_official_domain`으로 게이트를 통과한 저장값을 전달하면 발견 호출을 생략합니다. 발견 호출은 `web_search` 도구를 붙이지 않고 출력도 `candidate_domain` 하나뿐입니다. 일반 검색에서는 `OPENAI_SEARCH_MODEL`, 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
+**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 상품 검색 **이전에** 공식몰 발견용 `web_search`가 1회 추가됩니다. 다만 앞선 동적 발견 결과를 `registered_brand_official_domain`으로 재사용하면 발견 호출을 생략합니다. 발견 출력은 `candidate_domain`과 검색 근거 URL만 포함합니다. 일반 검색에서는 `OPENAI_SEARCH_MODEL`, 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
 
 **캐시 키와 수명.** 프로세스 메모리 안의 `Map` 하나입니다(`ProductSearchService.brandOfficialDomainCache`).
 
@@ -166,7 +166,7 @@ Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처
 - 그 밖에는 영속 저장이 없습니다. 재시작하면 비워지고, 인스턴스를 여러 개 띄우면 캐시도 인스턴스마다 따로입니다.
 - 브랜드명이 100자를 넘으면 발견 자체를 건너뜁니다. 브랜드명은 상품 페이지에서 AI가 뽑아낸 값이라 신뢰 경계 밖에서 오고, 그 문자열이 곧 캐시 키이기 때문입니다.
 
-**게이트.** 모델은 후보를 제안만 하고, 신뢰 여부는 규칙 기반 코드(`gateBrandOfficialDomainCandidate`)가 정합니다.
+**검색 근거와 게이트.** 모델은 실제 `web_search` 출처 URL과 후보 도메인을 함께 반환해야 합니다. 서비스는 근거 URL이 제공자 반환 출처 목록에 실제로 존재하고 후보 도메인과 일치하는지 먼저 확인한 뒤, 규칙 기반 코드(`gateBrandOfficialDomainCandidate`)를 적용합니다.
 
 - HTTPS 호스트명으로 정규화되지 않으면 거부
 - **퓨니코드(IDN) 도메인은 거부.** `new URL()`을 거치면 한글·키릴 등 비ASCII 호스트명은 `xn--`로 인코딩되므로, 이 한 가지 검사로 원본 유니코드 입력과 이미 인코딩된 입력이 모두 걸립니다. 진짜 도메인과 눈으로 구별되지 않는 호모그래프 주소를 막기 위한 것이며, 국내 화장품 브랜드가 IDN 호스트로 판매하는 경우는 없으므로 통째로 거부합니다.
@@ -174,15 +174,15 @@ Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처
 - 고정 판매처 세 도메인과 그 서브도메인은 거부
 - `.kr`로 끝나지 않는 도메인은 거부하지 **않고** 경고만 붙입니다(해외 스토어프론트 가능성).
 
-통과한 도메인만 `web_search`의 `allowed_domains`에 추가되고 `BRAND_OFFICIAL` 결과의 URL 검증 기준이 됩니다. 발견이 실패해도 검색 자체는 실패하지 않습니다. 고정 세 도메인만으로 진행하고 `BRAND_OFFICIAL`은 `UNKNOWN`으로 남습니다.
+검색 근거 대조와 게이트를 모두 통과한 도메인만 후속 상품 `web_search`의 `allowed_domains`에 추가되고 `BRAND_OFFICIAL` 결과의 URL 검증 기준이 됩니다. 발견이 실패해도 고정 세 판매처 검색은 계속하고 `BRAND_OFFICIAL`은 `UNKNOWN`으로 남습니다.
 
 **발견된 도메인을 쓰면 항상 경고가 붙습니다.** 새로 발견했든 캐시에서 꺼냈든, 응답 `warnings`에 다음 경고가 무조건 들어갑니다(`buildBrandOfficialDomainWarnings`).
 
 ```txt
-BRAND_OFFICIAL domain <도메인> was proposed by the model for brand "<브랜드>" and passed rule-based checks only; it is not verified to be operated by the brand.
+BRAND_OFFICIAL domain <도메인> was discovered by web_search for brand "<브랜드>", matched a returned source URL, and passed rule-based checks; it is not verified at seller-page content level and requires separate verification.
 ```
 
-게이트 통과는 "알아볼 수 있는 잘못된 부류가 아니었다"는 뜻일 뿐, 그 도메인이 실제로 브랜드의 것이라는 확인이 아니기 때문입니다. Core는 이 경고가 붙은 `BRAND_OFFICIAL` 오퍼를 검증된 사실과 동급으로 다루면 안 됩니다.
+검색 근거가 있다는 사실은 모델 기억만으로 지어낸 후보를 차단하지만, 도메인 소유자나 운영 주체까지 증명하지는 않습니다. 또한 공식몰 발견 근거는 가격 근거가 아니므로 후속 상품 페이지가 별도로 검증돼야 합니다.
 
 여기에 조건부 경고 두 개가 더 붙을 수 있습니다. `.kr`이 아닐 때(해외 스토어프론트 가능성), 그리고 브랜드명의 라틴 토큰이 도메인에 전혀 없을 때(`brandNameMismatchWarning`)입니다. 뒤엣것은 모델이 무관한 도메인을 지어낸 경우를 잡을 뿐, `innisfree-kr.com` 같은 타이포스쿼트는 잡지 못합니다. 브랜드명을 그대로 품고 있기 때문이며, 이를 가리려면 실제 도메인을 아는 외부 근거가 필요합니다.
 

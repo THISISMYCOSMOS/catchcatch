@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { Seller } from './product-data.schema';
 
 export const FIXED_SELLER_DOMAINS: Readonly<Record<Exclude<Seller, 'BRAND_OFFICIAL'>, string>> = {
@@ -188,6 +189,21 @@ export function gateBrandOfficialDomainCandidate(
     return {
       accepted: false,
       reason: `${domain} is an internationalized (punycode) domain; too easy to pass off as a brand's real domain`,
+    };
+  }
+  const labels = domain.split('.');
+  const reservedSuffix = labels.at(-1);
+  if (
+    isIP(domain) !== 0 ||
+    domain.includes(':') ||
+    labels.length < 2 ||
+    !reservedSuffix ||
+    reservedSuffix.length < 2 ||
+    ['example', 'invalid', 'localhost', 'local', 'test'].includes(reservedSuffix)
+  ) {
+    return {
+      accepted: false,
+      reason: `${domain} is not a public registrable brand domain`,
     };
   }
   const isBlockedTenancyHost = BRAND_OFFICIAL_DOMAIN_BLOCKLIST.some((rawBlocked) => {

@@ -64,8 +64,24 @@ function searchResponse(anchorProduct = input.anchor_product) {
   };
 }
 
-function discoveryResponse(candidateDomain: string | null) {
-  return { output: [], output_parsed: { candidate_domain: candidateDomain } };
+function discoveryResponse(
+  candidateDomain: string | null,
+  evidenceUrls: string[] = [],
+  sourceUrls: string[] = evidenceUrls,
+) {
+  return {
+    output: [{
+      type: 'web_search_call',
+      action: {
+        type: 'search',
+        sources: sourceUrls.map((url) => ({ type: 'url', url })),
+      },
+    }],
+    output_parsed: {
+      candidate_domain: candidateDomain,
+      evidence_urls: evidenceUrls,
+    },
+  };
 }
 
 function createService() {
@@ -75,13 +91,20 @@ function createService() {
   }));
 }
 
-// The discovery call is the one without a web_search tool attached.
+// Both phases use web_search. Discovery has no allowed_domains filter because
+// finding the official domain is its job; the product search is restricted to
+// the fixed sellers plus the discovered domain.
 function discoveryCalls() {
-  return parseMock.mock.calls.filter(([body]) => !(body as { tools?: unknown[] }).tools);
+  return parseMock.mock.calls.filter(([body]) => {
+    const tool = (body as { tools?: Array<{ filters?: unknown }> }).tools?.[0];
+    return tool && !tool.filters;
+  });
 }
 
 function searchCallBody() {
-  const call = parseMock.mock.calls.find(([body]) => (body as { tools?: unknown[] }).tools);
+  const call = parseMock.mock.calls.find(([body]) => (
+    (body as { tools?: Array<{ filters?: unknown }> }).tools?.[0]?.filters
+  ));
   return call?.[0] as { tools: Array<{ filters: { allowed_domains: string[] } }> };
 }
 
@@ -90,21 +113,27 @@ describe('brand-official domain discovery (T5)', () => {
     parseMock.mockReset();
   });
 
-  it('runs one discovery call and adds the gated domain to the search allowlist', async () => {
+  it('web-searches the official domain and adds a source-backed candidate to the product-search allowlist', async () => {
     parseMock
-      .mockResolvedValueOnce(discoveryResponse('innisfree.com'))
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+      ))
       .mockResolvedValueOnce(searchResponse());
 
     const result = await createService().searchSameProduct(input);
 
     expect(discoveryCalls()).toHaveLength(1);
     expect(searchCallBody().tools[0].filters.allowed_domains).toContain('innisfree.com');
-    expect(result.warnings.some((warning) => warning.includes('not verified'))).toBe(true);
+    expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(true);
   });
 
   it('reuses the cached domain instead of discovering again for the same brand', async () => {
     parseMock
-      .mockResolvedValueOnce(discoveryResponse('innisfree.com'))
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+      ))
       .mockResolvedValue(searchResponse());
 
     const service = createService();
@@ -117,9 +146,15 @@ describe('brand-official domain discovery (T5)', () => {
 
   it('does not reuse a cached domain across service instances', async () => {
     parseMock
-      .mockResolvedValueOnce(discoveryResponse('innisfree.com'))
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+      ))
       .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(discoveryResponse('innisfree.com'))
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+      ))
       .mockResolvedValueOnce(searchResponse());
 
     await createService().searchSameProduct(input);
@@ -130,7 +165,10 @@ describe('brand-official domain discovery (T5)', () => {
 
   it('drops a candidate the gate rejects and searches the fixed domains only', async () => {
     parseMock
-      .mockResolvedValueOnce(discoveryResponse('smartstore.naver.com'))
+      .mockResolvedValueOnce(discoveryResponse(
+        'smartstore.naver.com',
+        ['https://smartstore.naver.com/innisfree'],
+      ))
       .mockResolvedValueOnce(searchResponse());
 
     const result = await createService().searchSameProduct(input);
@@ -140,7 +178,39 @@ describe('brand-official domain discovery (T5)', () => {
       'musinsa.com',
       'coupang.com',
     ]);
-    expect(result.warnings.some((warning) => warning.includes('not verified'))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(false);
+  });
+
+  it('rejects a candidate whose evidence URL was not returned by web_search', async () => {
+    parseMock
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+        ['https://unrelated.example/search-result'],
+      ))
+      .mockResolvedValueOnce(searchResponse());
+
+    const result = await createService().searchSameProduct(input);
+
+    expect(searchCallBody().tools[0].filters.allowed_domains).toEqual([
+      'oliveyoung.co.kr',
+      'musinsa.com',
+      'coupang.com',
+    ]);
+    expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(false);
+  });
+
+  it('rejects evidence from a different domain even when it was returned by web_search', async () => {
+    parseMock
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://unrelated.example/innisfree'],
+      ))
+      .mockResolvedValueOnce(searchResponse());
+
+    await createService().searchSameProduct(input);
+
+    expect(searchCallBody().tools[0].filters.allowed_domains).not.toContain('innisfree.com');
   });
 
   it('degrades to no domain when the model returns no candidate', async () => {

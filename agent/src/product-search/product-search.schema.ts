@@ -227,13 +227,13 @@ export function mergeWarnings(...groups: string[][]): string[] {
   return [...new Set(groups.flat())];
 }
 
-// Output contract for the brand-official domain discovery step (T5). Kept
-// deliberately tiny and separate from productSearchAiResultSchema: it is a
-// different call with a different job (propose, not search), and its output
-// is never trusted directly — it only becomes a search domain if it passes
-// gateBrandOfficialDomainCandidate.
+// Output contract for the brand-official domain discovery search. URL
+// strings stay format-free because OpenAI Structured Outputs rejects the
+// JSON Schema URI format; the service validates and cross-checks every URL
+// against the actual web_search sources before promoting the domain.
 export const brandOfficialDomainCandidateSchema = z.object({
   candidate_domain: z.string().min(1).nullable(),
+  evidence_urls: z.array(z.string().min(1)).max(5),
 });
 
 export type BrandOfficialDomainCandidate = z.infer<typeof brandOfficialDomainCandidateSchema>;

@@ -146,6 +146,19 @@ describe('seller domain policy', () => {
       const result = gateBrandOfficialDomainCandidate('not a domain');
       expect(result.accepted).toBe(false);
     });
+
+    it.each([
+      'localhost',
+      '127.0.0.1',
+      'brand.example',
+      'brand.test',
+    ])('rejects the non-public candidate %s', (host) => {
+      const result = gateBrandOfficialDomainCandidate(host);
+      expect(result.accepted).toBe(false);
+      if (!result.accepted) {
+        expect(result.reason).toContain('public registrable');
+      }
+    });
   });
 
   describe('brandNameMismatchWarning', () => {

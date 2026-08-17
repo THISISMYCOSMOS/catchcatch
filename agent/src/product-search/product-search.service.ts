@@ -665,12 +665,11 @@ export class ProductSearchService {
     }
   }
 
-  // T5 discovery step: a separate, tool-free OpenAI call asking the model to
-  // recall (not search) a candidate brand-official domain from the brand
-  // name alone. Never throws — any failure (no candidate, malformed output,
-  // network/API error, or a candidate that fails the rule-based gate)
-  // degrades to "no domain discovered", which is a normal, handled outcome
-  // for the caller (BRAND_OFFICIAL stays UNKNOWN), not a search failure.
+  // Brand-official discovery is a separate web search driven by the brand
+  // extracted from the input product page. A candidate is promoted only when
+  // its evidence URL is also present in the provider-returned source list and
+  // the domain passes the deterministic gate. Any failure degrades to no
+  // official domain, leaving BRAND_OFFICIAL as UNKNOWN.
   private async discoverBrandOfficialDomain(
     client: OpenAI,
     brand: string,
@@ -690,6 +689,12 @@ export class ProductSearchService {
         model,
         instructions: CATCHCATCH_BRAND_OFFICIAL_DOMAIN_INSTRUCTIONS,
         input: buildBrandOfficialDomainCandidatePrompt(brand),
+        tools: [{
+          type: 'web_search',
+          search_context_size: this.resolveWebSearchContextSize(),
+        }],
+        tool_choice: 'required',
+        include: ['web_search_call.action.sources'],
         store: false,
         text: {
           format: zodTextFormat(brandOfficialDomainCandidateSchema, 'catchcatch_brand_official_domain_candidate'),
@@ -697,7 +702,8 @@ export class ProductSearchService {
       });
       logOpenAIUsage(this.config, this.logger, 'brand_official_discovery', model, response);
 
-      const candidate = response.output_parsed?.candidate_domain;
+      const parsed = brandOfficialDomainCandidateSchema.parse(response.output_parsed);
+      const candidate = parsed.candidate_domain;
       if (!candidate) {
         return { domain: null, warnings: [] };
       }
@@ -709,9 +715,20 @@ export class ProductSearchService {
         );
         return { domain: null, warnings: [] };
       }
+      const sourceUrls = collectWebSearchSourceUrls(response.output);
+      if (!hasBrandOfficialDomainSearchEvidence(
+        gate.domain,
+        parsed.evidence_urls,
+        sourceUrls,
+      )) {
+        this.logger.warn(
+          `Rejected brand-official domain candidate "${gate.domain}" for brand "${brand}": no matching web_search source evidence`,
+        );
+        return { domain: null, warnings: [] };
+      }
 
       this.brandOfficialDomainCache.set(cacheKey, gate.domain);
-      this.logger.log(`Promoted brand-official domain ${gate.domain} for brand "${brand}"`);
+      this.logger.log(`Promoted web-searched brand-official domain ${gate.domain} for brand "${brand}"`);
       return { domain: gate.domain, warnings: buildBrandOfficialDomainWarnings(brand, gate.domain) };
     } catch (error) {
       this.logger.warn(
@@ -946,7 +963,7 @@ export function buildBrandOfficialDomainWarnings(
   domain: string,
 ): string[] {
   const warnings = [
-    `BRAND_OFFICIAL domain ${domain} was proposed by the model for brand "${brand}" and passed rule-based checks only; it is not verified to be operated by the brand.`,
+    `BRAND_OFFICIAL domain ${domain} was discovered by web_search for brand "${brand}", matched a returned source URL, and passed rule-based checks; it is not verified at seller-page content level and requires separate verification.`,
   ];
   for (const conditionalWarning of [
     brandNameMismatchWarning(brand, domain),
@@ -1598,6 +1615,26 @@ export function collectWebSearchSourceUrls(output: unknown): Set<string> {
     }
   }
   return urls;
+}
+
+export function hasBrandOfficialDomainSearchEvidence(
+  candidateDomain: string,
+  evidenceUrls: readonly string[],
+  sourceUrls: ReadonlySet<string>,
+): boolean {
+  const domain = normalizeDomain(candidateDomain);
+  return evidenceUrls.some((rawEvidenceUrl) => {
+    try {
+      const evidenceUrl = normalizeSellerPageUrl(rawEvidenceUrl);
+      const hostname = new URL(evidenceUrl).hostname.toLowerCase().replace(/^www\./, '');
+      return (
+        (hostname === domain || hostname.endsWith(`.${domain}`)) &&
+        sourceUrls.has(evidenceUrl)
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 function assertUrlWasReturnedByWebSearch(
