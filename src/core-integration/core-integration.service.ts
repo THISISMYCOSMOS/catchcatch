@@ -20,6 +20,7 @@ import {
 import { calculateMarketEffectivePrice } from '../domain/calculations';
 import { AllowedConclusion, CapacityUnit, ComparisonStatus, CriterionStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
 import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
+import { SearchQuotaService } from '../search-quota/search-quota.service';
 
 type ProductComponentContract = {
   type: 'MAIN' | 'REFILL' | 'MINI' | 'TRAVEL' | 'OTHER_COSMETIC' | 'NON_COSMETIC_GIFT';
@@ -196,13 +197,15 @@ export class CoreIntegrationService {
     private readonly analyses: AnalysisRepository,
     @Inject(ANALYSIS_OFFER_REPOSITORY)
     private readonly analysisOffers: AnalysisOfferRepository,
+    private readonly searchQuota: SearchQuotaService,
   ) {}
 
-  async resolveProduct(input: ResolveProductDto): Promise<ResolvedProductResponse> {
+  async resolveProduct(input: ResolveProductDto, userId: string): Promise<ResolvedProductResponse> {
     const identification = parseIdentification(input.identification);
     if (identification.identification_status !== 'IDENTIFIED' || !identification.anchor_product) {
       throw new BadRequestException('Only IDENTIFIED products can be resolved');
     }
+    await this.searchQuota.consumeForUser(userId, input.idempotencyKey);
     const identity = identification.anchor_product;
     const canonicalName = requiredString(identity.normalized_product_name, 'normalized_product_name');
     const productKey = createProductKey(identity);

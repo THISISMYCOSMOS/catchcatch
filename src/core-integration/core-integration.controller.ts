@@ -12,8 +12,11 @@ export class CoreIntegrationController {
   constructor(private readonly service: CoreIntegrationService) {}
 
   @Post('products/resolve')
-  resolveProduct(@Body() body: ResolveProductDto) {
-    return this.service.resolveProduct(body);
+  resolveProduct(
+    @Body() body: ResolveProductDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.resolveProduct(body, user.id);
   }
 
   @Put('products/:productId/offers')

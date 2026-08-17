@@ -54,6 +54,57 @@ export type Database = {
         };
         Relationships: [];
       };
+      user_search_quotas: {
+        Row: {
+          user_id: string;
+          window_started_at: string;
+          window_expires_at: string;
+          used_count: number;
+          limit_count: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          window_started_at: string;
+          window_expires_at: string;
+          used_count?: number;
+          limit_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          window_started_at?: string;
+          window_expires_at?: string;
+          used_count?: number;
+          limit_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_search_quota_consumptions: {
+        Row: {
+          user_id: string;
+          idempotency_key: string;
+          consumed_at: string;
+          window_started_at: string;
+        };
+        Insert: {
+          user_id: string;
+          idempotency_key: string;
+          consumed_at?: string;
+          window_started_at: string;
+        };
+        Update: {
+          user_id?: string;
+          idempotency_key?: string;
+          consumed_at?: string;
+          window_started_at?: string;
+        };
+        Relationships: [];
+      };
       user_memberships: {
         Row: {
           id: string;

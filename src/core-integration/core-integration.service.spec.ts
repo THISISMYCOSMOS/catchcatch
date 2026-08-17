@@ -7,10 +7,12 @@ import {
   InMemoryDatabase,
   InMemoryProductComponentRepository,
   InMemoryProductRepository,
+  InMemorySearchQuotaRepository,
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
 } from '../database/repositories/in-memory.repositories';
 import { calculateMarketEffectivePrice } from '../domain/calculations';
+import { SearchQuotaService } from '../search-quota/search-quota.service';
 import { CoreIntegrationService } from './core-integration.service';
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,6 +25,7 @@ describe('CoreIntegrationService', () => {
   let preferences: InMemoryUserPreferenceRepository;
   let analyses: InMemoryAnalysisRepository;
   let analysisOffers: InMemoryAnalysisOfferRepository;
+  let searchQuota: SearchQuotaService;
   let service: CoreIntegrationService;
 
   beforeEach(() => {
@@ -33,6 +36,7 @@ describe('CoreIntegrationService', () => {
     preferences = new InMemoryUserPreferenceRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
     analysisOffers = new InMemoryAnalysisOfferRepository(database);
+    searchQuota = new SearchQuotaService(new InMemorySearchQuotaRepository(database));
     service = new CoreIntegrationService(
       products,
       components,
@@ -40,12 +44,13 @@ describe('CoreIntegrationService', () => {
       preferences,
       analyses,
       analysisOffers,
+      searchQuota,
     );
   });
 
   it('resolves IDENTIFIED products with a UUID productId and reuses the same product', async () => {
-    const first = await service.resolveProduct(resolveProductRequest());
-    const second = await service.resolveProduct(resolveProductRequest('request-2'));
+    const first = await resolveProduct(resolveProductRequest());
+    const second = await resolveProduct(resolveProductRequest('request-2'));
 
     expect(first).toEqual({ productId: expect.stringMatching(UUID_V4_PATTERN), brandId: null });
     expect(second).toEqual({ productId: first.productId, brandId: null });
@@ -84,9 +89,9 @@ describe('CoreIntegrationService', () => {
       firstFiftyWithGift.identification.anchor_product!.components[0],
     ];
 
-    const first = await service.resolveProduct(firstFiftyWithGift);
-    const same = await service.resolveProduct(sameFiftyDifferentOrder);
-    const different = await service.resolveProduct(hundredMl);
+    const first = await resolveProduct(firstFiftyWithGift);
+    const same = await resolveProduct(sameFiftyDifferentOrder);
+    const different = await resolveProduct(hundredMl);
 
     expect(same.productId).toBe(first.productId);
     expect(different.productId).not.toBe(first.productId);
@@ -97,20 +102,28 @@ describe('CoreIntegrationService', () => {
     request.identification.identification_status = 'AMBIGUOUS';
     (request.identification as Record<string, unknown>).anchor_product = null;
 
-    await expect(service.resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
     expect(database.store.products).toHaveLength(0);
+    await expect(searchQuota.findForUser('user-1')).resolves.toMatchObject({
+      used: 0,
+      remaining: 10,
+    });
   });
 
   it('rejects malformed identification payloads without creating products', async () => {
     const request = resolveProductRequest();
     request.identification.anchor_product!.components[0].quantity = 0;
 
-    await expect(service.resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(resolveProduct(request)).rejects.toBeInstanceOf(BadRequestException);
     expect(database.store.products).toHaveLength(0);
+    await expect(searchQuota.findForUser('user-1')).resolves.toMatchObject({
+      used: 0,
+      remaining: 10,
+    });
   });
 
   it('ingests only CONTENT_VERIFIED seller offers and returns stored values', async () => {
-    const product = await service.resolveProduct(resolveProductRequest());
+    const product = await resolveProduct(resolveProductRequest());
 
     const first = await service.ingestOffers(product.productId, ingestOffersRequest());
     const second = await service.ingestOffers(product.productId, ingestOffersRequest('same-request-again'));
@@ -167,7 +180,7 @@ describe('CoreIntegrationService', () => {
       (request.search.seller_results[1] as Record<string, unknown>).seller = request.search.seller_results[0].seller;
     }],
   ])('rejects malformed search payloads without storing offers: %s', async (_name, mutate) => {
-    const product = await service.resolveProduct(resolveProductRequest());
+    const product = await resolveProduct(resolveProductRequest());
     const request = ingestOffersRequest();
     mutate(request);
 
@@ -177,7 +190,7 @@ describe('CoreIntegrationService', () => {
   });
 
   it('updates an existing seller offer price while preserving the offer id', async () => {
-    const product = await service.resolveProduct(resolveProductRequest());
+    const product = await resolveProduct(resolveProductRequest());
 
     const first = await service.ingestOffers(product.productId, ingestOffersRequest());
     const secondRequest = ingestOffersRequest('updated-price');
@@ -202,7 +215,7 @@ describe('CoreIntegrationService', () => {
   });
 
   it('uses the domain market effective price calculation for ingested offers', async () => {
-    const product = await service.resolveProduct(resolveProductRequest());
+    const product = await resolveProduct(resolveProductRequest());
 
     const result = await service.ingestOffers(product.productId, ingestOffersRequest());
 
@@ -448,6 +461,10 @@ describe('CoreIntegrationService', () => {
         warnings: [],
       },
     };
+  }
+
+  function resolveProduct(input: ReturnType<typeof resolveProductRequest>, userId = 'user-1') {
+    return service.resolveProduct(input, userId);
   }
 
   function ingestOffersRequest(idempotencyKey = 'request-1') {

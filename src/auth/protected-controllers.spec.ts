@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { AnalysesController } from '../analyses/analyses.controller';
 import { PriceAlertsController } from '../price-alerts/price-alerts.controller';
 import { SavedProductsController } from '../saved-products/saved-products.controller';
+import { SearchQuotaController } from '../search-quota/search-quota.controller';
 import { UserPreferencesController } from '../user-preferences/user-preferences.controller';
 
 const userA = { id: 'user-a', email: 'a@example.com' };
@@ -116,6 +117,16 @@ describe('protected user controllers', () => {
 
     expect(service.create).toHaveBeenCalledWith('user-a', 'product-1', 1000);
     expect(service.updateEnabledForUser).toHaveBeenCalledWith('user-a', 'alert-1', false);
+  });
+
+  it('uses authenticated user id for search quota lookup', async () => {
+    const service = {
+      findForUser: jest.fn().mockResolvedValue({ remaining: 10 }),
+    };
+    const controller = new SearchQuotaController(service as never);
+
+    await expect(controller.findMine(userA)).resolves.toEqual({ remaining: 10 });
+    expect(service.findForUser).toHaveBeenCalledWith('user-a');
   });
 
   it('keeps sale calendar public by not requiring user owner checks', () => {

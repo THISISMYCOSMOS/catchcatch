@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
+import { SearchQuotaModule } from '../search-quota/search-quota.module';
 import { CoreIntegrationController } from './core-integration.controller';
 import { CoreIntegrationService } from './core-integration.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule],
+  imports: [AuthModule, DatabaseModule, SearchQuotaModule],
   controllers: [CoreIntegrationController],
   providers: [CoreIntegrationService],
   exports: [CoreIntegrationService],

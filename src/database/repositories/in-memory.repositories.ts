@@ -14,6 +14,8 @@ import {
   SavedProductRepository,
   SellerOfferBenefitRepository,
   SellerOfferRepository,
+  SearchQuotaConsumeResult,
+  SearchQuotaRepository,
   UserCardRepository,
   UserMembershipRepository,
   UserPreferenceRepository,
@@ -35,6 +37,8 @@ type Store = {
   userMemberships: Row<'user_memberships'>[];
   userShoppingGrades: Row<'user_shopping_grades'>[];
   userCards: Row<'user_cards'>[];
+  userSearchQuotas: Row<'user_search_quotas'>[];
+  userSearchQuotaConsumptions: Row<'user_search_quota_consumptions'>[];
 };
 
 export class InMemoryDatabase {
@@ -54,6 +58,8 @@ export class InMemoryDatabase {
     userMemberships: [],
     userShoppingGrades: [],
     userCards: [],
+    userSearchQuotas: [],
+    userSearchQuotaConsumptions: [],
   };
 
   nextId(prefix: string): string {
@@ -254,6 +260,46 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
       rows.push(row);
     }
     return rows;
+  }
+}
+
+export class InMemorySearchQuotaRepository implements SearchQuotaRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findByUserId(userId: string): Promise<Row<'user_search_quotas'> | null> {
+    return this.database.store.userSearchQuotas.find((row) => row.user_id === userId) ?? null;
+  }
+
+  async consume(
+    userId: string,
+    idempotencyKey: string,
+    now = new Date(),
+  ): Promise<SearchQuotaConsumeResult> {
+    const existingConsumption = this.database.store.userSearchQuotaConsumptions.find((row) => (
+      row.user_id === userId && row.idempotency_key === idempotencyKey
+    ));
+    if (existingConsumption) {
+      return toSearchQuotaConsumeResult(
+        getOrCreateReadableQuota(this.database, userId, now),
+        true,
+        false,
+      );
+    }
+
+    const quota = getOrCreateConsumableQuota(this.database, userId, now);
+    if (quota.used_count >= quota.limit_count) {
+      return toSearchQuotaConsumeResult(quota, false, false);
+    }
+
+    quota.used_count += 1;
+    quota.updated_at = now.toISOString();
+    this.database.store.userSearchQuotaConsumptions.push({
+      user_id: userId,
+      idempotency_key: idempotencyKey,
+      consumed_at: now.toISOString(),
+      window_started_at: quota.window_started_at,
+    });
+    return toSearchQuotaConsumeResult(quota, false, true);
   }
 }
 
@@ -780,6 +826,78 @@ function restoreStore(target: Store, source: Store): void {
   target.userMemberships = source.userMemberships;
   target.userShoppingGrades = source.userShoppingGrades;
   target.userCards = source.userCards;
+  target.userSearchQuotas = source.userSearchQuotas;
+  target.userSearchQuotaConsumptions = source.userSearchQuotaConsumptions;
+}
+
+function getOrCreateReadableQuota(
+  database: InMemoryDatabase,
+  userId: string,
+  now: Date,
+): Row<'user_search_quotas'> {
+  return database.store.userSearchQuotas.find((row) => row.user_id === userId) ??
+    createQuotaRow(database, userId, now, 0);
+}
+
+function getOrCreateConsumableQuota(
+  database: InMemoryDatabase,
+  userId: string,
+  now: Date,
+): Row<'user_search_quotas'> {
+  const existing = database.store.userSearchQuotas.find((row) => row.user_id === userId);
+  if (!existing) {
+    return createQuotaRow(database, userId, now, 0);
+  }
+  if (new Date(existing.window_expires_at).getTime() <= now.getTime()) {
+    existing.window_started_at = now.toISOString();
+    existing.window_expires_at = addDays(now, 7).toISOString();
+    existing.used_count = 0;
+    existing.limit_count = 10;
+    existing.updated_at = now.toISOString();
+  }
+  return existing;
+}
+
+function createQuotaRow(
+  database: InMemoryDatabase,
+  userId: string,
+  now: Date,
+  usedCount: number,
+): Row<'user_search_quotas'> {
+  const row: Row<'user_search_quotas'> = {
+    user_id: userId,
+    window_started_at: now.toISOString(),
+    window_expires_at: addDays(now, 7).toISOString(),
+    used_count: usedCount,
+    limit_count: 10,
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+  };
+  database.store.userSearchQuotas.push(row);
+  return row;
+}
+
+function toSearchQuotaConsumeResult(
+  quota: Row<'user_search_quotas'>,
+  idempotent: boolean,
+  consumed: boolean,
+): SearchQuotaConsumeResult {
+  return {
+    allowed: quota.used_count < quota.limit_count || consumed || idempotent,
+    consumed,
+    idempotent,
+    limit: quota.limit_count,
+    used: quota.used_count,
+    remaining: Math.max(quota.limit_count - quota.used_count, 0),
+    windowStartedAt: quota.window_started_at,
+    resetsAt: quota.window_expires_at,
+  };
+}
+
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
 }
 
 function sortSaleRows(rows: readonly Row<'sale_calendar'>[]): Row<'sale_calendar'>[] {

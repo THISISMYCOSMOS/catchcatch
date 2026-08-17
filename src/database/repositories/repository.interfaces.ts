@@ -112,3 +112,26 @@ export interface UserCardRepository {
     inputs: Insert<'user_cards'>[],
   ): Promise<Row<'user_cards'>[]>;
 }
+
+export type SearchQuotaSnapshot = {
+  limit: number;
+  used: number;
+  remaining: number;
+  windowStartedAt: string | null;
+  resetsAt: string | null;
+};
+
+export type SearchQuotaConsumeResult = SearchQuotaSnapshot & {
+  allowed: boolean;
+  consumed: boolean;
+  idempotent: boolean;
+};
+
+export interface SearchQuotaRepository {
+  findByUserId(userId: string): Promise<Row<'user_search_quotas'> | null>;
+  consume(
+    userId: string,
+    idempotencyKey: string,
+    now?: Date,
+  ): Promise<SearchQuotaConsumeResult>;
+}

@@ -10,6 +10,7 @@ import {
   PRODUCT_REPOSITORY,
   SAVED_PRODUCT_REPOSITORY,
   SALE_CALENDAR_REPOSITORY,
+  SEARCH_QUOTA_REPOSITORY,
   SELLER_OFFER_BENEFIT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
   USER_CARD_REPOSITORY,
@@ -26,6 +27,7 @@ import { SupabaseProductComponentRepository } from './repositories/supabase-prod
 import { SupabaseProductRepository } from './repositories/supabase-product.repository';
 import { SupabaseSavedProductRepository } from './repositories/supabase-saved-product.repository';
 import { SupabaseSaleCalendarRepository } from './repositories/supabase-sale-calendar.repository';
+import { SupabaseSearchQuotaRepository } from './repositories/supabase-search-quota.repository';
 import { SupabaseSellerOfferBenefitRepository } from './repositories/supabase-seller-offer-benefit.repository';
 import { SupabaseSellerOfferRepository } from './repositories/supabase-seller-offer.repository';
 import { SupabaseUserCardRepository } from './repositories/supabase-user-card.repository';
@@ -49,6 +51,7 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
     SupabaseAnalysisPersistenceRepository,
     SupabaseSavedProductRepository,
     SupabaseSaleCalendarRepository,
+    SupabaseSearchQuotaRepository,
     SupabaseSellerOfferBenefitRepository,
     SupabasePriceAlertRepository,
     SupabaseUserMembershipRepository,
@@ -99,6 +102,10 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
       useExisting: SupabaseSaleCalendarRepository,
     },
     {
+      provide: SEARCH_QUOTA_REPOSITORY,
+      useExisting: SupabaseSearchQuotaRepository,
+    },
+    {
       provide: PRICE_ALERT_REPOSITORY,
       useExisting: SupabasePriceAlertRepository,
     },
@@ -128,6 +135,7 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
     ANALYSIS_OFFER_REPOSITORY,
     SAVED_PRODUCT_REPOSITORY,
     SALE_CALENDAR_REPOSITORY,
+    SEARCH_QUOTA_REPOSITORY,
     PRICE_ALERT_REPOSITORY,
     USER_MEMBERSHIP_REPOSITORY,
     USER_SHOPPING_GRADE_REPOSITORY,
