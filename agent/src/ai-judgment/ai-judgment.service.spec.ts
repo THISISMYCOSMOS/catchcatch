@@ -1,4 +1,14 @@
 import { ConfigService } from '@nestjs/config';
+
+jest.mock('openai', () => {
+  const parse = jest.fn();
+  class MockAPIError extends Error {}
+  const MockOpenAI = jest.fn(() => ({ responses: { parse } }));
+  Object.assign(MockOpenAI, { APIError: MockAPIError, __parse: parse });
+  return { __esModule: true, default: MockOpenAI };
+});
+
+import OpenAI from 'openai';
 import {
   AiJudgmentService,
   validateAiJudgmentBusinessRules,
@@ -8,6 +18,8 @@ import {
   JudgmentInput,
   judgmentInputSchema,
 } from './ai-judgment.schema';
+
+const parseMock = (OpenAI as unknown as { __parse: jest.Mock }).__parse;
 
 const input: JudgmentInput = {
   product_data_mode: 'sample',
@@ -121,6 +133,8 @@ const validJudgment: AiJudgment = {
 };
 
 describe('AiJudgmentService', () => {
+  beforeEach(() => parseMock.mockReset());
+
   it('returns a deterministic result without calling OpenAI in mock mode', async () => {
     const config = new ConfigService({ AI_JUDGMENT_MODE: 'mock' });
     const service = new AiJudgmentService(config);
@@ -141,6 +155,24 @@ describe('AiJudgmentService', () => {
     await expect(service.judge(input)).rejects.toThrow(
       'OPENAI_API_KEY is required in real mode',
     );
+  });
+
+  it('uses one bounded Luna judgment attempt by default', async () => {
+    parseMock.mockResolvedValueOnce({ output: [], output_parsed: validJudgment });
+    const config = new ConfigService({
+      AI_JUDGMENT_MODE: 'real',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_MODEL: 'gpt-5.6',
+    });
+    const service = new AiJudgmentService(config);
+
+    await expect(service.judge(input)).resolves.toEqual(validJudgment);
+    expect(parseMock).toHaveBeenCalledTimes(1);
+    expect(parseMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.6-luna',
+      max_output_tokens: 2000,
+      reasoning: { effort: 'low' },
+    }));
   });
 
   it('rejects a number that does not exist in verified facts', () => {

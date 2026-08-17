@@ -85,6 +85,29 @@ AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 
 
 `agent/.env.example`을 그대로 `.env`로 복사하고 `INTERNAL_API_TOKEN`만 채우면(`PRODUCT_DATA_MODE=sample`, `AI_JUDGMENT_MODE=mock`이 기본값이므로) `OPENAI_API_KEY` 없이도 세 엔드포인트 모두 스키마를 통과하는 응답을 반환합니다. Core↔Agent 연동을 로컬에서 확인할 때는 이 기본값을 그대로 쓰면 됩니다. 실제 판매처 데이터와 실제 AI 판단이 필요할 때만 두 값을 각각 `web_search`, `real`로 바꾸고 `OPENAI_API_KEY`를 채웁니다.
 
+### 분석당 OpenAI 비용 예산
+
+기본 운영 예산은 `OPENAI_ANALYSIS_COST_BUDGET_USD=0.17`입니다. 환율 1달러
+1,600원과 부가세 10%를 보수적으로 적용하면 약 299원입니다. Agent는 Responses
+API가 반환한 비캐시 입력, 캐시 입력, 출력 토큰과 `web_search_call` 수를 모델별
+단가로 계산해 `OPENAI_COST` 로그에 남깁니다.
+
+비용 배분 기본값은 상품 식별 $0.02, 공식몰 발견 $0.02, 필수 판매처 검색
+$0.11, AI 판단 $0.02입니다. 식별·공식몰 발견·판단은 기본적으로
+`gpt-5.6-luna`, 필수 판매처 검색은 `gpt-5.6`(Sol)을 사용합니다. 공식몰 발견을
+실행하면 필수 검색 예약분을 침범하는 경우 발견을 생략하고
+`BRAND_OFFICIAL=UNKNOWN`으로 남깁니다. 필수 검색 자체의 예약분이 없으면
+`ANALYSIS_COST_BUDGET_EXCEEDED`로 fail closed합니다.
+
+Core가 식별과 검색에 공통 분석 ID를 전달하지 않으므로, Agent는 동일한
+`product_url`의 식별·검색 호출을 5분 TTL FIFO 세션으로 연결합니다. 동시 동일 URL
+요청은 별도 세션으로 분리하지만 프로세스 재시작 시 원장은 사라집니다. 이를 보완하기
+위해 모델 라우팅 외에도 식별 1회, 공식몰 발견 1회, 필수 검색 2회의 도구 호출 상한,
+단계별 출력 토큰 상한, 재시도 0회(판단 기본 시도 1회)를 함께 적용합니다. 검색
+콘텐츠 토큰은 호출이 끝난 뒤에만 확정되므로 단일 진행 중 호출이 예약액을 넘는 경우까지
+정확히 차단하는 결제 수준의 절대 상한은 아닙니다. `OPENAI_COST_BUDGET_EXCEEDED`와
+`stage_reserve_exceeded` 로그를 운영 경보로 수집해야 합니다.
+
 ### 단일 상품 링크 실검색 점검
 
 `OPENAI_API_KEY`가 설정된 환경에서 아래 명령은 Backend 저장 없이 Agent의 상품 식별과
@@ -136,7 +159,7 @@ npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --
 구성 검색은 기본적으로 `OPENAI_CONFIGURATION_SEARCH_MODEL=gpt-5.6-luna`,
 `OPENAI_WEB_SEARCH_CONTEXT_SIZE=low`, `OPENAI_CONFIGURATION_REASONING_EFFORT=low`,
 `OPENAI_CONFIGURATION_MAX_OUTPUT_TOKENS=4000`을 사용합니다. 최종 AI 판정 모델
-`OPENAI_MODEL`과 분리되어 있어 가격·구성 추출만 저비용 모델로 운영할 수 있습니다.
+`OPENAI_JUDGMENT_MODEL`과 분리되어 있어 가격·구성 추출만 저비용 모델로 운영할 수 있습니다.
 Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처만
 `OPENAI_CONFIGURATION_FALLBACK_MODEL=gpt-5.6-sol`로 한 번 재시도합니다. 정상적인
 `UNKNOWN`에는 재시도하지 않습니다. 기본 시간 예산은 Luna 18초, Sol 10초입니다.
@@ -155,7 +178,7 @@ Luna가 타임아웃·API 오류·구조화 출력 오류로 실패한 판매처
 
 네 판매처 중 올리브영·무신사 뷰티·쿠팡은 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.
 
-**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 상품 검색 **이전에** 공식몰 발견용 `web_search`가 1회 추가됩니다. 다만 앞선 동적 발견 결과를 `registered_brand_official_domain`으로 재사용하면 발견 호출을 생략합니다. 발견 출력은 `candidate_domain`과 검색 근거 URL만 포함합니다. 일반 검색에서는 `OPENAI_SEARCH_MODEL`, 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
+**요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 상품 검색 **이전에** 공식몰 발견용 `web_search`가 1회 추가됩니다. 다만 앞선 동적 발견 결과를 `registered_brand_official_domain`으로 재사용하면 발견 호출을 생략합니다. 발견 출력은 `candidate_domain`과 검색 근거 URL만 포함합니다. 일반 검색에서는 `OPENAI_BRAND_OFFICIAL_MODEL`(기본 Luna), 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
 
 **캐시 키와 수명.** 프로세스 메모리 안의 `Map` 하나입니다(`ProductSearchService.brandOfficialDomainCache`).
 

@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { FIXED_SELLER_DOMAINS } from '../src/ai-contracts/seller-domain.policy';
 import { ProductIdentificationService } from '../src/product-identification/product-identification.service';
 import { ProductSearchService } from '../src/product-search/product-search.service';
+import { OpenAICostBudgetService } from '../src/openai-cost/openai-cost-budget.service';
 
 const USAGE = 'npm run test:search:live -- <https-product-url>';
 
@@ -33,8 +34,9 @@ async function main(): Promise<void> {
     ...process.env,
     PRODUCT_DATA_MODE: 'web_search',
   });
-  const identificationService = new ProductIdentificationService(config);
-  const searchService = new ProductSearchService(config);
+  const costBudget = new OpenAICostBudgetService(config);
+  const identificationService = new ProductIdentificationService(config, costBudget);
+  const searchService = new ProductSearchService(config, costBudget);
   const startedAt = Date.now();
   const identification = await identificationService.identify({
     product_url: productUrl.toString(),

@@ -20,6 +20,9 @@ import {
 } from './product-identification.schema';
 import { parseRequestInput } from '../ai-contracts/request-input';
 import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
+import {
+  OpenAICostBudgetService,
+} from '../openai-cost/openai-cost-budget.service';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real identification result (PRODUCT_DATA_MODE=sample).';
 
@@ -35,7 +38,10 @@ type WebSearchOutputItem = {
 export class ProductIdentificationService {
   private readonly logger = new Logger(ProductIdentificationService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly costBudget: OpenAICostBudgetService = new OpenAICostBudgetService(config),
+  ) {}
 
   async identify(rawInput: unknown): Promise<ProductIdentificationResult> {
     const input = parseRequestInput(productIdentificationInputSchema, rawInput);
@@ -65,9 +71,24 @@ export class ProductIdentificationService {
     });
 
     const model = this.config.get<string>(
-      'OPENAI_SEARCH_MODEL',
-      this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
+      'OPENAI_IDENTIFICATION_MODEL',
+      'gpt-5.6-luna',
     );
+    const budgetSession = this.costBudget.begin(
+      input.product_url,
+      this.costBudget.searchPipelineBudgetUsd(),
+    );
+    const reservation = this.costBudget.reserve(
+      budgetSession,
+      'product_identification',
+    );
+    if (!reservation) {
+      throw new ServiceUnavailableException({
+        code: 'ANALYSIS_COST_BUDGET_EXCEEDED',
+        stage: 'product_identification',
+        retryable: false,
+      });
+    }
     try {
       const response = await client.responses.parse({
         model,
@@ -79,6 +100,16 @@ export class ProductIdentificationService {
           filters: { allowed_domains: input.allowed_domains },
         }],
         tool_choice: 'required',
+        max_tool_calls: 1,
+        max_output_tokens: resolvePositiveInteger(
+          this.config.get<string>('OPENAI_IDENTIFICATION_MAX_OUTPUT_TOKENS'),
+          1_200,
+        ),
+        reasoning: {
+          effort: resolveReasoningEffort(
+            this.config.get<string>('OPENAI_IDENTIFICATION_REASONING_EFFORT', 'low'),
+          ),
+        },
         include: ['web_search_call.action.sources'],
         store: false,
         text: {
@@ -88,7 +119,16 @@ export class ProductIdentificationService {
           ),
         },
       });
+      this.costBudget.settle(reservation, model, response);
       logOpenAIUsage(this.config, this.logger, 'product_identification', model, response);
+
+      if (this.costBudget.isExceeded(budgetSession)) {
+        throw new ServiceUnavailableException({
+          code: 'ANALYSIS_COST_BUDGET_EXCEEDED',
+          stage: 'product_identification',
+          retryable: false,
+        });
+      }
 
       if (!response.output_parsed) {
         throw new Error('OpenAI returned no parsed identification output');
@@ -96,6 +136,8 @@ export class ProductIdentificationService {
       assertInputUrlWasSearched(input, response.output);
       return validateProductIdentificationResult(input, response.output_parsed);
     } catch (error) {
+      this.costBudget.release(reservation);
+      if (error instanceof ServiceUnavailableException) throw error;
       if (error instanceof OpenAI.APIError) {
         this.logger.error(
           `OpenAI product identification failed: status=${error.status}, code=${error.code ?? 'unknown'}, request_id=${error.requestID ?? 'unknown'}, message=${error.message}`,
@@ -150,6 +192,19 @@ export class ProductIdentificationService {
     };
     return validateProductIdentificationResult(input, sampleAiResult);
   }
+}
+
+function resolvePositiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function resolveReasoningEffort(
+  raw: string | undefined,
+): 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' {
+  return raw === 'none' || raw === 'medium' || raw === 'high' || raw === 'xhigh' || raw === 'max'
+    ? raw
+    : 'low';
 }
 
 function resolveWebSearchContextSize(

@@ -1,5 +1,17 @@
 import { ConfigService } from '@nestjs/config';
+
+jest.mock('openai', () => {
+  const parse = jest.fn();
+  class MockAPIError extends Error {}
+  const MockOpenAI = jest.fn(() => ({ responses: { parse } }));
+  Object.assign(MockOpenAI, { APIError: MockAPIError, __parse: parse });
+  return { __esModule: true, default: MockOpenAI };
+});
+
+import OpenAI from 'openai';
 import { ProductIdentificationService } from './product-identification.service';
+
+const parseMock = (OpenAI as unknown as { __parse: jest.Mock }).__parse;
 
 const input = {
   product_url: 'https://www.coupang.com/vp/products/1',
@@ -7,6 +19,8 @@ const input = {
 };
 
 describe('ProductIdentificationService', () => {
+  beforeEach(() => parseMock.mockReset());
+
   it('returns schema-valid, clearly-labeled sample data without calling OpenAI', async () => {
     const service = new ProductIdentificationService(config({
       PRODUCT_DATA_MODE: 'sample',
@@ -50,6 +64,50 @@ describe('ProductIdentificationService', () => {
         retryable: false,
       },
     });
+  });
+
+  it('uses the cost-sensitive identification model and bounded web search by default', async () => {
+    parseMock.mockResolvedValueOnce({
+      output: [{
+        type: 'web_search_call',
+        action: { sources: [{ url: input.product_url }] },
+      }],
+      output_parsed: {
+        identification_status: 'IDENTIFIED',
+        anchor_product: {
+          brand: 'Example',
+          normalized_product_name: 'Example Product',
+          product_type: 'serum',
+          option: null,
+          shade_or_scent: null,
+          version_or_renewal: null,
+          components: [],
+        },
+        preview: null,
+        source: {
+          source_type: 'SELLER_PAGE',
+          source_url: input.product_url,
+          acquisition_method: 'AI_WEB_SEARCH',
+          verification_status: 'UNVERIFIED',
+        },
+        warnings: [],
+      },
+    });
+    const service = new ProductIdentificationService(config({
+      PRODUCT_DATA_MODE: 'web_search',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_SEARCH_MODEL: 'gpt-5.6',
+    }));
+
+    await expect(service.identify(input)).resolves.toMatchObject({
+      identification_status: 'IDENTIFIED',
+    });
+    expect(parseMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.6-luna',
+      max_tool_calls: 1,
+      max_output_tokens: 1200,
+      reasoning: { effort: 'low' },
+    }));
   });
 });
 

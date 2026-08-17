@@ -6,6 +6,7 @@ import { FIXED_SELLER_DOMAINS } from '../src/ai-contracts/seller-domain.policy';
 import { productIdentitySchema, sellerSchema } from '../src/ai-contracts/product-data.schema';
 import { ProductIdentificationService } from '../src/product-identification/product-identification.service';
 import { ProductSearchService } from '../src/product-search/product-search.service';
+import { OpenAICostBudgetService } from '../src/openai-cost/openai-cost-budget.service';
 
 const USAGE = 'npm run test:configurations:live -- <https-product-url> [--sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,BRAND_OFFICIAL] [--max-candidates=1] [--anchor-file=path.json] [--brand-domain=example.com]';
 
@@ -54,14 +55,15 @@ async function main(): Promise<void> {
   const maxCandidatesPerSeller = maxCandidatesArgument
     ? Number(maxCandidatesArgument)
     : undefined;
-  const searchService = new ProductSearchService(config);
+  const costBudget = new OpenAICostBudgetService(config);
+  const searchService = new ProductSearchService(config, costBudget);
   const startedAt = Date.now();
   const reusedAnchor = anchorFile
     ? productIdentitySchema.parse(JSON.parse(await readFile(anchorFile, 'utf8')))
     : null;
   const identification = reusedAnchor
     ? null
-    : await new ProductIdentificationService(config).identify({
+    : await new ProductIdentificationService(config, costBudget).identify({
       product_url: productUrl.toString(),
       allowed_domains: [allowedDomain],
     });

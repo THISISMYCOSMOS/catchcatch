@@ -15,12 +15,16 @@ import {
 } from './ai-judgment.prompt';
 import { parseRequestInput } from '../ai-contracts/request-input';
 import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
+import { OpenAICostBudgetService } from '../openai-cost/openai-cost-budget.service';
 
 @Injectable()
 export class AiJudgmentService {
   private readonly logger = new Logger(AiJudgmentService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly costBudget: OpenAICostBudgetService = new OpenAICostBudgetService(config),
+  ) {}
 
   async judge(rawInput: unknown): Promise<AiJudgment> {
     const input = parseRequestInput(judgmentInputSchema, rawInput);
@@ -48,43 +52,79 @@ export class AiJudgmentService {
       timeout: Number(this.config.get<string>('OPENAI_TIMEOUT_MS', '20000')),
       maxRetries: 0,
     });
-    const model = this.config.get<string>('OPENAI_MODEL', 'gpt-5.6');
+    const model = this.config.get<string>('OPENAI_JUDGMENT_MODEL', 'gpt-5.6-luna');
+    const maxAttempts = resolveBoundedInteger(
+      this.config.get<string>('OPENAI_JUDGMENT_MAX_ATTEMPTS'),
+      1,
+      1,
+      2,
+    );
+    const budgetSession = this.costBudget.begin(
+      `judgment:${input.product.product_id}`,
+      this.costBudget.stageReserveUsd('ai_judgment'),
+    );
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const correction = attempt === 1
-          ? `\n\n${CATCHCATCH_JUDGMENT_CORRECTION_INSTRUCTIONS}`
-          : '';
-        const response = await client.responses.parse({
-          model,
-          instructions: `${CATCHCATCH_JUDGMENT_INSTRUCTIONS}${correction}`,
-          input: buildJudgmentPrompt(input),
-          store: false,
-          text: {
-            format: zodTextFormat(aiJudgmentSchema, 'catchcatch_judgment'),
-          },
-        });
-        logOpenAIUsage(this.config, this.logger, `judgment_attempt_${attempt + 1}`, model, response);
-
-        if (!response.output_parsed) {
-          throw new Error('OpenAI returned no parsed output');
+    try {
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const reservation = this.costBudget.reserve(budgetSession, 'ai_judgment');
+        if (!reservation) {
+          throw new ServiceUnavailableException({
+            code: 'ANALYSIS_COST_BUDGET_EXCEEDED',
+            stage: 'ai_judgment',
+            retryable: false,
+          });
         }
+        try {
+          const correction = attempt === 1
+            ? `\n\n${CATCHCATCH_JUDGMENT_CORRECTION_INSTRUCTIONS}`
+            : '';
+          const response = await client.responses.parse({
+            model,
+            instructions: `${CATCHCATCH_JUDGMENT_INSTRUCTIONS}${correction}`,
+            input: buildJudgmentPrompt(input),
+            max_output_tokens: resolveBoundedInteger(
+              this.config.get<string>('OPENAI_JUDGMENT_MAX_OUTPUT_TOKENS'),
+              2_000,
+              500,
+              8_000,
+            ),
+            reasoning: {
+              effort: resolveReasoningEffort(
+                this.config.get<string>('OPENAI_JUDGMENT_REASONING_EFFORT', 'low'),
+              ),
+            },
+            store: false,
+            text: {
+              format: zodTextFormat(aiJudgmentSchema, 'catchcatch_judgment'),
+            },
+          });
+          this.costBudget.settle(reservation, model, response);
+          logOpenAIUsage(this.config, this.logger, `judgment_attempt_${attempt + 1}`, model, response);
 
-        return validateAiJudgmentBusinessRules(input, response.output_parsed);
-      } catch (error) {
-        if (error instanceof OpenAI.APIError) {
-          this.logger.error(
-            `OpenAI request failed: status=${error.status}, code=${error.code ?? 'unknown'}, request_id=${error.requestID ?? 'unknown'}`,
-          );
-          throw new ServiceUnavailableException('AI_JUDGMENT_FAILED');
-        }
-        if (attempt === 1) {
-          this.logger.error('OpenAI response validation failed after one retry');
+          if (!response.output_parsed) {
+            throw new Error('OpenAI returned no parsed output');
+          }
+
+          return validateAiJudgmentBusinessRules(input, response.output_parsed);
+        } catch (error) {
+          this.costBudget.release(reservation);
+          if (error instanceof ServiceUnavailableException) throw error;
+          if (error instanceof OpenAI.APIError) {
+            this.logger.error(
+              `OpenAI request failed: status=${error.status}, code=${error.code ?? 'unknown'}, request_id=${error.requestID ?? 'unknown'}`,
+            );
+            throw new ServiceUnavailableException('AI_JUDGMENT_FAILED');
+          }
+          if (attempt === maxAttempts - 1) {
+            this.logger.error('OpenAI response validation failed within the configured cost budget');
+          }
         }
       }
-    }
 
-    throw new ServiceUnavailableException('AI_JUDGMENT_FAILED');
+      throw new ServiceUnavailableException('AI_JUDGMENT_FAILED');
+    } finally {
+      this.costBudget.finish(budgetSession);
+    }
   }
 
   private createMockJudgment(input: JudgmentInput): AiJudgment {
@@ -142,6 +182,26 @@ export class AiJudgmentService {
       used_fact_ids: input.facts.map((fact) => fact.id),
     };
   }
+}
+
+function resolveBoundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback;
+}
+
+function resolveReasoningEffort(
+  raw: string | undefined,
+): 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' {
+  return raw === 'none' || raw === 'medium' || raw === 'high' || raw === 'xhigh' || raw === 'max'
+    ? raw
+    : 'low';
 }
 
 export function validateAiJudgmentBusinessRules(

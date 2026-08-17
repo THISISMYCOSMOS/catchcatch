@@ -105,7 +105,13 @@ function searchCallBody() {
   const call = parseMock.mock.calls.find(([body]) => (
     (body as { tools?: Array<{ filters?: unknown }> }).tools?.[0]?.filters
   ));
-  return call?.[0] as { tools: Array<{ filters: { allowed_domains: string[] } }> };
+  return call?.[0] as {
+    model: string;
+    max_tool_calls: number;
+    max_output_tokens: number;
+    reasoning: { effort: string };
+    tools: Array<{ filters: { allowed_domains: string[] } }>;
+  };
 }
 
 describe('brand-official domain discovery (T5)', () => {
@@ -124,6 +130,18 @@ describe('brand-official domain discovery (T5)', () => {
     const result = await createService().searchSameProduct(input);
 
     expect(discoveryCalls()).toHaveLength(1);
+    expect(discoveryCalls()[0]?.[0]).toMatchObject({
+      model: 'gpt-5.6-luna',
+      max_tool_calls: 1,
+      max_output_tokens: 400,
+      reasoning: { effort: 'low' },
+    });
+    expect(searchCallBody()).toMatchObject({
+      model: 'gpt-5.6',
+      max_tool_calls: 2,
+      max_output_tokens: 2500,
+      reasoning: { effort: 'low' },
+    });
     expect(searchCallBody().tools[0].filters.allowed_domains).toContain('innisfree.com');
     expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(true);
   });
@@ -231,6 +249,23 @@ describe('brand-official domain discovery (T5)', () => {
 
     expect(result.seller_results).toHaveLength(4);
     expect(searchCallBody().tools[0].filters.allowed_domains).toHaveLength(3);
+  });
+
+  it('skips optional official discovery when it would consume the required search reserve', async () => {
+    parseMock.mockResolvedValueOnce(searchResponse());
+    const service = new ProductSearchService(new ConfigService({
+      PRODUCT_DATA_MODE: 'web_search',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_ANALYSIS_COST_BUDGET_USD: '0.13',
+    }));
+
+    const result = await service.searchSameProduct(input);
+
+    expect(discoveryCalls()).toHaveLength(0);
+    expect(parseMock).toHaveBeenCalledTimes(1);
+    expect(result.warnings).toContain(
+      'BRAND_OFFICIAL discovery was skipped to preserve the required seller-search cost budget; BRAND_OFFICIAL remains UNKNOWN.',
+    );
   });
 
   it('skips discovery entirely for an implausibly long brand name', async () => {

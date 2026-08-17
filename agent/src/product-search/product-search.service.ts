@@ -56,6 +56,11 @@ import {
 } from '../ai-contracts/product-data.schema';
 import { parseRequestInput } from '../ai-contracts/request-input';
 import { logOpenAIUsage } from '../openai-usage/openai-usage.logger';
+import {
+  AnalysisBudgetSession,
+  CostReservation,
+  OpenAICostBudgetService,
+} from '../openai-cost/openai-cost-budget.service';
 
 const SAMPLE_DATA_WARNING = 'This is sample data, not a real seller result (PRODUCT_DATA_MODE=sample).';
 const SAMPLE_BRAND_OFFICIAL_WARNING = 'Brand-official domain discovery does not run in sample mode (PRODUCT_DATA_MODE=sample); BRAND_OFFICIAL is always reported as UNKNOWN.';
@@ -86,7 +91,10 @@ export class ProductSearchService {
   // so a single wrong discovery cannot be reused indefinitely.
   private readonly brandOfficialDomainCache = new BrandOfficialDomainCache();
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly costBudget: OpenAICostBudgetService = new OpenAICostBudgetService(config),
+  ) {}
 
   async searchSameProduct(rawInput: unknown): Promise<ProductSearchResult> {
     const input = parseRequestInput(productSearchInputSchema, rawInput);
@@ -109,19 +117,34 @@ export class ProductSearchService {
         false,
       );
     }
+    // Reject an out-of-scope input before spending anything on official-domain
+    // discovery. The discovered domain only expands output search scope; it
+    // must never legitimize an unregistered input seller URL.
+    assertAllowedSellerUrl(input.product_url, buildAllowedSearchDomains(null));
 
     const client = new OpenAI({
       apiKey,
-      timeout: Number(this.config.get<string>('OPENAI_TIMEOUT_MS', '20000')),
+      timeout: Number(this.config.get<string>(
+        'OPENAI_PRODUCT_SEARCH_TIMEOUT_MS',
+        '45000',
+      )),
       maxRetries: 0,
     });
+
+    const budgetSession = this.costBudget.claimForSearch(input.product_url);
+    const model = this.resolveSearchModel();
 
     // T5: brand-official domain is no longer a human-curated registry keyed
     // by brand_id (Core no longer supplies a meaningful one). It is
     // discovered from the identified brand name and gated in code before it
     // is ever added to the search allowlist.
     const brandDiscovery = input.anchor_product.brand
-      ? await this.discoverBrandOfficialDomain(client, input.anchor_product.brand)
+      ? await this.discoverBrandOfficialDomain(
+        client,
+        input.anchor_product.brand,
+        this.resolveBrandOfficialModel(),
+        budgetSession,
+      )
       : { domain: null as string | null, warnings: [] as string[] };
     const allowedDomains = buildAllowedSearchDomains(brandDiscovery.domain);
     assertAllowedSellerUrl(input.product_url, allowedDomains);
@@ -130,7 +153,14 @@ export class ProductSearchService {
       brandDiscovery.warnings,
     );
 
-    const model = this.resolveSearchModel();
+    const searchReservation = this.costBudget.reserve(
+      budgetSession,
+      'same_product_search',
+    );
+    if (!searchReservation) {
+      this.costBudget.finish(budgetSession);
+      throw createAnalysisCostBudgetExceededException('same_product_search');
+    }
     try {
       const response = await client.responses.parse({
         model,
@@ -148,12 +178,16 @@ export class ProductSearchService {
           },
         ],
         tool_choice: 'required',
+        max_tool_calls: this.resolveProductSearchMaxToolCalls(),
+        max_output_tokens: this.resolveProductSearchMaxOutputTokens(),
+        reasoning: { effort: this.resolveProductSearchReasoningEffort() },
         include: ['web_search_call.action.sources'],
         store: false,
         text: {
           format: zodTextFormat(productSearchAiResultSchema, 'catchcatch_product_search'),
         },
       });
+      this.costBudget.settle(searchReservation, model, response);
       logOpenAIUsage(this.config, this.logger, 'same_product_search', model, response);
 
       if (!response.output_parsed) {
@@ -188,6 +222,7 @@ export class ProductSearchService {
       };
       return productSearchResultSchema.parse(verifiedResult);
     } catch (error) {
+      this.costBudget.release(searchReservation);
       if (error instanceof OpenAI.APIError) {
         this.logger.error(
           `OpenAI web search failed: status=${error.status}, code=${error.code ?? 'unknown'}, request_id=${error.requestID ?? 'unknown'}`,
@@ -205,6 +240,8 @@ export class ProductSearchService {
         provider: 'OPENAI_WEB_SEARCH',
         retryable: false,
       });
+    } finally {
+      this.costBudget.finish(budgetSession);
     }
   }
 
@@ -673,7 +710,8 @@ export class ProductSearchService {
   private async discoverBrandOfficialDomain(
     client: OpenAI,
     brand: string,
-    model = this.resolveSearchModel(),
+    model = this.resolveBrandOfficialModel(),
+    budgetSession?: AnalysisBudgetSession,
   ): Promise<{ domain: string | null; warnings: string[] }> {
     const cacheKey = normalizeBrandCacheKey(brand);
     if (!cacheKey || brand.length > MAX_DISCOVERY_BRAND_LENGTH) {
@@ -682,6 +720,23 @@ export class ProductSearchService {
     const cachedDomain = this.brandOfficialDomainCache.get(cacheKey);
     if (cachedDomain) {
       return { domain: cachedDomain, warnings: buildBrandOfficialDomainWarnings(brand, cachedDomain) };
+    }
+
+    let reservation: CostReservation | null = null;
+    if (budgetSession) {
+      reservation = this.costBudget.reserve(
+        budgetSession,
+        'brand_official_discovery',
+        this.costBudget.stageReserveUsd('same_product_search'),
+      );
+      if (!reservation) {
+        return {
+          domain: null,
+          warnings: [
+            'BRAND_OFFICIAL discovery was skipped to preserve the required seller-search cost budget; BRAND_OFFICIAL remains UNKNOWN.',
+          ],
+        };
+      }
     }
 
     try {
@@ -694,12 +749,16 @@ export class ProductSearchService {
           search_context_size: this.resolveWebSearchContextSize(),
         }],
         tool_choice: 'required',
+        max_tool_calls: 1,
+        max_output_tokens: this.resolveBrandOfficialMaxOutputTokens(),
+        reasoning: { effort: this.resolveBrandOfficialReasoningEffort() },
         include: ['web_search_call.action.sources'],
         store: false,
         text: {
           format: zodTextFormat(brandOfficialDomainCandidateSchema, 'catchcatch_brand_official_domain_candidate'),
         },
       });
+      if (reservation) this.costBudget.settle(reservation, model, response);
       logOpenAIUsage(this.config, this.logger, 'brand_official_discovery', model, response);
 
       const parsed = brandOfficialDomainCandidateSchema.parse(response.output_parsed);
@@ -731,6 +790,7 @@ export class ProductSearchService {
       this.logger.log(`Promoted web-searched brand-official domain ${gate.domain} for brand "${brand}"`);
       return { domain: gate.domain, warnings: buildBrandOfficialDomainWarnings(brand, gate.domain) };
     } catch (error) {
+      this.costBudget.release(reservation);
       this.logger.warn(
         `Brand-official domain discovery failed for brand "${brand}": ${error instanceof Error ? error.message : 'unknown error'}`,
       );
@@ -742,6 +802,47 @@ export class ProductSearchService {
     return this.config.get<string>(
       'OPENAI_SEARCH_MODEL',
       this.config.get<string>('OPENAI_MODEL', 'gpt-5.6'),
+    );
+  }
+
+  private resolveBrandOfficialModel(): string {
+    return this.config.get<string>('OPENAI_BRAND_OFFICIAL_MODEL', 'gpt-5.6-luna');
+  }
+
+  private resolveBrandOfficialReasoningEffort(): 'none' | 'low' | 'medium' | 'high' {
+    const value = this.config.get<string>('OPENAI_BRAND_OFFICIAL_REASONING_EFFORT', 'low');
+    return value === 'none' || value === 'medium' || value === 'high' ? value : 'low';
+  }
+
+  private resolveBrandOfficialMaxOutputTokens(): number {
+    return resolveBoundedInteger(
+      this.config.get<string>('OPENAI_BRAND_OFFICIAL_MAX_OUTPUT_TOKENS'),
+      400,
+      200,
+      2_000,
+    );
+  }
+
+  private resolveProductSearchReasoningEffort(): 'none' | 'low' | 'medium' | 'high' {
+    const value = this.config.get<string>('OPENAI_PRODUCT_SEARCH_REASONING_EFFORT', 'low');
+    return value === 'none' || value === 'medium' || value === 'high' ? value : 'low';
+  }
+
+  private resolveProductSearchMaxOutputTokens(): number {
+    return resolveBoundedInteger(
+      this.config.get<string>('OPENAI_PRODUCT_SEARCH_MAX_OUTPUT_TOKENS'),
+      2_500,
+      1_000,
+      8_000,
+    );
+  }
+
+  private resolveProductSearchMaxToolCalls(): number {
+    return resolveBoundedInteger(
+      this.config.get<string>('OPENAI_PRODUCT_SEARCH_MAX_TOOL_CALLS'),
+      2,
+      1,
+      4,
     );
   }
 
@@ -973,6 +1074,7 @@ export function buildBrandOfficialDomainWarnings(
       warnings.push(conditionalWarning);
     }
   }
+
   return warnings;
 }
 
@@ -1615,6 +1717,28 @@ export function collectWebSearchSourceUrls(output: unknown): Set<string> {
     }
   }
   return urls;
+}
+
+function createAnalysisCostBudgetExceededException(
+  stage: 'same_product_search',
+): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    code: 'ANALYSIS_COST_BUDGET_EXCEEDED',
+    stage,
+    retryable: false,
+  });
+}
+
+function resolveBoundedInteger(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback;
 }
 
 export function hasBrandOfficialDomainSearchEvidence(
