@@ -6,6 +6,7 @@ import {
   AnalysisRepository,
   ProductComponentRepository,
   ProductRepository,
+  SellerOfferComponentRepository,
   SellerOfferRepository,
   UserPreferenceRepository,
 } from '../database/repositories/repository.interfaces';
@@ -14,6 +15,7 @@ import {
   ANALYSIS_REPOSITORY,
   PRODUCT_COMPONENT_REPOSITORY,
   PRODUCT_REPOSITORY,
+  SELLER_OFFER_COMPONENT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
   USER_PREFERENCE_REPOSITORY,
 } from '../database/repositories/repository.tokens';
@@ -191,6 +193,8 @@ export class CoreIntegrationService {
     private readonly productComponents: ProductComponentRepository,
     @Inject(SELLER_OFFER_REPOSITORY)
     private readonly sellerOffers: SellerOfferRepository,
+    @Inject(SELLER_OFFER_COMPONENT_REPOSITORY)
+    private readonly sellerOfferComponents: SellerOfferComponentRepository,
     @Inject(USER_PREFERENCE_REPOSITORY)
     private readonly preferences: UserPreferenceRepository,
     @Inject(ANALYSIS_REPOSITORY)
@@ -220,6 +224,10 @@ export class CoreIntegrationService {
       brand: identity.brand,
       image_url: identification.preview?.image_url ?? null,
       product_key: productKey,
+      product_type: identity.product_type,
+      option: identity.option,
+      shade_or_scent: identity.shade_or_scent,
+      version_or_renewal: identity.version_or_renewal,
       package_type: identity.components.length > 1 ? 'set' : 'single',
     });
     await this.productComponents.createMany(identity.components.map((component) => ({
@@ -291,10 +299,29 @@ export class CoreIntegrationService {
         reusedExisting: existingKeys.has(sellerOfferKey(offer)),
       });
     }
+    const uniqueResults = uniqueBy(verifiedResults, (result) => sellerResultKey(productId, result));
+    for (const result of uniqueResults) {
+      const item = allOffersByKey.get(sellerResultKey(productId, result));
+      if (!item) {
+        continue;
+      }
+      await this.sellerOfferComponents.replaceForSellerOffer(
+        item.row.id,
+        result.candidate_offer!.components.map((component) => ({
+          id: randomUUID(),
+          seller_offer_id: item.row.id,
+          component_type: component.type,
+          name: component.name,
+          capacity_value: component.capacity_value,
+          capacity_unit: component.capacity_unit,
+          quantity: component.quantity,
+        })),
+      );
+    }
 
     return {
       productId,
-      offers: uniqueBy(verifiedResults, (result) => sellerResultKey(productId, result))
+      offers: uniqueResults
         .map((result) => allOffersByKey.get(sellerResultKey(productId, result)))
         .filter((item): item is { row: Row<'seller_offers'>; reusedExisting: boolean } => item !== undefined)
         .map((item) => ({
@@ -341,10 +368,10 @@ export class CoreIntegrationService {
         identity: {
           brand: product.brand,
           normalized_product_name: product.canonical_name,
-          product_type: null,
-          option: null,
-          shade_or_scent: null,
-          version_or_renewal: null,
+          product_type: product.product_type,
+          option: product.option,
+          shade_or_scent: product.shade_or_scent,
+          version_or_renewal: product.version_or_renewal,
           components: components.map((component) => ({
             type: component.component_type,
             name: component.name,
@@ -873,16 +900,74 @@ function buildFacts(
       source_urls: [analysis.source_url],
     }];
   }
-  return snapshots.map((snapshot) => ({
-    id: `offer:${snapshot.seller_identifier}:price`,
-    description: `${snapshot.seller_name} effective price snapshot for ${product.canonical_name}.`,
-    numeric_values: [
-      snapshot.market_effective_price,
-      snapshot.user_effective_price,
-      snapshot.calculated_unit_price,
-    ].filter((value): value is number => typeof value === 'number'),
-    source_urls: [getSnapshotSourceUrl(snapshot) ?? analysis.source_url],
-  }));
+  const facts: JudgmentInputResponse['facts'] = [];
+  for (const snapshot of snapshots) {
+    const sourceUrls = [getSnapshotSourceUrl(snapshot) ?? analysis.source_url];
+    facts.push({
+      id: `offer:${snapshot.seller_identifier}:price`,
+      description: `${snapshot.seller_name} price evidence for ${product.canonical_name}.`,
+      numeric_values: [
+        snapshot.original_list_price,
+        snapshot.sale_price,
+        snapshot.market_effective_price,
+        snapshot.user_effective_price,
+        snapshot.shipping_fee,
+        snapshot.calculated_unit_price,
+      ].filter((value): value is number => typeof value === 'number'),
+      source_urls: sourceUrls,
+    });
+    const components = getSnapshotComponents(snapshot);
+    if (components.length > 0) {
+      facts.push({
+        id: `offer:${snapshot.seller_identifier}:composition`,
+        description: `${snapshot.seller_name} composition evidence with ${components.length} component(s).`,
+        numeric_values: components
+          .flatMap((component) => [component.capacity_value, component.quantity])
+          .filter((value): value is number => typeof value === 'number'),
+        source_urls: sourceUrls,
+      });
+    }
+    const deliveryDays = getSnapshotValue(snapshot, 'deliveryDays');
+    if (typeof deliveryDays === 'number') {
+      facts.push({
+        id: `offer:${snapshot.seller_identifier}:delivery`,
+        description: `${snapshot.seller_name} delivery speed evidence.`,
+        numeric_values: [deliveryDays],
+        source_urls: sourceUrls,
+      });
+    }
+    if (snapshot.user_discount !== null) {
+      facts.push({
+        id: `offer:${snapshot.seller_identifier}:personalized-benefit`,
+        description: `${snapshot.seller_name} personalized benefit evidence.`,
+        numeric_values: [snapshot.user_discount],
+        source_urls: sourceUrls,
+      });
+    }
+  }
+  const recentAveragePrice = getNumericResultValue(analysis.result_json, 'recentAveragePrice');
+  const verifiedSourceUrls = uniqueBy(
+    snapshots.map((snapshot) => getSnapshotSourceUrl(snapshot) ?? analysis.source_url),
+    (url) => url,
+  );
+  if (recentAveragePrice !== null) {
+    facts.push({
+      id: 'history:recent-average',
+      description: `Recent representative market average for ${product.canonical_name}.`,
+      numeric_values: [recentAveragePrice],
+      source_urls: verifiedSourceUrls,
+    });
+  }
+  const previousSalePrice = getNumericResultValue(analysis.result_json, 'previousSalePrice');
+  if (previousSalePrice !== null) {
+    facts.push({
+      id: 'history:previous-sale',
+      description: `Previous verified sale observation for ${product.canonical_name}.`,
+      numeric_values: [previousSalePrice],
+      source_urls: verifiedSourceUrls,
+    });
+  }
+  return facts;
 }
 
 function getSnapshotComponents(snapshot: Row<'analysis_offers'>): JudgmentInputResponse['offers'][number]['components'] {
@@ -988,12 +1073,14 @@ function factIdsForCriterion(
   snapshots: readonly Row<'analysis_offers'>[],
   analysis: Row<'analyses'>,
 ): string[] {
-  const allFactIds = facts.map((fact) => fact.id);
   if (criterion === 'FINAL_PAYMENT_AMOUNT' && snapshots.some((snapshot) => snapshot.market_effective_price !== null)) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':price');
   }
   if (criterion === 'UNIT_PRICE' && snapshots.some((snapshot) => snapshot.calculated_unit_price !== null)) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':price').filter((factId) => {
+      const offerId = factId.slice('offer:'.length, -':price'.length);
+      return snapshots.some((snapshot) => snapshot.seller_identifier === offerId && snapshot.calculated_unit_price !== null);
+    });
   }
   if (
     criterion === 'PURCHASE_TIMING' &&
@@ -1001,30 +1088,42 @@ function factIdsForCriterion(
     (getNumericResultValue(analysis.result_json, 'recentAveragePrice') !== null ||
       getNumericResultValue(analysis.result_json, 'previousSalePrice') !== null)
   ) {
-    return allFactIds;
+    return facts
+      .map((fact) => fact.id)
+      .filter((id) => id === 'history:recent-average' || id === 'history:previous-sale');
   }
   if (criterion === 'SET_AND_GIFTS' && snapshots.some((snapshot) => getSnapshotComponents(snapshot).length > 1)) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':composition');
   }
   if (
     criterion === 'RIGHT_SIZED_PURCHASE' &&
     snapshots.some((snapshot) => snapshot.total_amount !== null && snapshot.unit !== null)
   ) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':composition');
   }
   if (
     criterion === 'SIMPLE_DISCOUNT' &&
     snapshots.some((snapshot) => snapshot.original_list_price !== null && snapshot.sale_price !== null)
   ) {
-    return allFactIds;
+    return [
+      ...factIdsBySuffix(facts, ':price'),
+      ...facts.map((fact) => fact.id).filter((id) => id.startsWith('history:')),
+    ];
   }
   if (criterion === 'FAST_DELIVERY' && snapshots.some((snapshot) => typeof getSnapshotValue(snapshot, 'deliveryDays') === 'number')) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':delivery');
   }
   if (criterion === 'REWARDS_AND_MEMBERSHIP' && snapshots.some((snapshot) => snapshot.user_discount !== null)) {
-    return allFactIds;
+    return factIdsBySuffix(facts, ':personalized-benefit');
   }
   return [];
+}
+
+function factIdsBySuffix(
+  facts: readonly JudgmentInputResponse['facts'][number][],
+  suffix: string,
+): string[] {
+  return facts.map((fact) => fact.id).filter((id) => id.endsWith(suffix));
 }
 
 function validateJudgment(

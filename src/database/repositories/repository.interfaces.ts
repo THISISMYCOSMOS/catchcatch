@@ -22,6 +22,14 @@ export interface SellerOfferRepository {
   upsertMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
 }
 
+export interface SellerOfferComponentRepository {
+  findBySellerOfferIds(sellerOfferIds: string[]): Promise<Row<'seller_offer_components'>[]>;
+  replaceForSellerOffer(
+    sellerOfferId: string,
+    inputs: Insert<'seller_offer_components'>[],
+  ): Promise<Row<'seller_offer_components'>[]>;
+}
+
 export interface SellerOfferBenefitRepository {
   findBySellerOfferIds(sellerOfferIds: string[]): Promise<Row<'seller_offer_benefits'>[]>;
   createMany(inputs: Insert<'seller_offer_benefits'>[]): Promise<Row<'seller_offer_benefits'>[]>;

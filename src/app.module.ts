@@ -6,6 +6,7 @@ import { CoreIntegrationModule } from './core-integration/core-integration.modul
 import { DatabaseModule } from './database/database.module';
 import { HealthController } from './health.controller';
 import { PriceAlertsModule } from './price-alerts/price-alerts.module';
+import { ProductsModule } from './products/products.module';
 import { SavedProductsModule } from './saved-products/saved-products.module';
 import { SaleCalendarModule } from './sale-calendar/sale-calendar.module';
 import { SearchQuotaModule } from './search-quota/search-quota.module';
@@ -26,6 +27,7 @@ import { UserPreferencesModule } from './user-preferences/user-preferences.modul
     SaleCalendarModule,
     PriceAlertsModule,
     SearchQuotaModule,
+    ProductsModule,
   ],
   controllers: [HealthController],
 })

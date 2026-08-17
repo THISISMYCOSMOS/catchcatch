@@ -193,6 +193,10 @@ export type Database = {
           brand: string | null;
           image_url: string | null;
           product_key: string;
+          product_type: string | null;
+          option: string | null;
+          shade_or_scent: string | null;
+          version_or_renewal: string | null;
           package_type: PackageType | null;
           created_at: string;
           updated_at: string;
@@ -203,6 +207,10 @@ export type Database = {
           brand?: string | null;
           image_url?: string | null;
           product_key: string;
+          product_type?: string | null;
+          option?: string | null;
+          shade_or_scent?: string | null;
+          version_or_renewal?: string | null;
           package_type?: PackageType | null;
           created_at?: string;
           updated_at?: string;
@@ -213,6 +221,10 @@ export type Database = {
           brand?: string | null;
           image_url?: string | null;
           product_key?: string;
+          product_type?: string | null;
+          option?: string | null;
+          shade_or_scent?: string | null;
+          version_or_renewal?: string | null;
           package_type?: PackageType | null;
           created_at?: string;
           updated_at?: string;
@@ -435,6 +447,47 @@ export type Database = {
           },
         ];
       };
+      seller_offer_components: {
+        Row: {
+          id: string;
+          seller_offer_id: string;
+          component_type: ComponentType;
+          name: string | null;
+          capacity_value: number | null;
+          capacity_unit: CapacityUnit | null;
+          quantity: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          seller_offer_id: string;
+          component_type: ComponentType;
+          name?: string | null;
+          capacity_value?: number | null;
+          capacity_unit?: CapacityUnit | null;
+          quantity?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          seller_offer_id?: string;
+          component_type?: ComponentType;
+          name?: string | null;
+          capacity_value?: number | null;
+          capacity_unit?: CapacityUnit | null;
+          quantity?: number | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'seller_offer_components_seller_offer_id_fkey';
+            columns: ['seller_offer_id'];
+            isOneToOne: false;
+            referencedRelation: 'seller_offers';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       price_history: {
         Row: {
           id: string;
@@ -442,6 +495,10 @@ export type Database = {
           analysis_id: string | null;
           seller_offer_id: string | null;
           market_effective_price: number | null;
+          listed_price: number | null;
+          listed_sale_price: number | null;
+          is_sale_observation: boolean;
+          observation_key: string | null;
           observed_at: string;
           created_at: string;
         };
@@ -451,6 +508,10 @@ export type Database = {
           analysis_id?: string | null;
           seller_offer_id?: string | null;
           market_effective_price?: number | null;
+          listed_price?: number | null;
+          listed_sale_price?: number | null;
+          is_sale_observation?: boolean;
+          observation_key?: string | null;
           observed_at: string;
           created_at?: string;
         };
@@ -460,6 +521,10 @@ export type Database = {
           analysis_id?: string | null;
           seller_offer_id?: string | null;
           market_effective_price?: number | null;
+          listed_price?: number | null;
+          listed_sale_price?: number | null;
+          is_sale_observation?: boolean;
+          observation_key?: string | null;
           observed_at?: string;
           created_at?: string;
         };

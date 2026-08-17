@@ -12,6 +12,7 @@ import {
   SALE_CALENDAR_REPOSITORY,
   SEARCH_QUOTA_REPOSITORY,
   SELLER_OFFER_BENEFIT_REPOSITORY,
+  SELLER_OFFER_COMPONENT_REPOSITORY,
   SELLER_OFFER_REPOSITORY,
   USER_CARD_REPOSITORY,
   USER_MEMBERSHIP_REPOSITORY,
@@ -29,6 +30,7 @@ import { SupabaseSavedProductRepository } from './repositories/supabase-saved-pr
 import { SupabaseSaleCalendarRepository } from './repositories/supabase-sale-calendar.repository';
 import { SupabaseSearchQuotaRepository } from './repositories/supabase-search-quota.repository';
 import { SupabaseSellerOfferBenefitRepository } from './repositories/supabase-seller-offer-benefit.repository';
+import { SupabaseSellerOfferComponentRepository } from './repositories/supabase-seller-offer-component.repository';
 import { SupabaseSellerOfferRepository } from './repositories/supabase-seller-offer.repository';
 import { SupabaseUserCardRepository } from './repositories/supabase-user-card.repository';
 import { SupabaseUserMembershipRepository } from './repositories/supabase-user-membership.repository';
@@ -52,6 +54,7 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
     SupabaseSavedProductRepository,
     SupabaseSaleCalendarRepository,
     SupabaseSearchQuotaRepository,
+    SupabaseSellerOfferComponentRepository,
     SupabaseSellerOfferBenefitRepository,
     SupabasePriceAlertRepository,
     SupabaseUserMembershipRepository,
@@ -76,6 +79,10 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
     {
       provide: SELLER_OFFER_BENEFIT_REPOSITORY,
       useExisting: SupabaseSellerOfferBenefitRepository,
+    },
+    {
+      provide: SELLER_OFFER_COMPONENT_REPOSITORY,
+      useExisting: SupabaseSellerOfferComponentRepository,
     },
     {
       provide: PRICE_HISTORY_REPOSITORY,
@@ -129,6 +136,7 @@ import { SupabaseUserShoppingGradeRepository } from './repositories/supabase-use
     PRODUCT_COMPONENT_REPOSITORY,
     SELLER_OFFER_REPOSITORY,
     SELLER_OFFER_BENEFIT_REPOSITORY,
+    SELLER_OFFER_COMPONENT_REPOSITORY,
     PRICE_HISTORY_REPOSITORY,
     ANALYSIS_REPOSITORY,
     ANALYSIS_PERSISTENCE_REPOSITORY,

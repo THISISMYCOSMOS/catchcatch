@@ -27,11 +27,54 @@ export class SupabasePriceHistoryRepository implements PriceHistoryRepository {
     if (inputs.some((input) => (input.market_effective_price ?? 0) < 0)) {
       throw new Error('Price history market_effective_price cannot be negative');
     }
+    const normalizedInputs = inputs.map((input) => ({
+      ...input,
+      observation_key: input.observation_key ?? priceHistoryObservationKey(input),
+    }));
+    const existing = await this.findExistingObservations(normalizedInputs);
+    const existingKeys = new Set(existing.map(priceHistoryObservationKey));
+    const toInsert = normalizedInputs.filter((input) => !existingKeys.has(priceHistoryObservationKey(input)));
+    if (toInsert.length === 0) {
+      return normalizedInputs
+        .map((input) => existing.find((row) => priceHistoryObservationKey(row) === priceHistoryObservationKey(input)))
+        .filter((row): row is Row<'price_history'> => row !== undefined);
+    }
     const { data, error } = await this.client
       .from('price_history')
-      .insert(inputs)
+      .insert(toInsert)
       .select('*');
     throwOnSupabaseError('create price history', error);
-    return data ?? [];
+    const rows = [...existing, ...(data ?? [])];
+    return normalizedInputs
+      .map((input) => rows.find((row) => priceHistoryObservationKey(row) === priceHistoryObservationKey(input)))
+      .filter((row): row is Row<'price_history'> => row !== undefined);
   }
+
+  private async findExistingObservations(inputs: readonly Insert<'price_history'>[]): Promise<Row<'price_history'>[]> {
+    const productIds = [...new Set(inputs.map((input) => input.product_id))];
+    const { data, error } = await this.client
+      .from('price_history')
+      .select('*')
+      .in('product_id', productIds);
+    throwOnSupabaseError('find existing price history observations', error);
+    const keys = new Set(inputs.map(priceHistoryObservationKey));
+    return (data ?? []).filter((row) => keys.has(priceHistoryObservationKey(row)));
+  }
+}
+
+function priceHistoryObservationKey(
+  input: Pick<
+    Insert<'price_history'>,
+    'product_id' | 'seller_offer_id' | 'observed_at' | 'market_effective_price' | 'observation_key'
+  >,
+): string {
+  if (input.observation_key) {
+    return input.observation_key;
+  }
+  return [
+    input.product_id,
+    input.seller_offer_id ?? '',
+    input.observed_at,
+    input.market_effective_price ?? '',
+  ].join(':');
 }

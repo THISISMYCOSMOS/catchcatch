@@ -8,6 +8,7 @@ import {
   InMemoryProductComponentRepository,
   InMemoryProductRepository,
   InMemorySearchQuotaRepository,
+  InMemorySellerOfferComponentRepository,
   InMemorySellerOfferRepository,
   InMemoryUserPreferenceRepository,
 } from '../database/repositories/in-memory.repositories';
@@ -22,6 +23,7 @@ describe('CoreIntegrationService', () => {
   let products: InMemoryProductRepository;
   let components: InMemoryProductComponentRepository;
   let sellerOffers: InMemorySellerOfferRepository;
+  let sellerOfferComponents: InMemorySellerOfferComponentRepository;
   let preferences: InMemoryUserPreferenceRepository;
   let analyses: InMemoryAnalysisRepository;
   let analysisOffers: InMemoryAnalysisOfferRepository;
@@ -33,6 +35,7 @@ describe('CoreIntegrationService', () => {
     products = new InMemoryProductRepository(database);
     components = new InMemoryProductComponentRepository(database);
     sellerOffers = new InMemorySellerOfferRepository(database);
+    sellerOfferComponents = new InMemorySellerOfferComponentRepository(database);
     preferences = new InMemoryUserPreferenceRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
     analysisOffers = new InMemoryAnalysisOfferRepository(database);
@@ -41,6 +44,7 @@ describe('CoreIntegrationService', () => {
       products,
       components,
       sellerOffers,
+      sellerOfferComponents,
       preferences,
       analyses,
       analysisOffers,
@@ -148,6 +152,41 @@ describe('CoreIntegrationService', () => {
     expect(database.store.priceHistory).toHaveLength(0);
   });
 
+  it('stores different seller offer components and replaces stale components on re-search', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest();
+    request.search.seller_results[1].source!.verification_status = 'CONTENT_VERIFIED';
+    (request.search.seller_results[0].candidate_offer!.components as unknown[]) = [
+      { type: 'MAIN', name: 'main', capacity_value: 50, capacity_unit: 'ML', quantity: 1 },
+      { type: 'NON_COSMETIC_GIFT', name: 'gift pouch', capacity_value: null, capacity_unit: null, quantity: 1 },
+    ];
+    (request.search.seller_results[1].candidate_offer!.components as unknown[]) = [
+      { type: 'MAIN', name: 'main', capacity_value: 50, capacity_unit: 'ML', quantity: 1 },
+    ];
+
+    const first = await service.ingestOffers(product.productId, request);
+    const firstComponents = await sellerOfferComponents.findBySellerOfferIds(first.offers.map((offer) => offer.id));
+    expect(firstComponents.filter((component) => component.seller_offer_id === first.offers[0].id)).toHaveLength(2);
+    expect(firstComponents.filter((component) => component.seller_offer_id === first.offers[1].id)).toHaveLength(1);
+
+    const secondRequest = ingestOffersRequest('component-refresh');
+    secondRequest.search.seller_results[1].source!.verification_status = 'CONTENT_VERIFIED';
+    (secondRequest.search.seller_results[0].candidate_offer!.components as unknown[]) = [
+      { type: 'MAIN', name: 'main', capacity_value: 50, capacity_unit: 'ML', quantity: 1 },
+    ];
+    (secondRequest.search.seller_results[1].candidate_offer!.components as unknown[]) = [
+      { type: 'MAIN', name: 'main', capacity_value: 50, capacity_unit: 'ML', quantity: 1 },
+    ];
+    const second = await service.ingestOffers(product.productId, secondRequest);
+    expect(second.offers[0].id).toBe(first.offers[0].id);
+    const refreshed = await sellerOfferComponents.findBySellerOfferIds([first.offers[0].id]);
+    expect(refreshed).toHaveLength(1);
+    expect(refreshed[0].component_type).toBe('MAIN');
+
+    await service.ingestOffers(product.productId, secondRequest);
+    await expect(sellerOfferComponents.findBySellerOfferIds([first.offers[0].id])).resolves.toHaveLength(1);
+  });
+
   it.each([
     ['invalid seller', (request: ReturnType<typeof ingestOffersRequest>) => {
       (request.search.seller_results[0] as Record<string, unknown>).seller = 'UNKNOWN_SELLER';
@@ -245,7 +284,10 @@ describe('CoreIntegrationService', () => {
         product_id: productId,
         identity: {
           normalized_product_name: 'Round Lab Sun Cream',
-          product_type: null,
+          product_type: 'SUNSCREEN',
+          option: 'SPF50',
+          shade_or_scent: 'Unscented',
+          version_or_renewal: '2026',
         },
       },
       selected_criteria: [
@@ -287,6 +329,53 @@ describe('CoreIntegrationService', () => {
 
     expect(result.comparison_price_basis).toBe('PUBLIC');
     expect(result.cheapest_offer_id).toBe('offer-public-lowest');
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('connects criterion assessments only to matching fact types', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis();
+    await preferences.upsert({
+      user_id: 'user-1',
+      selected_criteria: [
+        'SET_AND_GIFTS',
+        'FAST_DELIVERY',
+        'PURCHASE_TIMING',
+      ],
+    });
+    const analysis = await analyses.findById(analysisId);
+    await analyses.updateResult(analysisId, {
+      status: analysis!.status,
+      verdict: analysis!.verdict,
+      allowed_conclusions: analysis!.allowed_conclusions,
+      warning_codes: [],
+      result_json: {
+        ...(analysis!.result_json as Record<string, unknown>),
+        recentAveragePrice: 12000,
+      },
+    });
+    const [snapshot] = await analysisOffers.findByAnalysisId(analysisId);
+    snapshot.offer_snapshot = {
+      ...(snapshot.offer_snapshot as Record<string, unknown>),
+      components: [
+        { type: 'MAIN', name: 'main', capacity_value: 50, capacity_unit: 'ML', quantity: 1 },
+        { type: 'NON_COSMETIC_GIFT', name: 'gift', capacity_value: null, capacity_unit: null, quantity: 1 },
+      ],
+      deliveryDays: 1,
+    };
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+
+    expect(result.facts.map((fact) => fact.id)).toEqual(expect.arrayContaining([
+      'offer:offer-lowest:price',
+      'offer:offer-lowest:composition',
+      'offer:offer-lowest:delivery',
+      'history:recent-average',
+    ]));
+    expect(result.criterion_assessments).toEqual([
+      { criterion: 'SET_AND_GIFTS', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:composition'] },
+      { criterion: 'FAST_DELIVERY', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:delivery'] },
+      { criterion: 'PURCHASE_TIMING', status: 'NEUTRAL', fact_ids: ['history:recent-average'] },
+    ]);
     expectAgentSchemaParse('judgmentInputSchema', result);
   });
 
@@ -597,6 +686,10 @@ describe('CoreIntegrationService', () => {
       canonical_name: 'Round Lab Sun Cream',
       brand: 'Round Lab',
       product_key: 'round-lab-sun-cream',
+      product_type: 'SUNSCREEN',
+      option: 'SPF50',
+      shade_or_scent: 'Unscented',
+      version_or_renewal: '2026',
       package_type: 'single',
     });
     await components.createMany([

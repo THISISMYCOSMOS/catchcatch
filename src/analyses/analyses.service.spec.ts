@@ -9,6 +9,7 @@ import {
   InMemoryProductComponentRepository,
   InMemoryProductRepository,
   InMemorySellerOfferBenefitRepository,
+  InMemorySellerOfferComponentRepository,
   InMemorySellerOfferRepository,
   InMemoryUserCardRepository,
   InMemoryUserMembershipRepository,
@@ -30,6 +31,7 @@ describe('AnalysesService', () => {
   let products: InMemoryProductRepository;
   let components: InMemoryProductComponentRepository;
   let offers: InMemorySellerOfferRepository;
+  let offerComponents: InMemorySellerOfferComponentRepository;
   let offerBenefits: InMemorySellerOfferBenefitRepository;
   let history: InMemoryPriceHistoryRepository;
   let analyses: InMemoryAnalysisRepository;
@@ -46,6 +48,7 @@ describe('AnalysesService', () => {
     products = new InMemoryProductRepository(database);
     components = new InMemoryProductComponentRepository(database);
     offers = new InMemorySellerOfferRepository(database);
+    offerComponents = new InMemorySellerOfferComponentRepository(database);
     offerBenefits = new InMemorySellerOfferBenefitRepository(database);
     history = new InMemoryPriceHistoryRepository(database);
     analyses = new InMemoryAnalysisRepository(database);
@@ -60,6 +63,7 @@ describe('AnalysesService', () => {
       components,
       offers,
       offerBenefits,
+      offerComponents,
       history,
       analyses,
       analysisPersistence,
@@ -102,6 +106,114 @@ describe('AnalysesService', () => {
       },
     });
     expect(await analysisOffers.findByAnalysisId(result.id)).toHaveLength(2);
+  });
+
+  it('uses seller offer components for unit price and keeps analysis snapshot immutable after offer refresh', async () => {
+    const product = await seedAnalysisReadyProduct('offer-components-unit');
+
+    const result = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/components',
+      productId: product.id,
+    });
+    const snapshot = database.store.analysisOffers.find((row) => row.seller_identifier === 'offer-lowest');
+    expect(snapshot?.total_amount).toBe(50);
+    expect(snapshot?.calculated_unit_price).toBe(200);
+    expect(snapshot?.offer_snapshot).toMatchObject({
+      components: [
+        expect.objectContaining({
+          type: 'MAIN',
+          capacity_value: 50,
+          capacity_unit: 'ML',
+          quantity: 1,
+        }),
+      ],
+    });
+
+    await offerComponents.replaceForSellerOffer('offer-lowest', [
+      {
+        seller_offer_id: 'offer-lowest',
+        component_type: 'MAIN',
+        capacity_value: 100,
+        capacity_unit: 'ML',
+        quantity: 1,
+      },
+    ]);
+
+    const stored = database.store.analysisOffers.find((row) => (
+      row.analysis_id === result.id && row.seller_identifier === 'offer-lowest'
+    ));
+    expect(stored?.total_amount).toBe(50);
+    expect(stored?.offer_snapshot).toMatchObject({
+      components: [
+        expect.objectContaining({ capacity_value: 50 }),
+      ],
+    });
+  });
+
+  it('keeps unit price unknown when offer composition evidence is missing', async () => {
+    const product = await seedAnalysisReadyProduct('no-offer-composition');
+    await offerComponents.replaceForSellerOffer('offer-high', []);
+    await offerComponents.replaceForSellerOffer('offer-lowest', []);
+
+    const result = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/no-composition',
+      productId: product.id,
+    });
+
+    expect(result.result).toMatchObject({
+      lowestUnitPriceOffer: null,
+      unitPriceComparison: {
+        ml: null,
+        g: null,
+      },
+    });
+  });
+
+  it('writes price history at seller observed_at and skips duplicate observations on retry', async () => {
+    const product = await seedAnalysisReadyProduct('observed-at-history');
+    const offer = database.store.sellerOffers.find((row) => row.id === 'offer-lowest')!;
+    offer.observed_at = '2026-08-17T05:00:00.000Z';
+
+    await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/history-1',
+      productId: product.id,
+      idempotencyKey: 'history-1',
+    });
+    await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://example.com/product/history-2',
+      productId: product.id,
+      idempotencyKey: 'history-2',
+    });
+
+    const matchingHistory = database.store.priceHistory.filter((row) => (
+      row.product_id === product.id &&
+      row.seller_offer_id === 'offer-lowest' &&
+      row.observed_at === '2026-08-17T05:00:00.000Z'
+    ));
+    expect(matchingHistory).toHaveLength(1);
+    expect(matchingHistory[0]).toMatchObject({
+      listed_price: 12000,
+      listed_sale_price: 11000,
+      is_sale_observation: true,
+    });
+  });
+
+  it('returns product price history in chronological order and rejects unknown products', async () => {
+    const product = await seedAnalysisReadyProduct('history-api-product');
+
+    const response = await service.findProductPriceHistory(product.id);
+
+    expect(response.productId).toBe(product.id);
+    expect(response.points.map((point) => point.observedAt)).toEqual(
+      [...response.points.map((point) => point.observedAt)].sort(),
+    );
+    await expect(service.findProductPriceHistory('00000000-0000-4000-8000-000000000999'))
+      .rejects
+      .toBeInstanceOf(NotFoundException);
   });
 
   it('returns the existing analysis for the same user idempotency key without duplicate snapshots or history', async () => {
@@ -340,6 +452,7 @@ describe('AnalysesService', () => {
       components,
       offers,
       offerBenefits,
+      offerComponents,
       history,
       analyses,
       persistence,
@@ -380,6 +493,7 @@ describe('AnalysesService', () => {
       components,
       throwingOffers,
       offerBenefits,
+      offerComponents,
       history,
       analyses,
       analysisPersistence,
@@ -781,10 +895,39 @@ describe('AnalysesService', () => {
         user_effective_price: 8888,
       },
     ]);
+    await offerComponents.replaceForSellerOffer('offer-high', [
+      {
+        seller_offer_id: 'offer-high',
+        component_type: 'MAIN',
+        capacity_value: 50,
+        capacity_unit: 'ML',
+        quantity: 1,
+      },
+      {
+        seller_offer_id: 'offer-high',
+        component_type: 'OTHER_COSMETIC',
+        capacity_value: 20,
+        capacity_unit: 'G',
+        quantity: 1,
+      },
+    ]);
+    await offerComponents.replaceForSellerOffer('offer-lowest', [
+      {
+        seller_offer_id: 'offer-lowest',
+        component_type: 'MAIN',
+        capacity_value: 50,
+        capacity_unit: 'ML',
+        quantity: 1,
+      },
+    ]);
     await history.createMany([
       historyInput(product.id, 12000, daysAgo(20)),
       historyInput(product.id, 12100, daysAgo(10)),
-      historyInput(product.id, 11900, daysAgo(5)),
+      historyInput(product.id, 11900, daysAgo(5), {
+        listed_price: 13000,
+        listed_sale_price: 11900,
+        is_sale_observation: true,
+      }),
     ]);
     return product;
   }
@@ -820,6 +963,15 @@ describe('AnalysesService', () => {
         shipping_fee: 0,
       },
     ]);
+    await offerComponents.replaceForSellerOffer('benefit-offer', [
+      {
+        seller_offer_id: 'benefit-offer',
+        component_type: 'MAIN',
+        capacity_value: 50,
+        capacity_unit: 'ML',
+        quantity: 1,
+      },
+    ]);
     await offerBenefits.createMany([
       {
         seller_offer_id: 'benefit-offer',
@@ -841,11 +993,21 @@ describe('AnalysesService', () => {
   }
 });
 
-function historyInput(productId: string, price: number, observedAt: string) {
+function historyInput(
+  productId: string,
+  price: number,
+  observedAt: string,
+  overrides: Partial<Insert<'price_history'>> = {},
+) {
   return {
     product_id: productId,
     market_effective_price: price,
     observed_at: observedAt,
+    listed_price: null,
+    listed_sale_price: null,
+    is_sale_observation: false,
+    observation_key: null,
+    ...overrides,
   };
 }
 

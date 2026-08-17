@@ -767,6 +767,10 @@ function toPersistencePriceHistory(
     product_id: input.product_id,
     seller_offer_id: input.seller_offer_id ?? null,
     market_effective_price: input.market_effective_price ?? null,
+    listed_price: input.listed_price ?? null,
+    listed_sale_price: input.listed_sale_price ?? null,
+    is_sale_observation: input.is_sale_observation ?? false,
+    observation_key: input.observation_key ?? null,
     observed_at: input.observed_at,
   };
 }
@@ -810,6 +814,10 @@ function priceHistoryInput(
   return {
     product_id: 'product-1',
     market_effective_price: 10000,
+    listed_price: null,
+    listed_sale_price: null,
+    is_sale_observation: false,
+    observation_key: null,
     observed_at: '2026-07-01T00:00:00.000Z',
     ...overrides,
   };

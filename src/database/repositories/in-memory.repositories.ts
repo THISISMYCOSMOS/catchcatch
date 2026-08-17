@@ -13,6 +13,7 @@ import {
   SaleCalendarRepository,
   SavedProductRepository,
   SellerOfferBenefitRepository,
+  SellerOfferComponentRepository,
   SellerOfferRepository,
   SearchQuotaConsumeResult,
   SearchQuotaRepository,
@@ -28,6 +29,7 @@ type Store = {
   productComponents: Row<'product_components'>[];
   saleCalendar: Row<'sale_calendar'>[];
   sellerOffers: Row<'seller_offers'>[];
+  sellerOfferComponents: Row<'seller_offer_components'>[];
   sellerOfferBenefits: Row<'seller_offer_benefits'>[];
   priceHistory: Row<'price_history'>[];
   analyses: Row<'analyses'>[];
@@ -49,6 +51,7 @@ export class InMemoryDatabase {
     productComponents: [],
     saleCalendar: [],
     sellerOffers: [],
+    sellerOfferComponents: [],
     sellerOfferBenefits: [],
     priceHistory: [],
     analyses: [],
@@ -118,6 +121,10 @@ export class InMemoryProductRepository implements ProductRepository {
       brand: input.brand ?? null,
       image_url: input.image_url ?? null,
       product_key: input.product_key,
+      product_type: input.product_type ?? null,
+      option: input.option ?? null,
+      shade_or_scent: input.shade_or_scent ?? null,
+      version_or_renewal: input.version_or_renewal ?? null,
       package_type: input.package_type ?? null,
       created_at: input.created_at ?? now,
       updated_at: input.updated_at ?? now,
@@ -303,6 +310,39 @@ export class InMemorySearchQuotaRepository implements SearchQuotaRepository {
   }
 }
 
+export class InMemorySellerOfferComponentRepository implements SellerOfferComponentRepository {
+  constructor(private readonly database = new InMemoryDatabase()) {}
+
+  async findBySellerOfferIds(sellerOfferIds: string[]): Promise<Row<'seller_offer_components'>[]> {
+    if (sellerOfferIds.length === 0) {
+      return [];
+    }
+    const ids = new Set(sellerOfferIds);
+    return this.database.store.sellerOfferComponents.filter((row) => ids.has(row.seller_offer_id));
+  }
+
+  async replaceForSellerOffer(
+    sellerOfferId: string,
+    inputs: Insert<'seller_offer_components'>[],
+  ): Promise<Row<'seller_offer_components'>[]> {
+    this.database.store.sellerOfferComponents = this.database.store.sellerOfferComponents.filter((row) => (
+      row.seller_offer_id !== sellerOfferId
+    ));
+    const rows = uniqueBy(inputs, sellerOfferComponentInputKey).map((input) => ({
+      id: input.id ?? this.database.nextId('seller-offer-component'),
+      seller_offer_id: sellerOfferId,
+      component_type: input.component_type,
+      name: input.name ?? null,
+      capacity_value: input.capacity_value ?? null,
+      capacity_unit: input.capacity_unit ?? null,
+      quantity: input.quantity ?? null,
+      created_at: input.created_at ?? nowIso(),
+    }));
+    this.database.store.sellerOfferComponents.push(...rows);
+    return rows;
+  }
+}
+
 export class InMemorySellerOfferBenefitRepository implements SellerOfferBenefitRepository {
   constructor(private readonly database = new InMemoryDatabase()) {}
 
@@ -376,13 +416,28 @@ export class InMemoryPriceHistoryRepository implements PriceHistoryRepository {
         analysis_id: input.analysis_id ?? null,
         seller_offer_id: input.seller_offer_id ?? null,
         market_effective_price: input.market_effective_price ?? null,
+        listed_price: input.listed_price ?? null,
+        listed_sale_price: input.listed_sale_price ?? null,
+        is_sale_observation: input.is_sale_observation ?? false,
+        observation_key: input.observation_key ?? priceHistoryObservationKey(input),
         observed_at: input.observed_at,
         created_at: input.created_at ?? nowIso(),
       };
       return row;
     });
-    this.database.store.priceHistory.push(...rows);
-    return rows;
+    const created: Row<'price_history'>[] = [];
+    for (const row of rows) {
+      const existing = this.database.store.priceHistory.find((candidate) => (
+        priceHistoryObservationKey(candidate) === priceHistoryObservationKey(row)
+      ));
+      if (existing) {
+        created.push(existing);
+        continue;
+      }
+      this.database.store.priceHistory.push(row);
+      created.push(row);
+    }
+    return created;
   }
 }
 
@@ -817,6 +872,7 @@ function restoreStore(target: Store, source: Store): void {
   target.productComponents = source.productComponents;
   target.saleCalendar = source.saleCalendar;
   target.sellerOffers = source.sellerOffers;
+  target.sellerOfferComponents = source.sellerOfferComponents;
   target.sellerOfferBenefits = source.sellerOfferBenefits;
   target.priceHistory = source.priceHistory;
   target.analyses = source.analyses;
@@ -928,7 +984,34 @@ function analysisOfferKey(input: Insert<'analysis_offers'>): string {
 }
 
 function priceHistoryRunKey(input: Insert<'price_history'>): string {
-  return `${input.analysis_id ?? ''}:${input.product_id}:${input.seller_offer_id ?? ''}`;
+  return priceHistoryObservationKey(input);
+}
+
+function priceHistoryObservationKey(
+  input: Pick<
+    Insert<'price_history'>,
+    'product_id' | 'seller_offer_id' | 'observed_at' | 'market_effective_price' | 'observation_key'
+  >,
+): string {
+  if (input.observation_key) {
+    return input.observation_key;
+  }
+  return [
+    input.product_id,
+    input.seller_offer_id ?? '',
+    input.observed_at,
+    input.market_effective_price ?? '',
+  ].join(':');
+}
+
+function sellerOfferComponentInputKey(input: Insert<'seller_offer_components'>): string {
+  return [
+    input.component_type,
+    input.name ?? '',
+    input.capacity_value ?? '',
+    input.capacity_unit ?? '',
+    input.quantity ?? '',
+  ].join(':');
 }
 
 function sellerOfferBenefitInputKey(input: Insert<'seller_offer_benefits'>): string {
