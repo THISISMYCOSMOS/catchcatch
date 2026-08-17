@@ -11,8 +11,9 @@ type AnalysisResultPageProps = {
 export default async function AnalysisResultPage({ searchParams }: AnalysisResultPageProps) {
   const query = await searchParams;
   const requestedUrl = Array.isArray(query.url) ? query.url[0] : query.url;
-  const validation = validateCoupangProductUrl(requestedUrl ?? DEFAULT_COUPANG_PRODUCT_URL);
-  const productUrl = validation.ok ? validation.productUrl : DEFAULT_COUPANG_PRODUCT_URL;
+  const validation = requestedUrl ? validateCoupangProductUrl(requestedUrl) : null;
+  const productUrl = validation?.ok ? validation.productUrl : DEFAULT_COUPANG_PRODUCT_URL;
+  const externalPurchaseUrl = validation?.ok ? validation.productUrl : null;
 
-  return <AnalysisResultScreen productUrl={productUrl} platform="쿠팡" />;
+  return <AnalysisResultScreen productUrl={productUrl} externalPurchaseUrl={externalPurchaseUrl} platform="쿠팡" />;
 }

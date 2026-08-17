@@ -1,0 +1,59 @@
+.pageHeading {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 16px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 16px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.textarea:focus {
+  border-color: var(--strong-border);
+  box-shadow: none;
+}
+
+.textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.submit {
+  margin-top: 4px;
+}
+
+.myInquiries {
+  margin-top: 44px;
+}
+
+.myInquiries h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -.02em;
+  text-align: left;
+}
+
+.emptyState {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}

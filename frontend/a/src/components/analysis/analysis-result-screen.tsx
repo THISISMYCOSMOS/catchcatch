@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { analysisMock, similarProductsMock } from "@/lib/mock/analysis";
+import { alternativeConfigurationsMock, analysisMock } from "@/lib/mock/analysis";
 import styles from "./analysis-result.module.css";
 
 type MainTab = "analysis" | "stores";
@@ -12,6 +12,7 @@ type StoreSeriesKey = "coupang" | "oliveyoung" | "musinsa" | "official";
 
 type AnalysisResultScreenProps = {
   productUrl: string;
+  externalPurchaseUrl: string | null;
   platform: "쿠팡";
 };
 
@@ -46,19 +47,19 @@ function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
 
-export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScreenProps) {
+export function AnalysisResultScreen({ productUrl, externalPurchaseUrl, platform }: AnalysisResultScreenProps) {
   const [mainTab, setMainTab] = useState<MainTab>("analysis");
   const [chartTab, setChartTab] = useState<ChartTab>("history");
   const [storeTab, setStoreTab] = useState<StoreTab>("recommended");
-  const [isSimilarOpen, setIsSimilarOpen] = useState(false);
+  const [isConfigurationsOpen, setIsConfigurationsOpen] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const tabsRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (!isSimilarOpen) return;
+    if (!isConfigurationsOpen) return;
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsSimilarOpen(false);
+      if (event.key === "Escape") setIsConfigurationsOpen(false);
     };
     document.body.style.overflow = "hidden";
     document.addEventListener("keydown", closeOnEscape);
@@ -66,7 +67,7 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [isSimilarOpen]);
+  }, [isConfigurationsOpen]);
 
   function changeMainTab(tab: MainTab) {
     setMainTab(tab);
@@ -77,7 +78,7 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
   const sourceStores = storeTab === "recommended" ? analysisMock.recommendedStores : analysisMock.lowestStores;
   const stores = sourceStores.map((store, index) => ({
     ...store,
-    purchaseUrl: index === 0 ? productUrl : store.purchaseUrl,
+    purchaseUrl: index === 0 && externalPurchaseUrl ? externalPurchaseUrl : store.purchaseUrl,
   }));
 
   return (
@@ -107,10 +108,14 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
               <p>{platform}</p>
               <h1 id="analysis-product-name">{analysisMock.product.name}</h1>
               <strong>{analysisMock.product.price}</strong>
+              <div className={styles.productDescription}><span>상품 설명</span><p>{analysisMock.product.description}</p></div>
             </div>
           </div>
-          <div className={styles.productDescription}><strong>상품 설명</strong><p>{analysisMock.product.description}</p></div>
-          <a className={styles.externalButton} href={productUrl} target="_blank" rel="noopener noreferrer">외부 판매처로 이동 <span aria-hidden="true">↗</span></a>
+          {externalPurchaseUrl ? (
+            <a className={styles.externalButton} href={externalPurchaseUrl} target="_blank" rel="noopener noreferrer">외부 판매처로 이동 <span aria-hidden="true">↗</span></a>
+          ) : (
+            <button className={styles.externalButton} type="button" disabled>외부 판매처로 이동 <span aria-hidden="true">↗</span></button>
+          )}
         </section>
 
         <nav className={styles.mainTabs} aria-label="분석 정보" ref={tabsRef}>
@@ -154,7 +159,7 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
               </div>
             </div>
 
-            <button className={styles.similarButton} type="button" onClick={() => setIsSimilarOpen(true)}><span>비슷한 조건의 상품도 비교해보세요</span><strong>유사상품 보기 →</strong></button>
+            <button className={styles.similarButton} type="button" onClick={() => setIsConfigurationsOpen(true)}><span>같은 상품의 다른 구성도 비교해보세요</span><strong>다른 구성도 보기 →</strong></button>
 
             <div className={styles.discountGrid}>
               <article><span>표시 할인율</span><strong>{analysisMock.discount.displayed ?? "—"}</strong><small>판매 페이지 기준</small></article>
@@ -198,7 +203,11 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
             </div>
             <div className={styles.storeList}>{stores.map((store, index) => (
               <article className={styles.storeCard} key={store.name}>
-                <div className={styles.storeCopy}><p>{storeTab === "recommended" ? "추천" : "최저가"} {index + 1}순위</p><h2>{store.name}</h2><strong>{store.price}</strong><span>{store.description}</span></div>
+                <div className={styles.storeCopy}>
+                  <p>{storeTab === "recommended" ? "추천" : "최저가"} {index + 1}순위</p>
+                  <div className={styles.storeHeading}><h2>{store.name}</h2><strong>{store.price}</strong></div>
+                  <span>{store.description}</span>
+                </div>
                 <a href={store.purchaseUrl} target="_blank" rel="noopener noreferrer">사이트 바로가기 <span aria-hidden="true">↗</span></a>
               </article>
             ))}</div>
@@ -206,13 +215,46 @@ export function AnalysisResultScreen({ productUrl, platform }: AnalysisResultScr
         )}
       </div>
 
-      {isSimilarOpen ? (
-        <div className={styles.modalBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setIsSimilarOpen(false); }}>
-          <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="similar-products-title">
-            <div className={styles.modalHeader}><div><p className={styles.eyebrow}>SIMILAR PICKS</p><h2 id="similar-products-title">유사상품 추천</h2></div><button type="button" onClick={() => setIsSimilarOpen(false)} aria-label="유사상품 팝업 닫기"><CloseIcon /></button></div>
-            <p className={styles.modalIntro}>같은 선케어 유형에서 함께 살펴볼 데모 상품을 모았어요.</p>
-            <div className={styles.similarList}>{similarProductsMock.map((product, index) => <article key={product.name}><div className={styles.smallPlaceholder}>0{index + 1}</div><div><p>{product.platform}</p><h3>{product.name}</h3><strong>{product.price}</strong><span>{product.reason}</span></div></article>)}</div>
-            <button className={styles.modalConfirm} type="button" onClick={() => setIsSimilarOpen(false)}>확인</button>
+      {isConfigurationsOpen ? (
+        <div className={styles.modalBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setIsConfigurationsOpen(false); }}>
+          <section
+            className={styles.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alternative-configurations-title"
+            aria-describedby="alternative-configurations-description"
+          >
+            <header className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>OTHER CONFIGURATIONS</p>
+                <h2 id="alternative-configurations-title">다른 구성도 보기</h2>
+                <p className={styles.modalIntro} id="alternative-configurations-description">같은 상품의 다른 구성을 비교해보세요.</p>
+              </div>
+              <button type="button" onClick={() => setIsConfigurationsOpen(false)} aria-label="다른 구성 팝업 닫기"><CloseIcon /></button>
+            </header>
+
+            <div className={styles.modalBody}>
+              <div className={styles.similarList}>
+                {alternativeConfigurationsMock.map((configuration) => (
+                  <article key={configuration.id}>
+                    <h3>{configuration.configurationName}</h3>
+                    <p className={styles.configurationSummary}>
+                      {configuration.volume} · {configuration.quantity}개 · {configuration.setLabel}
+                      {configuration.additionalItems ? ` · 추가 구성 ${configuration.additionalItems}` : ""}
+                    </p>
+                    <div className={styles.configurationMarket}>
+                      <span>{configuration.sellerName}</span>
+                      <strong>{configuration.price}</strong>
+                    </div>
+                    <p className={styles.configurationPriority}>{configuration.priorityResult}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <footer className={styles.modalFooter}>
+              <button className={styles.modalConfirm} type="button" onClick={() => setIsConfigurationsOpen(false)}>확인</button>
+            </footer>
           </section>
         </div>
       ) : null}

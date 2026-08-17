@@ -62,6 +62,14 @@
   letter-spacing: -.01em;
 }
 
+.elapsedTime {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
+
 .actions {
   width: min(100%, 320px);
   margin-top: 26px;

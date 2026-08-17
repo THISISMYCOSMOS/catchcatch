@@ -8,11 +8,7 @@ import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/m
 import { SAVED_PRODUCTS } from "@/lib/mock/saved-products";
 
 function HeartIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M12 20.2 4.8 13A4.7 4.7 0 0 1 11.4 6.3l.6.7.6-.7A4.7 4.7 0 0 1 19.2 13Z" />
-    </svg>
-  );
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20.8 5.7a5.2 5.2 0 0 0-7.4 0L12 7.1l-1.4-1.4a5.2 5.2 0 1 0-7.4 7.4L12 21l8.8-7.9a5.2 5.2 0 0 0 0-7.4Z" /></svg>;
 }
 
 function formatPrice(price: number) {
@@ -49,6 +45,8 @@ export function SavedProductsScreen() {
       pageClassName="home-page feature-page"
       shellClassName="home-mobile-shell feature-shell"
       headerClassName="home-header feature-header"
+      backHref="/home"
+      backLabel="홈으로 돌아가기"
     >
       <section className={styles.pageHeading} aria-labelledby="saved-products-title">
         <h1 className="section-page-title" id="saved-products-title">관심 상품</h1>
@@ -66,19 +64,22 @@ export function SavedProductsScreen() {
       </div>
 
       {visibleProducts.length > 0 ? (
-        <ul className={styles.productList} aria-live="polite">
+        <ul className={`${styles.productList} recent-list`} aria-live="polite">
           {visibleProducts.map((product) => (
-            <li key={product.id}>
-              <div className={styles.productImage} aria-hidden="true" />
-              <div className={styles.productCopy}>
-                <span>{product.brand}</span>
-                <strong>{product.name}</strong>
-                <b>{formatPrice(product.price)}</b>
+            <li className={`${styles.savedProductCard} recent-card recent-card-history`} key={product.id}>
+              <div className="product-image-placeholder compact" aria-label="상품 이미지 없음" />
+              <div className="recent-card-copy">
+                <div className="recent-card-upper">
+                  <h3>{product.name}</h3>
+                  <strong className={styles.savedProductPrice}>{formatPrice(product.price)}</strong>
+                  <p className={styles.savedProductMeta}>{product.brand}</p>
+                </div>
               </div>
               <button
                 className={styles.favoriteButton}
                 type="button"
                 aria-label={`${product.name} 관심 상품에서 삭제`}
+                aria-pressed="true"
                 onClick={() => setSavedProductIds((current) => current.filter((id) => id !== product.id))}
               >
                 <HeartIcon />

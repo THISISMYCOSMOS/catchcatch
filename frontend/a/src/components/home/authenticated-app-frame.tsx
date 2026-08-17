@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,8 @@ type AuthenticatedAppFrameProps = {
   shellClassName?: string;
   headerClassName?: string;
   overlayContent?: ReactNode;
+  backHref?: string;
+  backLabel?: string;
 };
 
 const MENU_ITEMS = [
@@ -31,7 +34,7 @@ const MENU_ITEMS = [
   { label: "혜택 등록", href: "/benefits" },
   { label: "세일캘린더", href: "/sale-calendar" },
   { label: "관심상품", href: "/saved-products" },
-  { label: "1:1문의", href: null },
+  { label: "1:1문의", href: "/inquiry" },
   { label: "설정", href: "/settings" },
 ] as const;
 
@@ -130,11 +133,7 @@ function MenuDrawer({ onClose, onNavigate, isClosing }: {
         <ul>
           {MENU_ITEMS.map((item) => (
             <li key={item.label}>
-              {item.href ? (
-                <button className="menu-navigation" type="button" onClick={() => onNavigate(item.href)}>{item.label}</button>
-              ) : (
-                <span aria-disabled="true">{item.label}</span>
-              )}
+              <button className="menu-navigation" type="button" onClick={() => onNavigate(item.href)}>{item.label}</button>
             </li>
           ))}
         </ul>
@@ -149,6 +148,8 @@ export function AuthenticatedAppFrame({
   shellClassName = "home-mobile-shell",
   headerClassName = "home-header",
   overlayContent,
+  backHref,
+  backLabel = "이전 화면으로 돌아가기",
 }: AuthenticatedAppFrameProps) {
   const router = useRouter();
   const pageRef = useRef<HTMLElement>(null);
@@ -265,13 +266,17 @@ export function AuthenticatedAppFrame({
     <>
       <AppLogo
         className="home-logo"
-        leftAction={<button className="home-icon-button" type="button" aria-label="메뉴 열기" onClick={() => openDrawer("menu")}><MenuIcon /></button>}
-        rightAction={(
+        leftAction={backHref ? (
+          <Link className="recent-back" href={backHref} aria-label={backLabel}>‹</Link>
+        ) : (
+          <button className="home-icon-button" type="button" aria-label="메뉴 열기" onClick={() => openDrawer("menu")}><MenuIcon /></button>
+        )}
+        rightAction={backHref ? undefined : (
           <button className="home-icon-button notification-button" type="button" aria-label="알림 열기" onClick={() => openDrawer("notifications")}>
             <BellIcon />
             {unreadCount > 0 ? <span className="notification-dot" aria-label={`읽지 않은 알림 ${unreadCount}개`} /> : null}
           </button>
-        )}
+      )}
       />
       <main className={pageClassName} ref={pageRef}>
         <div className={shellClassName}>

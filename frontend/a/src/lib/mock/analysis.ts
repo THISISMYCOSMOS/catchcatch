@@ -9,16 +9,26 @@ export type StoreOffer = {
   readonly purchaseUrl: string;
 };
 
+// Backend 분석 상태 계약이 연결되기 전까지 실패 UI를 확인하기 위한 frontend mock 타입입니다.
+export type AnalysisFailureStatus =
+  | "NEEDS_MORE_DATA"
+  | "INVALID_LINK"
+  | "PRODUCT_MISMATCH"
+  | "AI_JUDGMENT_FAILED"
+  | "INTERNAL_ERROR";
+
 export type MockAnalysisResult =
   | { ok: true }
-  | { ok: false };
+  | { ok: false; status: AnalysisFailureStatus };
 
 const wait = (milliseconds = 650) =>
   new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
 export async function mockAnalyzeProduct(productUrl: string): Promise<MockAnalysisResult> {
   await wait();
-  return productUrl === DEMO_PRODUCT_URL ? { ok: true } : { ok: false };
+  return productUrl === DEMO_PRODUCT_URL
+    ? { ok: true }
+    : { ok: false, status: "INVALID_LINK" };
 }
 
 export const analysisMock = {
@@ -68,8 +78,43 @@ export const analysisMock = {
   ],
 } as const;
 
-export const similarProductsMock = [
-  { name: "유사 선크림 A", platform: "올리브영", price: "가격 확인 전", reason: "같은 선케어 유형의 비교 후보" },
-  { name: "유사 선크림 B", platform: "무신사", price: "가격 확인 전", reason: "같은 선케어 유형의 비교 후보" },
-  { name: "유사 선크림 C", platform: "쿠팡", price: "가격 확인 전", reason: "비슷한 사용감의 비교 후보" },
+// 동일 상품의 다른 구성을 표시하기 위한 frontend mock View Model입니다.
+// 순서와 설명은 Backend/Agent 응답을 대신하는 데모 값이며 프론트엔드에서 재정렬하지 않습니다.
+export const alternativeConfigurationsMock = [
+  {
+    id: "configuration-1",
+    configurationType: "SAME_PRODUCT_CONFIGURATION",
+    configurationName: "라운드랩 독도 선크림 50ml 2개 세트",
+    volume: "50ml",
+    quantity: 2,
+    setLabel: "2개 세트",
+    additionalItems: null,
+    price: "28,900원",
+    sellerName: "쿠팡",
+    priorityResult: "최종 결제 금액 기준에서 비교 가능한 구성",
+  },
+  {
+    id: "configuration-2",
+    configurationType: "SAME_PRODUCT_CONFIGURATION",
+    configurationName: "라운드랩 독도 선크림 기획세트",
+    volume: "50ml",
+    quantity: 1,
+    setLabel: "기획세트",
+    additionalItems: "클렌징폼",
+    price: "25,000원",
+    sellerName: "올리브영",
+    priorityResult: "기획세트·증정품 기준에서 비교 가능한 구성",
+  },
+  {
+    id: "configuration-3",
+    configurationType: "SAME_PRODUCT_CONFIGURATION",
+    configurationName: "라운드랩 독도 선크림 100ml 대용량",
+    volume: "100ml",
+    quantity: 1,
+    setLabel: "단품",
+    additionalItems: null,
+    price: "27,000원",
+    sellerName: "무신사",
+    priorityResult: "용량 대비 가격 기준에서 비교 가능한 구성",
+  },
 ] as const;

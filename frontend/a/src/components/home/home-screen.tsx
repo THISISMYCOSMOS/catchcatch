@@ -10,18 +10,53 @@ import {
   RECENT_ANALYSES,
   getRecentAnalysisById,
 } from "@/lib/mock/home";
+import { AnalysisLimitDialog } from "@/components/home/analysis-limit-dialog";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
 import { getMockAuthenticatedUsername } from "@/lib/mock/session";
 import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
 import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
-import { mockAnalyzeProduct } from "@/lib/mock/analysis";
+import { mockAnalyzeProduct, type AnalysisFailureStatus } from "@/lib/mock/analysis";
+import { consumeFrontendMockWeeklyAnalysis, type WeeklyAnalysisUsageViewModel } from "@/lib/mock/weekly-analysis-usage";
 import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
 type AnalysisState = "idle" | "loading" | "error";
 type AnalysisRequest = { productUrl: string; platform: "쿠팡" };
+type HomeScreenProps = {
+  username: string;
+  initialWeeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
+};
+
+const ANALYSIS_ERROR_MESSAGES: Record<AnalysisFailureStatus, { title: string; description: string }> = {
+  INVALID_LINK: {
+    title: "상품 링크를 확인해주세요",
+    description: "분석할 수 있는 상품 링크인지 확인한 후 다시 시도해주세요.",
+  },
+  NEEDS_MORE_DATA: {
+    title: "상품 정보를 충분히 확인하지 못했어요",
+    description: "분석에 필요한 상품 정보가 부족해 결과를 만들지 못했습니다.",
+  },
+  PRODUCT_MISMATCH: {
+    title: "상품 정보를 정확히 비교하기 어려워요",
+    description: "동일한 상품인지 확인하기 어려워 분석을 완료하지 못했습니다.",
+  },
+  AI_JUDGMENT_FAILED: {
+    title: "구매 판단을 완료하지 못했어요",
+    description: "상품 정보는 확인했지만 최종 구매 판단 중 문제가 발생했습니다.",
+  },
+  INTERNAL_ERROR: {
+    title: "일시적인 오류가 발생했어요",
+    description: "잠시 후 다시 시도해주세요.",
+  },
+};
+
+function formatElapsedTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
@@ -88,21 +123,28 @@ function ProductPreviewCard({ product, isSelecting, onSelect }: {
   );
 }
 
-export function HomeScreen() {
+export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenProps) {
   const router = useRouter();
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState("");
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
+  const [analysisErrorStatus, setAnalysisErrorStatus] = useState<AnalysisFailureStatus>("INTERNAL_ERROR");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [weeklyAnalysisUsage, setWeeklyAnalysisUsage] = useState(initialWeeklyAnalysisUsage);
   const [lastAnalysisRequest, setLastAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const isAnalyzingRef = useRef(false);
+  const analysisTimerRef = useRef<number | null>(null);
   const [product, setProduct] = useState<ProductPreview | null>(null);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [isProductSelecting, setIsProductSelecting] = useState(false);
   const productSelectionTimerRef = useRef<number | null>(null);
   const productRegionRef = useRef<HTMLDivElement>(null);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+  const [isAnalysisLimitDialogOpen, setIsAnalysisLimitDialogOpen] = useState(false);
   const [isBenefitPromptVisible, setIsBenefitPromptVisible] = useState(false);
   const selectedAnalysis = selectedAnalysisId ? getRecentAnalysisById(selectedAnalysisId) : null;
+  const isWeeklyLimitReached = weeklyAnalysisUsage.remainingCount === 0 || weeklyAnalysisUsage.limitReached;
+  const analysisErrorMessage = ANALYSIS_ERROR_MESSAGES[analysisErrorStatus];
 
   useEffect(() => {
     const promptCheck = window.setTimeout(() => {
@@ -141,7 +183,25 @@ export function HomeScreen() {
     if (productSelectionTimerRef.current !== null) {
       window.clearTimeout(productSelectionTimerRef.current);
     }
+    if (analysisTimerRef.current !== null) {
+      window.clearInterval(analysisTimerRef.current);
+    }
   }, []);
+
+  function stopAnalysisTimer() {
+    if (analysisTimerRef.current === null) return;
+    window.clearInterval(analysisTimerRef.current);
+    analysisTimerRef.current = null;
+  }
+
+  function startAnalysisTimer() {
+    stopAnalysisTimer();
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    analysisTimerRef.current = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+  }
 
   useEffect(() => {
     if (!isProductPopoverOpen) return;
@@ -185,6 +245,10 @@ export function HomeScreen() {
 
   async function runAnalysis(request: AnalysisRequest) {
     if (isAnalyzingRef.current) return;
+    if (isWeeklyLimitReached) {
+      setIsAnalysisLimitDialogOpen(true);
+      return;
+    }
     const query = new URLSearchParams({
       url: request.productUrl,
       platform: request.platform,
@@ -195,17 +259,23 @@ export function HomeScreen() {
     setAnalysisState("loading");
     setLinkError("");
     closeProductPopover();
+    startAnalysisTimer();
 
     try {
       const result = await mockAnalyzeProduct(request.productUrl);
+      stopAnalysisTimer();
       if (!result.ok) {
+        setAnalysisErrorStatus(result.status);
         setAnalysisState("error");
         isAnalyzingRef.current = false;
         return;
       }
+      setWeeklyAnalysisUsage(consumeFrontendMockWeeklyAnalysis(username));
       window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, request.productUrl);
       router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
     } catch {
+      stopAnalysisTimer();
+      setAnalysisErrorStatus("INTERNAL_ERROR");
       setAnalysisState("error");
       isAnalyzingRef.current = false;
     }
@@ -214,6 +284,10 @@ export function HomeScreen() {
   function handleAnalyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isAnalyzingRef.current) return;
+    if (isWeeklyLimitReached) {
+      setIsAnalysisLimitDialogOpen(true);
+      return;
+    }
 
     const validation = validateCoupangProductUrl(linkValue);
     if (!validation.ok) {
@@ -230,6 +304,8 @@ export function HomeScreen() {
     <AuthenticatedAppFrame
       overlayContent={selectedAnalysis ? (
         <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setSelectedAnalysisId(null)} />
+      ) : isAnalysisLimitDialogOpen ? (
+        <AnalysisLimitDialog onClose={() => setIsAnalysisLimitDialogOpen(false)} />
       ) : null}
     >
         <section className="home-intro" aria-labelledby="home-title">
@@ -263,14 +339,15 @@ export function HomeScreen() {
             </div>
             <h2 className={styles.title}>상품을 분석하고 있어요</h2>
             <p className={styles.description}>가격과 구성 정보를 확인하고 있어요.<br />잠시만 기다려주세요.</p>
+            <time className={styles.elapsedTime} dateTime={`PT${elapsedSeconds}S`}>{formatElapsedTime(elapsedSeconds)}</time>
           </section>
         ) : analysisState === "error" ? (
           <section className={styles.status} role="alert">
             <div className={styles.failureVisual}>
               <AnalysisFailureIcon />
             </div>
-            <h2 className={styles.title}>분석에 실패했어요</h2>
-            <p className={styles.description}>상품 정보를 분석하는 중 문제가 발생했어요.<br />잠시 후 다시 시도해주세요.</p>
+            <h2 className={styles.title}>{analysisErrorMessage.title}</h2>
+            <p className={styles.description}>{analysisErrorMessage.description}</p>
             <div className={styles.actions}>
               <button
                 className="button button-primary"
@@ -316,7 +393,27 @@ export function HomeScreen() {
               ) : null}
             </div>
             {linkError ? <p className="analysis-link-error" id="analysis-link-error" role="alert">{linkError}</p> : null}
-            <button className="analysis-submit" type="submit">분석하기</button>
+            <button
+              className="analysis-submit"
+              type="submit"
+              disabled={isWeeklyLimitReached}
+            >
+              분석하기
+            </button>
+            <div className={`analysis-usage${isWeeklyLimitReached ? " is-limit-reached" : ""}`}>
+              <span className="analysis-usage-text">
+                이번 주 분석 <strong>{weeklyAnalysisUsage.remainingCount}회 남음</strong>
+              </span>
+              <button
+                className="analysis-usage-help"
+                type="button"
+                aria-label="주간 분석 이용 안내"
+                aria-haspopup="dialog"
+                onClick={() => setIsAnalysisLimitDialogOpen(true)}
+              >
+                <span aria-hidden="true">?</span>
+              </button>
+            </div>
             <p className="demo-link-hint">데모 링크: {DEMO_PRODUCT_URL}</p>
           </form>
         )}

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
@@ -30,10 +29,6 @@ function readSettings() {
   } catch {
     return DEFAULT_SETTINGS;
   }
-}
-
-function ChevronIcon() {
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>;
 }
 
 function SettingSwitch({
@@ -104,6 +99,8 @@ export function SettingsScreen() {
       pageClassName="home-page feature-page"
       shellClassName="home-mobile-shell feature-shell"
       headerClassName="home-header feature-header"
+      backHref="/mypage"
+      backLabel="마이페이지로 돌아가기"
     >
       <section className={styles.pageHeading} aria-labelledby="settings-title">
         <h1 className="section-page-title" id="settings-title">설정</h1>
@@ -144,15 +141,6 @@ export function SettingsScreen() {
         </div>
       </section>
 
-      <section className={styles.settingsSection} aria-labelledby="account-settings-title">
-        <h2 id="account-settings-title">계정 설정</h2>
-        <div className={styles.settingsCard}>
-          <Link className={styles.settingsLink} href="/mypage/profile">
-            <span>비밀번호 변경</span>
-            <ChevronIcon />
-          </Link>
-        </div>
-      </section>
     </AuthenticatedAppFrame>
   );
 }
