@@ -1,6 +1,6 @@
 // 프론트엔드 데모 전용 사용량 저장소입니다.
 // 실제 사용자별 주간 제한과 초기화는 백엔드에서 검증해야 하며, 이 값은 보안 수단이 아닙니다.
-export const FRONTEND_MOCK_WEEKLY_ANALYSIS_LIMIT = 10;
+export const FRONTEND_MOCK_WEEKLY_ANALYSIS_LIMIT = 5;
 const FRONTEND_MOCK_USAGE_STORAGE_KEY = "catchcatch:analysis-remaining-by-user";
 
 export type WeeklyAnalysisUsageViewModel = {

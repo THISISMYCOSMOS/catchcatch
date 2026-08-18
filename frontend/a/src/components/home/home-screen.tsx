@@ -402,7 +402,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
             </button>
             <div className={`analysis-usage${isWeeklyLimitReached ? " is-limit-reached" : ""}`}>
               <span className="analysis-usage-text">
-                이번 주 분석 <strong>{weeklyAnalysisUsage.remainingCount}회 남음</strong>
+                이번 주 분석<strong>{weeklyAnalysisUsage.remainingCount}회 남음</strong>
               </span>
               <button
                 className="analysis-usage-help"

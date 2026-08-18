@@ -25,15 +25,26 @@ export const MUSINSA_GRADE_OPTIONS = [
   { id: "unknown", label: "등급을 모르겠어요" },
 ] as const;
 
+export const ZIGZAG_GRADE_OPTIONS = [
+  { id: "notUsing", label: "이용 안 함", purchaseAmount: null, benefit: null, mileageRate: null },
+  { id: "newbie", label: "NEWBIE (Z1)", purchaseAmount: "최근 6개월 구매 금액: 10만원 미만 또는 미구매", benefit: "쿠폰팩", mileageRate: "0.5%" },
+  { id: "bronze", label: "BRONZE (Z2)", purchaseAmount: "최근 6개월 구매 금액: 10만원 이상 ~ 30만원 미만", benefit: "쿠폰팩", mileageRate: "1%" },
+  { id: "silver", label: "SILVER (Z3)", purchaseAmount: "최근 6개월 구매 금액: 30만원 이상 ~ 50만원 미만", benefit: "쿠폰팩", mileageRate: "1.5%" },
+  { id: "gold", label: "GOLD (Z4)", purchaseAmount: "최근 6개월 구매 금액: 50만원 이상 ~ 100만원 미만", benefit: "쿠폰팩", mileageRate: "2%" },
+  { id: "vip", label: "VIP (Z5)", purchaseAmount: "최근 6개월 구매 금액: 100만원 이상", benefit: "쿠폰팩", mileageRate: "3%" },
+] as const;
+
 export type OliveYoungGrade = (typeof OLIVE_YOUNG_GRADE_OPTIONS)[number]["id"];
 export type MusinsaGrade = (typeof MUSINSA_GRADE_OPTIONS)[number]["id"];
-export type MembershipId = "coupangWow" | "oliveYoung" | "musinsa" | "other";
+export type ZigzagGrade = (typeof ZIGZAG_GRADE_OPTIONS)[number]["id"];
+export type MembershipId = "coupangWow" | "oliveYoung" | "musinsa" | "zigzag" | "other";
 
 export type BenefitProfile = {
   memberships: MembershipId[];
   coupangWow: boolean;
   oliveYoungGrade: OliveYoungGrade;
   musinsaGrade: MusinsaGrade;
+  zigzagGrade: ZigzagGrade;
   otherMembership: {
     enabled: boolean;
     name: string;
@@ -64,6 +75,7 @@ type BenefitsByUsername = Record<string, unknown>;
 
 const OLIVE_YOUNG_GRADES = new Set<string>(OLIVE_YOUNG_GRADE_OPTIONS.map((option) => option.id));
 const MUSINSA_GRADES = new Set<string>(MUSINSA_GRADE_OPTIONS.map((option) => option.id));
+const ZIGZAG_GRADES = new Set<string>(ZIGZAG_GRADE_OPTIONS.map((option) => option.id));
 const OLIVE_YOUNG_LEGACY_GRADES: Record<string, OliveYoungGrade> = {
   베이비: "baby",
   핑크: "pink",
@@ -109,12 +121,21 @@ function normalizeMusinsaGrade(value: unknown, hasMembership: boolean): MusinsaG
   return hasMembership ? "unknown" : "notUsing";
 }
 
+function normalizeZigzagGrade(value: unknown, hasMembership: boolean): ZigzagGrade {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (ZIGZAG_GRADES.has(normalized)) return normalized as ZigzagGrade;
+  }
+  return hasMembership ? "newbie" : "notUsing";
+}
+
 export function createDefaultBenefitProfile(): BenefitProfile {
   return {
     memberships: [],
     coupangWow: false,
     oliveYoungGrade: "notUsing",
     musinsaGrade: "notUsing",
+    zigzagGrade: "notUsing",
     otherMembership: { enabled: false, name: "" },
     coupon: { enabled: false, type: "fixed", value: 0, maxDiscount: 0 },
     points: { enabled: false, amount: 0 },
@@ -164,6 +185,10 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     stored.musinsaGrade ?? storedMembershipGrades.musinsa,
     storedMemberships.includes("musinsa"),
   );
+  const zigzagGrade = normalizeZigzagGrade(
+    stored.zigzagGrade ?? storedMembershipGrades.zigzag,
+    storedMemberships.includes("zigzag"),
+  );
   const storedOtherMembership = stored.otherMembership;
   const otherMembership = typeof storedOtherMembership === "string"
     ? { enabled: storedOtherMembership.trim().length > 0, name: storedOtherMembership }
@@ -179,6 +204,7 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     ...(coupangWow ? ["coupangWow" as const] : []),
     ...(oliveYoungGrade !== "notUsing" ? ["oliveYoung" as const] : []),
     ...(musinsaGrade !== "notUsing" ? ["musinsa" as const] : []),
+    ...(zigzagGrade !== "notUsing" ? ["zigzag" as const] : []),
     ...(otherMembership.enabled && otherMembership.name.trim() ? ["other" as const] : []),
   ];
 
@@ -187,6 +213,7 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     coupangWow,
     oliveYoungGrade,
     musinsaGrade,
+    zigzagGrade,
     otherMembership,
     coupon: defaults.coupon,
     points: defaults.points,
@@ -219,6 +246,7 @@ export function saveBenefitProfile(username: string, profile: BenefitProfile) {
     coupangWow: profile.coupangWow,
     oliveYoungGrade: profile.oliveYoungGrade,
     musinsaGrade: profile.musinsaGrade,
+    zigzagGrade: profile.zigzagGrade,
     otherMembership: {
       enabled: profile.otherMembership.enabled,
       name: profile.otherMembership.enabled ? profile.otherMembership.name.trim() : "",
@@ -249,6 +277,7 @@ export function hasAnyBenefits(profile: BenefitProfile) {
   return profile.coupangWow
     || profile.oliveYoungGrade !== "notUsing"
     || profile.musinsaGrade !== "notUsing"
+    || profile.zigzagGrade !== "notUsing"
     || (profile.otherMembership.enabled && profile.otherMembership.name.trim().length > 0);
 }
 

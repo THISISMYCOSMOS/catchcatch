@@ -99,8 +99,6 @@ export function SettingsScreen() {
       pageClassName="home-page feature-page"
       shellClassName="home-mobile-shell feature-shell"
       headerClassName="home-header feature-header"
-      backHref="/mypage"
-      backLabel="마이페이지로 돌아가기"
     >
       <section className={styles.pageHeading} aria-labelledby="settings-title">
         <h1 className="section-page-title" id="settings-title">설정</h1>

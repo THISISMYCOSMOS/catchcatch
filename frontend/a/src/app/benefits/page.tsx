@@ -20,6 +20,8 @@ import {
   OliveYoungGrade,
   OLIVE_YOUNG_GRADE_OPTIONS,
   saveBenefitProfile,
+  ZigzagGrade,
+  ZIGZAG_GRADE_OPTIONS,
 } from "@/lib/benefits";
 import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
 
@@ -212,12 +214,8 @@ export default function BenefitsPage() {
             <span aria-hidden="true" />
           </header>
 
-          <section className="benefits-intro" aria-labelledby="benefits-title">
-            <div className="previous-analysis-heading">
-              <p className="previous-analysis-eyebrow">MY BENEFITS</p>
-              <h1 className="benefits-title" id="benefits-title">내 혜택 등록</h1>
-              <p className="previous-analysis-description">사용 중인 혜택만 간단히 등록해주세요.<br />상품 분석 시 예상 최종 결제금액에 반영해드려요.</p>
-            </div>
+          <section className="feature-heading benefits-intro" aria-labelledby="benefits-title">
+            <h1 className="section-page-title" id="benefits-title">내 혜택 등록</h1>
           </section>
 
           <form className="benefits-form" onSubmit={handleSave} noValidate>
@@ -261,6 +259,16 @@ export default function BenefitsPage() {
                   onChange={(musinsaGrade) => setProfile((current) => current ? ({
                     ...current,
                     musinsaGrade,
+                  }) : current)}
+                />
+
+                <MembershipGradeDropdown<ZigzagGrade>
+                  label="지그재그 멤버십"
+                  value={profile.zigzagGrade}
+                  options={ZIGZAG_GRADE_OPTIONS}
+                  onChange={(zigzagGrade) => setProfile((current) => current ? ({
+                    ...current,
+                    zigzagGrade,
                   }) : current)}
                 />
 
@@ -308,6 +316,8 @@ export default function BenefitsPage() {
                 {isSaving ? "저장 중..." : "혜택 저장하기"}
               </button>
             </div>
+
+            <p className="benefits-note">사용 중인 혜택만 간단히 등록해주세요.<br />상품 분석 시 예상 최종 결제금액에 반영해드려요.</p>
           </form>
         </div>
       </main>

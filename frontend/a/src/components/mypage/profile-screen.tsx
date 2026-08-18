@@ -525,7 +525,6 @@ export function ProfileScreen() {
 
           <section className="feature-heading profile-heading" aria-labelledby="profile-title">
             <h1 className="section-page-title" id="profile-title">마이페이지</h1>
-            <p>계정 정보를 확인하고 변경할 수 있어요.</p>
           </section>
 
           {loadState === "loading" ? <ProfileSkeleton /> : null}

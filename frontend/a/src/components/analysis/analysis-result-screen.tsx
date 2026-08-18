@@ -8,7 +8,7 @@ import styles from "./analysis-result.module.css";
 type MainTab = "analysis" | "stores";
 type ChartTab = "history" | "storeHistory";
 type StoreTab = "recommended" | "lowest";
-type StoreSeriesKey = "coupang" | "oliveyoung" | "musinsa" | "official";
+type StoreSeriesKey = "coupang" | "oliveyoung" | "musinsa" | "zigzag" | "official";
 
 type AnalysisResultScreenProps = {
   productUrl: string;
@@ -20,6 +20,7 @@ const STORE_SERIES: ReadonlyArray<{ key: StoreSeriesKey; label: string }> = [
   { key: "coupang", label: "쿠팡" },
   { key: "oliveyoung", label: "올리브영" },
   { key: "musinsa", label: "무신사" },
+  { key: "zigzag", label: "지그재그" },
   { key: "official", label: "공식몰" },
 ];
 
@@ -266,12 +267,12 @@ function PriceChart() {
   const pointsData = analysisMock.priceHistory.map((item) => ({
     month: item.month,
     store: item.lowest,
-    value: Math.min(item.coupang, item.musinsa, item.oliveyoung, item.official),
+    value: Math.min(item.coupang, item.musinsa, item.zigzag, item.oliveyoung, item.official),
   }));
   const min = 14500;
   const max = 20500;
   const points = pointsData.map((item, index) => `${20 + index * (280 / (pointsData.length - 1))},${18 + ((max - item.value) / (max - min)) * 116}`).join(" ");
-  const storeNames = { coupang: "쿠팡", musinsa: "무신사", oliveyoung: "올리브영", official: "공식몰" } as const;
+  const storeNames = { coupang: "쿠팡", musinsa: "무신사", zigzag: "지그재그", oliveyoung: "올리브영", official: "공식몰" } as const;
 
   return <div className={styles.chartArea}><div className={styles.chartLegend}>{STORE_SERIES.map((store) => <span className={styles[store.key]} key={store.key}>{store.label}</span>)}</div><div className={styles.chartFrame}><span className={`${styles.chartY} ${styles.top}`}>20,000</span><span className={`${styles.chartY} ${styles.middle}`}>17,500</span><span className={`${styles.chartY} ${styles.bottom}`}>15,000</span><svg viewBox="0 0 320 150" role="img" aria-label="2026년 1월부터 7월까지 월별 최저가 변화"><defs><linearGradient id="analysis-chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#b8b2a5" stopOpacity=".24" /><stop offset="1" stopColor="#b8b2a5" stopOpacity="0" /></linearGradient></defs><path className={styles.areaFill} d={`M ${points} L 300 142 L 20 142 Z`} /><polyline className={styles.priceLine} points={points} /><g>{pointsData.map((item, index) => <circle key={item.month} className={`${styles.storeDot} ${styles[item.store]}`} cx={20 + index * (280 / (pointsData.length - 1))} cy={18 + ((max - item.value) / (max - min)) * 116} r="5"><title>{`${item.month} · ${storeNames[item.store]} · ${item.value.toLocaleString()}원`}</title></circle>)}</g></svg></div><div className={styles.axis}>{analysisMock.priceHistory.map((item) => <span key={item.month}>{item.month}</span>)}</div><p className={styles.chartNote}>점 색상은 해당 월의 최저가 판매처를 뜻해요.</p></div>;
 }

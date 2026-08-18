@@ -274,6 +274,7 @@
 .chartLegend span::before { content: ""; width: 7px; height: 7px; margin-right: 3px; display: inline-block; border-radius: 50%; }
 .chartLegend .coupang::before { background: #7567c9; }
 .chartLegend .musinsa::before { background: #454545; }
+.chartLegend .zigzag::before { background: #a76f8b; }
 .chartLegend .oliveyoung::before { background: #d87870; }
 .chartLegend .official::before { background: #5b9677; }
 .chartFrame { position: relative; padding-left: 35px; }
@@ -285,6 +286,8 @@
 .storeEndDot.coupang { fill: #7567c9; }
 .storeDot.musinsa,
 .storeEndDot.musinsa { fill: #454545; }
+.storeDot.zigzag,
+.storeEndDot.zigzag { fill: #a76f8b; }
 .storeDot.oliveyoung,
 .storeEndDot.oliveyoung { fill: #d87870; }
 .storeDot.official,
@@ -298,6 +301,7 @@
 .storeLine { fill: none; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
 .storeLine.coupang { stroke: #7567c9; }
 .storeLine.musinsa { stroke: #454545; }
+.storeLine.zigzag { stroke: #a76f8b; }
 .storeLine.oliveyoung { stroke: #d87870; }
 .storeLine.official { stroke: #5b9677; }
 .storeEndDot { stroke: #fff; stroke-width: 1.8; }
@@ -311,6 +315,7 @@
 .filterDot { width: 7px; height: 7px; border-radius: 50%; }
 .filterDot.coupang { background: #7567c9; }
 .filterDot.musinsa { background: #454545; }
+.filterDot.zigzag { background: #a76f8b; }
 .filterDot.oliveyoung { background: #d87870; }
 .filterDot.official { background: #5b9677; }
 
@@ -345,8 +350,8 @@
 
 .modalBackdrop { position: fixed; z-index: 80; inset: 0; padding: 20px; display: grid; place-items: center; overscroll-behavior: contain; background: rgba(21, 20, 18, .54); }
 .modal { width: calc(100% - 40px); max-width: calc(var(--app-width) - 80px); max-height: min(88dvh, 720px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 20px; color: var(--text); background: var(--surface); box-shadow: 0 16px 40px rgba(31, 31, 31, .14); }
-.modalHeader { position: relative; padding: 22px 18px 18px; flex: none; }
-.modalHeader > div { width: 100%; text-align: left; }
+.modalHeader { position: relative; padding: 22px 20px 0; flex: none; }
+.modalHeader > div { width: 100%; padding-top: 4px; padding-left: 15px; text-align: left; }
 .modalHeader h2 { margin: 4px 0 0; font-size: 22px; line-height: 1.35; letter-spacing: -.02em; }
 .modalHeader button { position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 10px; color: var(--text); background: var(--inactive); cursor: pointer; }
 .modalHeader svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
@@ -382,6 +387,7 @@
   .discountGrid article { padding: 13px; }
   .similarButton span { display: none; }
   .modalBackdrop { padding: 12px; }
+  .modalHeader { padding-right: 16px; padding-left: 16px; }
   .modalBody { padding-right: 16px; padding-left: 16px; }
   .modalFooter { padding-right: 16px; padding-left: 16px; }
 }

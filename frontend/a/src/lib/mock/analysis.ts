@@ -53,13 +53,13 @@ export const analysisMock = {
     unitPrice: "확인 전",
   },
   priceHistory: [
-    { month: "1월", coupang: 18900, musinsa: 18400, oliveyoung: 19800, official: 20500, lowest: "musinsa" },
-    { month: "2월", coupang: 18200, musinsa: 19000, oliveyoung: 17600, official: 19800, lowest: "oliveyoung" },
-    { month: "3월", coupang: 17500, musinsa: 16900, oliveyoung: 18900, official: 19200, lowest: "musinsa" },
-    { month: "4월", coupang: 16800, musinsa: 18800, oliveyoung: 16200, official: 18900, lowest: "oliveyoung" },
-    { month: "5월", coupang: 16600, musinsa: 18500, oliveyoung: 15800, official: 17900, lowest: "oliveyoung" },
-    { month: "6월", coupang: 15800, musinsa: 16100, oliveyoung: 17600, official: 17200, lowest: "coupang" },
-    { month: "7월", coupang: 15000, musinsa: 17900, oliveyoung: 17500, official: 18500, lowest: "coupang" },
+    { month: "1월", coupang: 18900, musinsa: 18400, zigzag: 19600, oliveyoung: 19800, official: 20500, lowest: "musinsa" },
+    { month: "2월", coupang: 18200, musinsa: 19000, zigzag: 18500, oliveyoung: 17600, official: 19800, lowest: "oliveyoung" },
+    { month: "3월", coupang: 17500, musinsa: 16900, zigzag: 18000, oliveyoung: 18900, official: 19200, lowest: "musinsa" },
+    { month: "4월", coupang: 16800, musinsa: 18800, zigzag: 17500, oliveyoung: 16200, official: 18900, lowest: "oliveyoung" },
+    { month: "5월", coupang: 16600, musinsa: 18500, zigzag: 17100, oliveyoung: 15800, official: 17900, lowest: "oliveyoung" },
+    { month: "6월", coupang: 15800, musinsa: 16100, zigzag: 16900, oliveyoung: 17600, official: 17200, lowest: "coupang" },
+    { month: "7월", coupang: 15000, musinsa: 17900, zigzag: 18200, oliveyoung: 17500, official: 18500, lowest: "coupang" },
   ],
   criteria: [
     { title: "가장 적게 결제하기 · 좋음", result: "7월 기준 쿠팡 15,000원으로 비교 판매처 중 최저가예요." },
@@ -70,11 +70,13 @@ export const analysisMock = {
     { name: "쿠팡", price: "15,000원", description: "7월 기준 최저가이며 1월보다 20.6% 낮아요.", purchaseUrl: "https://www.coupang.com" },
     { name: "올리브영", price: "17,500원", description: "일곱 달 중 세 번 최저가로 가장 자주 선정됐어요.", purchaseUrl: "https://www.oliveyoung.co.kr" },
     { name: "무신사", price: "17,900원", description: "1월과 3월에 최저가였던 판매처예요.", purchaseUrl: "https://www.musinsa.com/beauty" },
+    { name: "지그재그", price: "18,200원", description: "비교 화면 확인을 위해 추가한 프론트엔드 목업 가격이에요.", purchaseUrl: "https://zigzag.kr" },
   ],
   lowestStores: [
     { name: "쿠팡", price: "15,000원", description: "7월 조사 가격 기준 최저가", purchaseUrl: "https://www.coupang.com" },
     { name: "올리브영", price: "17,500원", description: "7월 조사 가격 기준 두 번째", purchaseUrl: "https://www.oliveyoung.co.kr" },
     { name: "무신사", price: "17,900원", description: "7월 조사 가격 기준 세 번째", purchaseUrl: "https://www.musinsa.com/beauty" },
+    { name: "지그재그", price: "18,200원", description: "프론트엔드 목업 비교 가격", purchaseUrl: "https://zigzag.kr" },
   ],
 } as const;
 
