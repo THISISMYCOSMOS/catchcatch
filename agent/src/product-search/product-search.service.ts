@@ -209,6 +209,9 @@ export class ProductSearchService {
         },
       ));
       const screened = promoted.map(({ result }) => screenCandidateIdentity(input.anchor_product, result));
+      const directVerified = await Promise.all(
+        screened.map(({ result }) => this.verifySameProductSellerResult(result)),
+      );
 
       const verifiedResult = {
         ...parsedResult,
@@ -217,8 +220,9 @@ export class ProductSearchService {
           preSearchWarnings,
           promoted.map((entry) => entry.warning).filter((warning): warning is string => Boolean(warning)),
           screened.flatMap((entry) => entry.warnings),
+          directVerified.flatMap((entry) => entry.warnings),
         ),
-        seller_results: screened.map((entry) => entry.result),
+        seller_results: directVerified.map((entry) => entry.result),
       };
       return productSearchResultSchema.parse(verifiedResult);
     } catch (error) {
@@ -634,11 +638,11 @@ export class ProductSearchService {
     }
   }
 
-  private async verifyDynamicSellerPage(
+  private async verifyDynamicSellerPage<T extends DirectSellerPageCandidate>(
     seller: Seller,
-    candidate: PromotedConfigurationCandidate,
+    candidate: T,
   ): Promise<{
-    candidate: PromotedConfigurationCandidate | null;
+    candidate: T | null;
     warnings: string[];
   }> {
     if (seller !== 'MUSINSA_BEAUTY') {
@@ -665,7 +669,9 @@ export class ProductSearchService {
       if (facts.listedSalePrice === null) {
         throw new Error('current public sale price was not present in page metadata');
       }
-      const corrected = candidate.candidate_offer.listed_sale_price !== facts.listedSalePrice;
+      const corrected =
+        candidate.candidate_offer.listed_sale_price !== facts.listedSalePrice ||
+        candidate.candidate_offer.list_price !== facts.listPrice;
       return {
         candidate: {
           ...candidate,
@@ -678,9 +684,9 @@ export class ProductSearchService {
             ...candidate.source,
             verification_status: 'CONTENT_VERIFIED',
           },
-        },
+        } as T,
         warnings: corrected
-          ? [`direct seller page corrected the AI sale price to ${facts.listedSalePrice}`]
+          ? [`direct seller page corrected AI prices to sale=${facts.listedSalePrice}, list=${facts.listPrice ?? 'unknown'}`]
           : [],
       };
     } catch (error) {
@@ -693,13 +699,52 @@ export class ProductSearchService {
             listed_sale_price: null,
             public_coupon_amount: null,
             automatic_discount_amount: null,
+            shipping_fee: null,
           },
-        },
+        } as T,
         warnings: [
           `direct seller-page price verification failed; AI price was cleared (${error instanceof Error ? error.message : 'unknown error'})`,
         ],
       };
     }
+  }
+
+  private async verifySameProductSellerResult(
+    sellerResult: SellerSearchResult,
+  ): Promise<{ result: SellerSearchResult; warnings: string[] }> {
+    if (
+      sellerResult.seller !== 'MUSINSA_BEAUTY' ||
+      sellerResult.availability !== 'AVAILABLE' ||
+      !sellerResult.candidate_offer ||
+      !sellerResult.source
+    ) {
+      return { result: sellerResult, warnings: [] };
+    }
+
+    const directVerification = await this.verifyDynamicSellerPage(
+      sellerResult.seller,
+      sellerResult as SellerSearchResult & DirectSellerPageCandidate,
+    );
+    if (directVerification.candidate) {
+      return {
+        result: directVerification.candidate as SellerSearchResult,
+        warnings: directVerification.warnings,
+      };
+    }
+
+    return {
+      result: {
+        ...sellerResult,
+        availability: 'NOT_AVAILABLE',
+        candidate_offer: null,
+        match_evidence: [],
+        mismatch_reasons: [
+          ...sellerResult.mismatch_reasons,
+          'direct seller page reports the offer is not purchasable',
+        ],
+      },
+      warnings: directVerification.warnings,
+    };
   }
 
   // Brand-official discovery is a separate web search driven by the brand
@@ -1139,6 +1184,11 @@ function buildSampleAlternativeComponents(
 }
 
 type PromotedConfigurationCandidate = Omit<ConfigurationCandidateAi, 'source'> & {
+  source: SourceMetadata;
+};
+
+type DirectSellerPageCandidate = {
+  candidate_offer: NonNullable<SellerSearchResult['candidate_offer']>;
   source: SourceMetadata;
 };
 

@@ -172,14 +172,14 @@ eval/ai-judgment-evaluation.md
 
 1. 조건부 상품 식별 OpenAI 호출 서비스와 컨트롤러
 2. ~~유사상품 검색 OpenAI 호출 서비스와 컨트롤러~~ (미연결 코드였던 프롬프트·스키마를 삭제했으므로 재설계 필요)
-3. 판매 페이지 실제 콘텐츠 검증기와 `CONTENT_VERIFIED` 승격
+3. 올리브영·쿠팡·지그재그·브랜드 공식몰 판매 페이지의 실제 콘텐츠 검증기와 `CONTENT_VERIFIED` 승격
 4. 상품·오퍼·출처·가격 이력 영속 저장 및 사용자 데이터 격리
 5. 백엔드 가격·할인·용량 계산기
 6. NAVER API HUB 웹문서 후보 발견 어댑터의 실제 접근성 검증
 7. 공급자별 rate limit, timeout, circuit breaker와 운영 모니터링
 8. 실제 OpenAI 모델을 사용하는 라이브 편향 평가
 
-현재 동일상품 OpenAI `web_search` 서비스와 최종 판단 서비스는 구현돼 있다. 그러나 검색 결과가 `URL_VERIFIED`에서 `CONTENT_VERIFIED`로 승격되는 단계가 없으므로 두 서비스를 실서비스 파이프라인으로 바로 연결해서는 안 된다.
+현재 동일상품 OpenAI `web_search` 서비스와 최종 판단 서비스는 구현돼 있다. 무신사 뷰티 `AVAILABLE` 후보는 직접 판매 페이지 메타데이터로 가격을 확인해 `CONTENT_VERIFIED`로 승격할 수 있지만, 나머지 판매처에는 콘텐츠 검증기가 없으므로 그 결과는 `URL_VERIFIED`에 남는다. 따라서 판매처 전체를 포괄하는 실서비스 파이프라인으로 바로 연결해서는 안 된다.
 
 ## 8. 최종 판정
 
