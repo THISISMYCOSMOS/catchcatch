@@ -1781,7 +1781,7 @@ type SellerSearchResult = ProductSearchResult['seller_results'][number];
 
 // T6: assertSellerMatchesUrl is a strict, throwing assertion (correct for
 // its other caller, product-identification, which has only one result to
-// accept or reject). Here there are up to four independent seller entries
+// accept or reject). Here there are up to five independent seller entries
 // in one response, and one of them citing a domain that does not match its
 // seller code — most commonly BRAND_OFFICIAL when no brand-official domain
 // was discovered/gated this request — must not discard the other, good

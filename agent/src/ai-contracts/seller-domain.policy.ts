@@ -5,6 +5,7 @@ export const FIXED_SELLER_DOMAINS: Readonly<Record<Exclude<Seller, 'BRAND_OFFICI
   OLIVE_YOUNG: 'oliveyoung.co.kr',
   MUSINSA_BEAUTY: 'musinsa.com',
   COUPANG: 'coupang.com',
+  ZIGZAG: 'zigzag.kr',
 };
 
 // Hosts that carry many different brands' storefronts under one domain
@@ -222,7 +223,7 @@ export function gateBrandOfficialDomainCandidate(
   if (isFixedSellerDomain) {
     return {
       accepted: false,
-      reason: `${domain} is already one of the three fixed registered seller domains`,
+      reason: `${domain} is already one of the four fixed registered seller domains`,
     };
   }
   return { accepted: true, domain, warning: foreignStorefrontWarning(domain) };

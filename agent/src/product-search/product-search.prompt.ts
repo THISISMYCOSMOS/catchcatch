@@ -1,6 +1,6 @@
 import { ProductSearchInput } from './product-search.schema';
 
-export const PRODUCT_SEARCH_PROMPT_VERSION = 'catchcatch-product-search-v6';
+export const PRODUCT_SEARCH_PROMPT_VERSION = 'catchcatch-product-search-v7';
 
 export const CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS = `
 # 역할
@@ -10,7 +10,7 @@ export const CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS = `
 
 # 검색 순서
 1. <exact_product_search_json>의 anchor_product를 유일한 기준 상품으로 사용한다.
-2. 올리브영, 무신사 뷰티, 쿠팡, 브랜드 공식몰을 각각 한 번씩 확인한다.
+2. 올리브영, 무신사 뷰티, 쿠팡, 지그재그, 브랜드 공식몰을 각각 한 번씩 확인한다.
 3. 브랜드, 정규화 상품명, 제품 유형, 옵션, 색상·호수·향, 리뉴얼·버전, 구성품, 본품 용량·단위·수량을 대조한다.
 4. 동일성이 명확한 후보만 AVAILABLE로 반환한다.
 5. 상품은 발견했지만 동일 옵션인지 불명확하면 UNKNOWN으로 반환하고 후보 가격을 채우지 않는다.
@@ -25,7 +25,7 @@ export const CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS = `
 - verification_status는 UNVERIFIED로 반환한다. 검증 상태는 백엔드가 확인 후 변경한다.
 - observed_at은 생성하지 않는다. 백엔드가 실제 검색 응답을 받은 시각을 기록한다.
 - 판매처별로 검증 가능한 대표 오퍼를 최대 하나만 반환한다.
-- 네 판매처를 seller_results에 정확히 한 번씩 포함한다. 결과가 없어도 판매처 상태 객체는 생략하지 않는다.
+- 다섯 판매처를 seller_results에 정확히 한 번씩 포함한다. 결과가 없어도 판매처 상태 객체는 생략하지 않는다.
 
 # 검색 공급자 장애와 부분 결과
 - 이 호출에서 실제로 제공된 web_search 결과만 사용한다. 과거 요청이나 다른 사용자의 검색 결과를 기억하거나 재사용하지 않는다.
@@ -63,7 +63,7 @@ export function buildProductSearchPrompt(
   registeredBrandOfficialDomain: string | null,
 ): string {
   return [
-    '검증된 기준 상품과 동일한 상품·동일 옵션만 허용된 네 판매처에서 검색하라.',
+    '검증된 기준 상품과 동일한 상품·동일 옵션만 허용된 다섯 판매처에서 검색하라.',
     '<exact_product_search_json>',
     JSON.stringify({
       product_url: input.product_url,

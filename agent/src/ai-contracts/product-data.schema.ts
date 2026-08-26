@@ -4,6 +4,7 @@ export const sellerSchema = z.enum([
   'OLIVE_YOUNG',
   'MUSINSA_BEAUTY',
   'COUPANG',
+  'ZIGZAG',
   'BRAND_OFFICIAL',
 ]);
 

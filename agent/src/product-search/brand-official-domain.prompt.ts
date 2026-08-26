@@ -1,6 +1,6 @@
 export const BRAND_OFFICIAL_DOMAIN_PROMPT_VERSION = 'catchcatch-brand-official-domain-v2';
 
-// This discovery-only step searches the web before the four-seller product
+// This discovery-only step searches the web before the five-seller product
 // search. The model must cite URLs from that search; service code then checks
 // those URLs against the provider-returned source list and the domain gate.
 export const CATCHCATCH_BRAND_OFFICIAL_DOMAIN_INSTRUCTIONS = `

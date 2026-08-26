@@ -23,6 +23,7 @@ src/ai-judgment/ai-judgment.schema.ts
 OLIVE_YOUNG
 MUSINSA_BEAUTY
 COUPANG
+ZIGZAG
 BRAND_OFFICIAL
 ```
 
@@ -89,6 +90,7 @@ AI 출력에는 `observed_at`이 없다. 추가 필드도 허용하지 않는다
 OLIVE_YOUNG   → oliveyoung.co.kr
 MUSINSA_BEAUTY → musinsa.com
 COUPANG       → coupang.com
+ZIGZAG        → zigzag.kr
 ```
 
 브랜드 공식몰은 외부 요청에서 도메인을 받지 않는다.
@@ -190,7 +192,7 @@ COUPANG       → coupang.com
 
 ### 백엔드 검증
 
-- 네 판매처가 정확히 한 번씩 존재해야 함
+- 다섯 판매처가 정확히 한 번씩 존재해야 함
 - `AVAILABLE`은 후보 오퍼, 출처, 명시적 일치 근거가 필수
 - `UNKNOWN`, `NOT_AVAILABLE`은 후보 오퍼를 가질 수 없음
 - AI가 응답의 `anchor_product`를 바꾸면 전체 거부

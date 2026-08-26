@@ -14,7 +14,7 @@ CatchCatch AI의 프롬프트, 구조화 출력 스키마, 백엔드 검증 경�
 | 기능 | 버전 | 실행 원본 |
 |---|---|---|
 | 조건부 상품 식별 | `catchcatch-product-identification-v3` | `src/product-identification/product-identification.prompt.ts` |
-| 동일상품 검색 | `catchcatch-product-search-v6` | `src/product-search/product-search.prompt.ts` |
+| 동일상품 검색 | `catchcatch-product-search-v7` | `src/product-search/product-search.prompt.ts` |
 | 최종 구매 판단 | `catchcatch-judgment-v7` | `src/ai-judgment/ai-judgment.prompt.ts` |
 | 유사상품 검색 (삭제됨, 설계 이력만 남음) | `catchcatch-similar-product-search-v3` | ~~`src/similar-product-search/similar-product-search.prompt.ts`~~ |
 

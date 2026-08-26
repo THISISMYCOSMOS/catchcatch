@@ -95,6 +95,7 @@ describe('seller domain policy', () => {
       'shop.oliveyoung.co.kr',
       'musinsa.com',
       'coupang.com',
+      'zigzag.kr',
     ])('rejects a fixed seller domain %s as a brand-official candidate', (host) => {
       const result = gateBrandOfficialDomainCandidate(host);
       expect(result.accepted).toBe(false);

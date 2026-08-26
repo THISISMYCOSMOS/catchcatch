@@ -1,7 +1,7 @@
 import { ProductConfigurationSearchInput } from './product-configuration-search.schema';
 
 export const PRODUCT_CONFIGURATION_SEARCH_PROMPT_VERSION =
-  'catchcatch-product-configuration-search-v2';
+  'catchcatch-product-configuration-search-v3';
 
 export const CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS = `
 # 역할
@@ -72,6 +72,7 @@ export function buildProductConfigurationSearchPrompt(
     OLIVE_YOUNG: '올리브영',
     MUSINSA_BEAUTY: '무신사 뷰티',
     COUPANG: '쿠팡',
+    ZIGZAG: '지그재그',
     BRAND_OFFICIAL: `${input.anchor_product.brand ?? ''} 공식몰`.trim(),
   };
   const preferredSearchQueries = (targetSellers ?? []).map((seller) => (

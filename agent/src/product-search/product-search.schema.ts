@@ -19,7 +19,7 @@ import {
 // Minimum number of registered sellers that must be present in seller_results.
 // A registered seller may still be reported as NOT_AVAILABLE (that counts as
 // present); only an entirely omitted seller reduces the count below this floor.
-const MIN_SELLER_COVERAGE = 3;
+const MIN_SELLER_COVERAGE = sellerSchema.options.length - 1;
 
 export { productComponentSchema, sellerSchema };
 

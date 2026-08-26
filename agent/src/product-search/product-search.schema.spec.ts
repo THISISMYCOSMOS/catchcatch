@@ -92,13 +92,14 @@ describe('product search output contract', () => {
     source,
   };
 
-  it('accepts all four registered sellers with no coverage warning', () => {
+  it('accepts all five registered sellers with no coverage warning', () => {
     const valid = productSearchResultSchema.safeParse({
       anchor_product: anchorProduct,
       seller_results: [
         available,
         unavailable('MUSINSA_BEAUTY'),
         unavailable('COUPANG'),
+        unavailable('ZIGZAG'),
         unavailable('BRAND_OFFICIAL'),
       ],
       warnings: [],
@@ -109,13 +110,14 @@ describe('product search output contract', () => {
     }
   });
 
-  it('accepts three distinct sellers and warns about the one omitted seller', () => {
+  it('accepts four distinct sellers and warns about the one omitted seller', () => {
     const valid = productSearchResultSchema.safeParse({
       anchor_product: anchorProduct,
       seller_results: [
         available,
         unavailable('MUSINSA_BEAUTY'),
         unavailable('COUPANG'),
+        unavailable('ZIGZAG'),
       ],
       warnings: [],
     });
@@ -127,12 +129,13 @@ describe('product search output contract', () => {
     }
   });
 
-  it('rejects fewer than three distinct sellers', () => {
+  it('rejects fewer than four distinct sellers', () => {
     const invalid = productSearchResultSchema.safeParse({
       anchor_product: anchorProduct,
       seller_results: [
         available,
         unavailable('MUSINSA_BEAUTY'),
+        unavailable('COUPANG'),
       ],
       warnings: [],
     });
@@ -146,6 +149,7 @@ describe('product search output contract', () => {
         available,
         unavailable('MUSINSA_BEAUTY'),
         unavailable('COUPANG'),
+        unavailable('ZIGZAG'),
         { ...unavailable('COUPANG') },
       ],
       warnings: [],
@@ -160,6 +164,7 @@ describe('product search output contract', () => {
         available,
         unavailable('MUSINSA_BEAUTY'),
         unavailable('COUPANG'),
+        unavailable('ZIGZAG'),
         unavailable('BRAND_OFFICIAL'),
       ],
       warnings: [],

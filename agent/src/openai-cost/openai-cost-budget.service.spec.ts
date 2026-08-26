@@ -24,12 +24,12 @@ describe('OpenAICostBudgetService', () => {
     expect(search.id).toBe(identification.id);
   });
 
-  it('uses the lean commercial budget and stage reserves by default', () => {
+  it('uses the official-store commercial budget and stage reserves by default', () => {
     const service = new OpenAICostBudgetService(config({}));
-    expect(service.analysisBudgetUsd()).toBe(0.056);
-    expect(service.searchPipelineBudgetUsd()).toBeCloseTo(0.051, 8);
+    expect(service.analysisBudgetUsd()).toBe(0.068);
+    expect(service.searchPipelineBudgetUsd()).toBeCloseTo(0.063, 8);
     expect(service.stageReserveUsd('product_identification')).toBe(0.012);
-    expect(service.stageReserveUsd('brand_official_discovery')).toBe(0.012);
+    expect(service.stageReserveUsd('brand_official_discovery')).toBe(0.013);
     expect(service.stageReserveUsd('same_product_search')).toBe(0.027);
     expect(service.stageReserveUsd('ai_judgment')).toBe(0.005);
   });
@@ -61,7 +61,7 @@ describe('OpenAICostBudgetService', () => {
     )).toBeNull();
   });
 
-  it('keeps the measured successful live-search usage inside the 5.1-cent search pipeline budget with Luna', () => {
+  it('keeps the measured successful live-search usage inside the 6.3-cent search pipeline budget with Luna', () => {
     const service = new OpenAICostBudgetService(config({}));
     const session = service.begin(
       'https://www.musinsa.com/products/2782655',
@@ -87,7 +87,54 @@ describe('OpenAICostBudgetService', () => {
     });
 
     expect(service.isExceeded(session)).toBe(false);
-    expect(service.remainingUsd(session)).toBeCloseTo(0.003785, 6);
+    expect(service.remainingUsd(session)).toBeCloseTo(0.015785, 6);
+  });
+
+  it('preserves official-store discovery after the highest observed Luna identification cost', () => {
+    const service = new OpenAICostBudgetService(config({}));
+    const session = service.begin(
+      'https://www.musinsa.com/products/2782655',
+      service.searchPipelineBudgetUsd(),
+    );
+
+    settleStage(service, session, 'product_identification', 'gpt-5.6-luna', {
+      input_tokens: 6_117,
+      output_tokens: 360,
+      web_search_calls: 2,
+    });
+
+    expect(service.reserve(
+      session,
+      'brand_official_discovery',
+      service.stageReserveUsd('same_product_search'),
+    )).not.toBeNull();
+  });
+
+  it('keeps the measured five-seller Zigzag live usage inside the 6.3-cent search pipeline budget', () => {
+    const service = new OpenAICostBudgetService(config({}));
+    const session = service.begin(
+      'https://www.musinsa.com/products/2782655',
+      service.searchPipelineBudgetUsd(),
+    );
+
+    settleStage(service, session, 'product_identification', 'gpt-5.6-luna', {
+      input_tokens: 6_208,
+      output_tokens: 253,
+      web_search_calls: 2,
+    });
+    settleStage(service, session, 'brand_official_discovery', 'gpt-5.6-luna', {
+      input_tokens: 8_944,
+      output_tokens: 199,
+      web_search_calls: 1,
+    }, service.stageReserveUsd('same_product_search'));
+    settleStage(service, session, 'same_product_search', 'gpt-5.6-luna', {
+      input_tokens: 22_950,
+      output_tokens: 1_186,
+      web_search_calls: 2,
+    });
+
+    expect(service.isExceeded(session)).toBe(false);
+    expect(service.remainingUsd(session)).toBeCloseTo(0.003414, 6);
   });
 });
 

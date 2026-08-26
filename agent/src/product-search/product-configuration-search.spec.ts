@@ -79,7 +79,7 @@ const aiCandidate = {
   },
 };
 
-function sellerResult(seller: 'OLIVE_YOUNG' | 'MUSINSA_BEAUTY' | 'COUPANG' | 'BRAND_OFFICIAL') {
+function sellerResult(seller: 'OLIVE_YOUNG' | 'MUSINSA_BEAUTY' | 'COUPANG' | 'ZIGZAG' | 'BRAND_OFFICIAL') {
   return {
     seller,
     availability: seller === 'COUPANG' ? 'AVAILABLE' as const : 'UNKNOWN' as const,
@@ -96,6 +96,7 @@ describe('product configuration search contract', () => {
         sellerResult('OLIVE_YOUNG'),
         sellerResult('MUSINSA_BEAUTY'),
         sellerResult('COUPANG'),
+        sellerResult('ZIGZAG'),
         sellerResult('BRAND_OFFICIAL'),
       ],
       warnings: [],
@@ -146,6 +147,7 @@ describe('product configuration search contract', () => {
         sellerResult('OLIVE_YOUNG'),
         sellerResult('MUSINSA_BEAUTY'),
         { ...sellerResult('COUPANG'), availability: 'UNKNOWN' },
+        sellerResult('ZIGZAG'),
         sellerResult('BRAND_OFFICIAL'),
       ],
       warnings: [],
@@ -156,7 +158,7 @@ describe('product configuration search contract', () => {
 describe('product configuration search prompt', () => {
   it('searches only another configuration of the same product and prohibits AI price conversion', () => {
     expect(PRODUCT_CONFIGURATION_SEARCH_PROMPT_VERSION).toBe(
-      'catchcatch-product-configuration-search-v2',
+      'catchcatch-product-configuration-search-v3',
     );
     expect(CATCHCATCH_PRODUCT_CONFIGURATION_SEARCH_INSTRUCTIONS).toContain(
       '다른 용량·구성 및 같은 제품 라인의 다른 버전 검색기',
@@ -178,6 +180,15 @@ describe('product configuration search prompt', () => {
     expect(prompt).toContain('"preferred_search_queries":["쿠팡 라운드랩 1025 독도 선크림"]');
     expect(prompt).toContain('"max_candidates_per_seller":2');
     expect(prompt).toContain('"normalized_product_name":"1025 독도 선크림"');
+
+    const zigzagPrompt = buildProductConfigurationSearchPrompt(
+      input,
+      ['zigzag.kr'],
+      null,
+      ['ZIGZAG'],
+      1,
+    );
+    expect(zigzagPrompt).toContain('"preferred_search_queries":["지그재그 라운드랩 1025 독도 선크림"]');
   });
 });
 
@@ -388,6 +399,7 @@ describe('ProductSearchService alternative-configuration mode', () => {
     expect(resolveConfigurationTargetSellers(input)).toEqual([
       'OLIVE_YOUNG',
       'MUSINSA_BEAUTY',
+      'ZIGZAG',
       'BRAND_OFFICIAL',
     ]);
     expect(buildAllowedSearchDomainsForSellers(
@@ -412,10 +424,11 @@ describe('ProductSearchService alternative-configuration mode', () => {
       new ConfigService({ PRODUCT_DATA_MODE: 'sample' }),
     );
     const result = await service.searchAlternativeConfigurations(input);
-    expect(result.seller_results).toHaveLength(3);
+    expect(result.seller_results).toHaveLength(4);
     expect(result.seller_results.map((entry) => entry.seller)).toEqual([
       'OLIVE_YOUNG',
       'MUSINSA_BEAUTY',
+      'ZIGZAG',
       'BRAND_OFFICIAL',
     ]);
     expect(result.seller_results.every((entry) => entry.availability === 'UNKNOWN')).toBe(true);

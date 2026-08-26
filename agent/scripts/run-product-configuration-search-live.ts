@@ -8,7 +8,7 @@ import { ProductIdentificationService } from '../src/product-identification/prod
 import { ProductSearchService } from '../src/product-search/product-search.service';
 import { OpenAICostBudgetService } from '../src/openai-cost/openai-cost-budget.service';
 
-const USAGE = 'npm run test:configurations:live -- <https-product-url> [--sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,BRAND_OFFICIAL] [--max-candidates=1] [--anchor-file=path.json] [--brand-domain=example.com]';
+const USAGE = 'npm run test:configurations:live -- <https-product-url> [--sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,ZIGZAG,BRAND_OFFICIAL] [--max-candidates=1] [--anchor-file=path.json] [--brand-domain=example.com]';
 
 async function main(): Promise<void> {
   const rawUrl = process.argv[2];

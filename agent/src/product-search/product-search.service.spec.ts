@@ -32,9 +32,9 @@ describe('ProductSearchService mode boundaries', () => {
     );
     const result = await service.searchSameProduct(input);
     expect(result.anchor_product).toEqual(input.anchor_product);
-    expect(result.seller_results).toHaveLength(4);
+    expect(result.seller_results).toHaveLength(5);
     expect(result.seller_results.map((item) => item.seller).sort()).toEqual(
-      ['BRAND_OFFICIAL', 'COUPANG', 'MUSINSA_BEAUTY', 'OLIVE_YOUNG'].sort(),
+      ['BRAND_OFFICIAL', 'COUPANG', 'MUSINSA_BEAUTY', 'OLIVE_YOUNG', 'ZIGZAG'].sort(),
     );
     expect(result.warnings.some((warning) => warning.includes('sample data'))).toBe(true);
 
@@ -81,6 +81,7 @@ describe('ProductSearchService mode boundaries', () => {
     ['https://www.oliveyoung.co.kr/store/goods/1', null, 'OLIVE_YOUNG'],
     ['https://www.musinsa.com/products/1', null, 'MUSINSA_BEAUTY'],
     ['https://www.coupang.com/vp/products/1', null, 'COUPANG'],
+    ['https://zigzag.kr/catalog/products/1', null, 'ZIGZAG'],
     ['https://brand.example.com/products/1', 'brand.example.com', 'BRAND_OFFICIAL'],
   ])('identifies the seller for %s', (url, officialDomain, expectedSeller) => {
     expect(identifySellerForUrl(url, officialDomain)).toBe(expectedSeller);
@@ -162,6 +163,7 @@ describe('ProductSearchService mode boundaries', () => {
       'oliveyoung.co.kr',
       'musinsa.com',
       'coupang.com',
+      'zigzag.kr',
       'brand.example.com',
     ]);
   });

@@ -22,6 +22,7 @@ jest.mock('openai', () => {
 
 // eslint-disable-next-line import/order
 import OpenAI from 'openai';
+import { OpenAICostBudgetService } from '../openai-cost/openai-cost-budget.service';
 import { ProductSearchService } from './product-search.service';
 
 const parseMock = (OpenAI as unknown as { __parse: jest.Mock }).__parse;
@@ -41,7 +42,7 @@ const input = {
 };
 
 function emptySellerResults() {
-  return ['OLIVE_YOUNG', 'MUSINSA_BEAUTY', 'COUPANG', 'BRAND_OFFICIAL'].map((seller) => ({
+  return ['OLIVE_YOUNG', 'MUSINSA_BEAUTY', 'COUPANG', 'ZIGZAG', 'BRAND_OFFICIAL'].map((seller) => ({
     seller,
     availability: 'UNKNOWN' as const,
     candidate_offer: null,
@@ -195,6 +196,7 @@ describe('brand-official domain discovery (T5)', () => {
       'oliveyoung.co.kr',
       'musinsa.com',
       'coupang.com',
+      'zigzag.kr',
     ]);
     expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(false);
   });
@@ -214,6 +216,7 @@ describe('brand-official domain discovery (T5)', () => {
       'oliveyoung.co.kr',
       'musinsa.com',
       'coupang.com',
+      'zigzag.kr',
     ]);
     expect(result.warnings.some((warning) => warning.includes('discovered by web_search'))).toBe(false);
   });
@@ -237,7 +240,7 @@ describe('brand-official domain discovery (T5)', () => {
       .mockResolvedValueOnce(searchResponse());
 
     await expect(createService().searchSameProduct(input)).resolves.toBeDefined();
-    expect(searchCallBody().tools[0].filters.allowed_domains).toHaveLength(3);
+    expect(searchCallBody().tools[0].filters.allowed_domains).toHaveLength(4);
   });
 
   it('does not fail the search when the discovery call itself throws', async () => {
@@ -247,8 +250,8 @@ describe('brand-official domain discovery (T5)', () => {
 
     const result = await createService().searchSameProduct(input);
 
-    expect(result.seller_results).toHaveLength(4);
-    expect(searchCallBody().tools[0].filters.allowed_domains).toHaveLength(3);
+    expect(result.seller_results).toHaveLength(5);
+    expect(searchCallBody().tools[0].filters.allowed_domains).toHaveLength(4);
   });
 
   it('skips optional official discovery when it would consume the required search reserve', async () => {
@@ -266,6 +269,38 @@ describe('brand-official domain discovery (T5)', () => {
     expect(result.warnings).toContain(
       'BRAND_OFFICIAL discovery was skipped to preserve the required seller-search cost budget; BRAND_OFFICIAL remains UNKNOWN.',
     );
+  });
+
+  it('runs official discovery after the highest observed Luna identification cost', async () => {
+    parseMock
+      .mockResolvedValueOnce(discoveryResponse(
+        'innisfree.com',
+        ['https://www.innisfree.com/kr/ko/Main.do'],
+      ))
+      .mockResolvedValueOnce(searchResponse());
+    const config = new ConfigService({
+      PRODUCT_DATA_MODE: 'web_search',
+      OPENAI_API_KEY: 'test-key',
+    });
+    const costBudget = new OpenAICostBudgetService(config);
+    const budgetSession = costBudget.begin(
+      input.product_url,
+      costBudget.searchPipelineBudgetUsd(),
+    );
+    const identification = costBudget.reserve(budgetSession, 'product_identification');
+    expect(identification).not.toBeNull();
+    costBudget.settle(identification!, 'gpt-5.6-luna', {
+      usage: { input_tokens: 6_117, output_tokens: 360 },
+      output: [
+        { type: 'web_search_call' },
+        { type: 'web_search_call' },
+      ],
+    });
+
+    await new ProductSearchService(config, costBudget).searchSameProduct(input);
+
+    expect(discoveryCalls()).toHaveLength(1);
+    expect(searchCallBody().tools[0].filters.allowed_domains).toContain('innisfree.com');
   });
 
   it('skips discovery entirely for an implausibly long brand name', async () => {

@@ -87,17 +87,22 @@ AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 
 
 ### 분석당 OpenAI 비용 예산
 
-기본 운영 예산은 `OPENAI_ANALYSIS_COST_BUDGET_USD=0.056`입니다. 환율 1달러
-1,600원과 부가세 10%를 보수적으로 적용하면 약 99원입니다. Agent는 Responses
+기본 운영 예산은 `OPENAI_ANALYSIS_COST_BUDGET_USD=0.068`입니다. 환율 1달러
+1,600원과 부가세 10%를 보수적으로 적용하면 약 120원입니다. Agent는 Responses
 API가 반환한 비캐시 입력, 캐시 입력, 출력 토큰과 `web_search_call` 수를 모델별
 단가로 계산해 `OPENAI_COST` 로그에 남깁니다.
 
-비용 배분 기본값은 상품 식별 $0.012, 공식몰 발견 $0.012, 필수 판매처 검색
+비용 배분 기본값은 상품 식별 $0.012, 공식몰 발견 $0.013, 필수 판매처 검색
 $0.027, AI 판단 $0.005입니다. 식별·공식몰 발견·필수 판매처 검색·판단은 기본적으로
 `gpt-5.6-luna`를 사용합니다. 공식몰 발견을
 실행하면 필수 검색 예약분을 침범하는 경우 발견을 생략하고
 `BRAND_OFFICIAL=UNKNOWN`으로 남깁니다. 필수 검색 자체의 예약분이 없으면
 `ANALYSIS_COST_BUDGET_EXCEEDED`로 fail closed합니다.
+
+이 기본값은 2026-08-17 Luna 실측에서 가장 비쌌던 식별 단계 뒤에도 공식몰 발견과
+필수 판매처 검색을 함께 예약하도록 100원 설정에서 상향한 값입니다. 호출 비용은
+응답 뒤에 확정되므로, 식별 실비가 관측 범위를 넘으면 공식몰 발견은 여전히 필수 검색을
+보호하기 위해 생략될 수 있습니다.
 
 Core가 식별과 검색에 공통 분석 ID를 전달하지 않으므로, Agent는 동일한
 `product_url`의 식별·검색 호출을 5분 TTL FIFO 세션으로 연결합니다. 동시 동일 URL
@@ -140,12 +145,12 @@ npm run test:search:live -- "https://www.musinsa.com/..."
 npm run test:configurations:live -- "https://www.coupang.com/vp/products/..."
 ```
 
-네 판매처를 후보 1개씩 조회하면서 실제 토큰 사용량을 확인하려면 다음처럼 실행합니다.
+다섯 판매처를 후보 1개씩 조회하면서 실제 토큰 사용량을 확인하려면 다음처럼 실행합니다.
 각 OpenAI 응답은 `OPENAI_USAGE` 로그에 토큰과 웹 검색 호출 수를 남기며 공개 API
 응답에는 이 진단값을 포함하지 않습니다.
 
 ```sh
-npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,BRAND_OFFICIAL --max-candidates=1
+npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --sellers=COUPANG,OLIVE_YOUNG,MUSINSA_BEAUTY,ZIGZAG,BRAND_OFFICIAL --max-candidates=1
 ```
 
 이미 저장한 기준 상품 JSON이 있으면 식별 호출 없이 재사용할 수 있습니다. 공식몰
@@ -173,12 +178,12 @@ npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --
 조회합니다. 직접 검색이 성공하면 OpenAI 호출 없이 현재 판매가·정상가·재고·상품명을
 읽어 `DIRECT_HTTP`/`CONTENT_VERIFIED` 출처로 반환합니다. 직접 검색 페이지 형식이
 바뀌거나 네트워크 오류가 나면 그때만 위 Luna 웹 검색 경로로 폴백합니다. 현재
-올리브영 검색 페이지는 접속 확인 화면, 쿠팡 검색 페이지는 서버 접근 거부가 있어
-두 판매처는 Luna 웹 검색 경로를 유지합니다.
+올리브영 검색 페이지는 접속 확인 화면, 쿠팡 검색 페이지는 서버 접근 거부가 있습니다.
+이 두 판매처와 별도 직접 조회를 구현하지 않은 지그재그는 Luna 웹 검색 경로를 유지합니다.
 
 ### 브랜드 공식몰 도메인 발견 (`web_search` 모드 전용)
 
-네 판매처 중 올리브영·무신사 뷰티·쿠팡은 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.
+다섯 판매처 중 올리브영·무신사 뷰티·쿠팡·지그재그는 도메인이 코드에 고정되어 있지만(`FIXED_SELLER_DOMAINS`), 브랜드 공식몰 도메인은 상품마다 다릅니다. 이전에는 `brand_id`로 조회하는 사람이 관리하는 레지스트리를 썼지만, 지금은 식별된 브랜드명으로부터 도메인 후보를 발견(discovery)한 뒤 코드가 검증합니다. 이 동작은 런타임 비용과 신뢰 경계를 함께 바꾸므로 아래 네 가지를 알고 써야 합니다.
 
 **요청당 비용.** `PRODUCT_DATA_MODE=web_search`이고 `anchor_product.brand`가 있으며 그 브랜드가 캐시에 없으면, 상품 검색 **이전에** 공식몰 발견용 `web_search`가 1회 추가됩니다. 다만 앞선 동적 발견 결과를 `registered_brand_official_domain`으로 재사용하면 발견 호출을 생략합니다. 발견 출력은 `candidate_domain`과 검색 근거 URL만 포함합니다. 일반 검색에서는 `OPENAI_BRAND_OFFICIAL_MODEL`(기본 Luna), 구성 검색에서 새로 발견할 때는 `OPENAI_CONFIGURATION_SEARCH_MODEL`을 사용합니다.
 
@@ -196,10 +201,10 @@ npm run test:configurations:live -- "https://www.coupang.com/vp/products/..." --
 - HTTPS 호스트명으로 정규화되지 않으면 거부
 - **퓨니코드(IDN) 도메인은 거부.** `new URL()`을 거치면 한글·키릴 등 비ASCII 호스트명은 `xn--`로 인코딩되므로, 이 한 가지 검사로 원본 유니코드 입력과 이미 인코딩된 입력이 모두 걸립니다. 진짜 도메인과 눈으로 구별되지 않는 호모그래프 주소를 막기 위한 것이며, 국내 화장품 브랜드가 IDN 호스트로 판매하는 경우는 없으므로 통째로 거부합니다.
 - 마켓플레이스·백화점몰·홈쇼핑·쇼핑몰 빌더 기본 호스트와 그 서브도메인은 거부. 한 도메인 아래 여러 브랜드가 입점하는 곳은 브랜드 자체 사이트가 아니기 때문입니다. 목록은 `BRAND_OFFICIAL_DOMAIN_BLOCKLIST`(`src/ai-contracts/seller-domain.policy.ts`)에 세 묶음(오픈마켓·가격비교 / 백화점·홈쇼핑 / 쇼핑몰 빌더)으로 정리해 두었습니다. 빌더 기본 호스트(`*.cafe24.com`, `*.myshopify.com` 등)를 막으면 실제로 거기서 공식몰을 운영하는 브랜드를 가끔 놓치지만, 그 경우 `BRAND_OFFICIAL`이 `UNKNOWN`으로 남을 뿐이라 안전한 쪽으로 실패합니다.
-- 고정 판매처 세 도메인과 그 서브도메인은 거부
+- 고정 판매처 네 도메인과 그 서브도메인은 거부
 - `.kr`로 끝나지 않는 도메인은 거부하지 **않고** 경고만 붙입니다(해외 스토어프론트 가능성).
 
-검색 근거 대조와 게이트를 모두 통과한 도메인만 후속 상품 `web_search`의 `allowed_domains`에 추가되고 `BRAND_OFFICIAL` 결과의 URL 검증 기준이 됩니다. 발견이 실패해도 고정 세 판매처 검색은 계속하고 `BRAND_OFFICIAL`은 `UNKNOWN`으로 남습니다.
+검색 근거 대조와 게이트를 모두 통과한 도메인만 후속 상품 `web_search`의 `allowed_domains`에 추가되고 `BRAND_OFFICIAL` 결과의 URL 검증 기준이 됩니다. 발견이 실패해도 고정 네 판매처 검색은 계속하고 `BRAND_OFFICIAL`은 `UNKNOWN`으로 남습니다.
 
 **발견된 도메인을 쓰면 항상 경고가 붙습니다.** 새로 발견했든 캐시에서 꺼냈든, 응답 `warnings`에 다음 경고가 무조건 들어갑니다(`buildBrandOfficialDomainWarnings`).
 
