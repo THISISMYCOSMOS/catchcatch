@@ -4,9 +4,11 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FormField } from "@/components/auth/form-field";
+import { LegalDocumentDialog } from "@/components/legal/legal-document-dialog";
 import { restoreAuthenticatedUser, sendPhoneOtp, verifyPhoneOtp, type PhoneAuthPurpose } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { authenticatedRoute } from "@/lib/api/user-preferences";
+import type { LegalDocumentId } from "@/lib/legal/documents";
 
 type Props = {
   purpose: PhoneAuthPurpose;
@@ -18,6 +20,8 @@ export function PhoneAuthForm({ purpose }: Props) {
   const [verifiedPhone, setVerifiedPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
+  const [openLegalDocument, setOpenLegalDocument] = useState<LegalDocumentId | null>(null);
   const [step, setStep] = useState<"phone" | "otp">("phone");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,8 +44,8 @@ export function PhoneAuthForm({ purpose }: Props) {
       setError("휴대폰 번호를 정확히 입력해주세요.");
       return;
     }
-    if (isSignup && !agreedToTerms) {
-      setError("서비스 이용약관에 동의해주세요.");
+    if (isSignup && (!agreedToTerms || !agreedToPrivacy)) {
+      setError("필수 약관에 모두 동의해주세요.");
       return;
     }
     setIsSubmitting(true);
@@ -68,7 +72,7 @@ export function PhoneAuthForm({ purpose }: Props) {
     setIsSubmitting(true);
     setError("");
     try {
-      const user = await verifyPhoneOtp(verifiedPhone, otp, isSignup && agreedToTerms);
+      const user = await verifyPhoneOtp(verifiedPhone, otp, isSignup && agreedToTerms && agreedToPrivacy);
       router.replace(await authenticatedRoute(user));
     } catch (cause) {
       setError(cause instanceof ApiError && cause.status === 401
@@ -126,20 +130,40 @@ export function PhoneAuthForm({ purpose }: Props) {
       />
       {isSignup ? (
         <div className="terms-group">
-          <label className="checkbox-label">
-            <input type="checkbox" checked={agreedToTerms} onChange={(event) => { setAgreedToTerms(event.target.checked); setError(""); }} />
-            <span>[필수] 서비스 이용약관에 동의합니다.</span>
-          </label>
+          <div className="terms-row">
+            <label className="checkbox-label">
+              <input type="checkbox" checked={agreedToTerms} onChange={(event) => { setAgreedToTerms(event.target.checked); setError(""); }} />
+              <span className="terms-copy">
+                <span className="terms-required">[필수]</span>
+                <span>서비스 이용약관에 동의합니다.</span>
+              </span>
+            </label>
+            <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("terms")}>보기</button>
+          </div>
+          <div className="terms-row">
+            <label className="checkbox-label">
+              <input type="checkbox" checked={agreedToPrivacy} onChange={(event) => { setAgreedToPrivacy(event.target.checked); setError(""); }} />
+              <span className="terms-copy">
+                <span className="terms-required">[필수]</span>
+                <span>개인정보 수집·이용에 동의합니다.</span>
+              </span>
+            </label>
+            <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("privacyConsent")}>보기</button>
+          </div>
+          <Link className="signup-privacy-policy-link" href="/privacy-policy">개인정보 처리방침</Link>
         </div>
       ) : null}
       <div className="button-stack">
-        <button className="button button-primary" type="submit" disabled={isSubmitting || !phone.trim() || (isSignup && !agreedToTerms)}>
+        <button className="button button-primary" type="submit" disabled={isSubmitting || !phone.trim() || (isSignup && (!agreedToTerms || !agreedToPrivacy))}>
           {isSubmitting ? "전송 중..." : "인증번호 받기"}
         </button>
         <Link className="button button-secondary" href={isSignup ? "/login" : "/signup"}>
           {isSignup ? "로그인" : "회원가입"}
         </Link>
       </div>
+      {openLegalDocument ? (
+        <LegalDocumentDialog documentId={openLegalDocument} onClose={() => setOpenLegalDocument(null)} />
+      ) : null}
     </form>
   );
 }
