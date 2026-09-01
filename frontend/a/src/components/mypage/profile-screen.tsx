@@ -6,14 +6,9 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useRouter } from "next/navigation";
 import { AppLogo } from "@/components/app-logo";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
-import { mockChangePassword } from "@/lib/mock/auth";
-import {
-  getMockUserProfile,
-  type MockUserProfile,
-  type MockUserProfileUpdate,
-  updateMockUserProfile,
-} from "@/lib/mock/profile";
-import { clearMockAuthentication, getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
+import type { MockUserProfile } from "@/lib/mock/profile";
+import { logout, restoreAuthenticatedUser, sendWithdrawalOtp, withdrawAccount } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/client";
 import { getEmailError, getPasswordError } from "@/lib/validation/auth";
 
 type ProfileLoadState = "loading" | "ready" | "error";
@@ -172,36 +167,133 @@ function ProfileDialog({
   );
 }
 
-function WithdrawalDialog({ onClose }: { onClose: () => void }) {
-  const [, setSupportNotice] = useState("");
+function WithdrawalDialog({
+  onClose,
+  onWithdraw,
+}: {
+  onClose: () => void;
+  onWithdraw: (token: string) => Promise<void>;
+}) {
+  const [step, setStep] = useState<"confirm" | "verify">("confirm");
+  const [token, setToken] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (step !== "verify") return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>("#withdrawal-otp")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [step]);
+
+  async function requestWithdrawalOtp() {
+    if (isSending || isSubmitting) return;
+    setIsSending(true);
+    setError("");
+    try {
+      await sendWithdrawalOtp();
+      setStep("verify");
+    } catch (requestError) {
+      setError(toWithdrawalErrorMessage(requestError, "send"));
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  async function confirmWithdrawal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isSubmitting || isSending) return;
+    if (!/^\d{6}$/.test(token)) {
+      setError("문자로 받은 6자리 인증번호를 입력해 주세요.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError("");
+    try {
+      await onWithdraw(token);
+    } catch (withdrawError) {
+      setError(toWithdrawalErrorMessage(withdrawError, "verify"));
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <ProfileDialog
       title="회원탈퇴"
-      description="탈퇴하면 저장한 관심상품과 분석 기록을 다시 확인할 수 없어요."
+      description={step === "confirm"
+        ? "탈퇴하면 저장한 관심상품과 분석 기록을 다시 확인할 수 없어요."
+        : "등록된 휴대폰으로 전송된 인증번호를 입력해 주세요."}
       initialFocusSelector=".profile-withdrawal-confirm"
       onClose={onClose}
       unifiedContent
     >
-      <button
-        className="button profile-withdrawal-confirm"
-        type="button"
-        onClick={() => setSupportNotice("회원 탈퇴는 지원되지 않으며 계정에는 아무 변경도 적용되지 않았습니다.")}
-      >
-        탈퇴하기
-      </button>
+      {step === "confirm" ? (
+        <button
+          className="button profile-withdrawal-confirm"
+          type="button"
+          disabled={isSending}
+          onClick={() => void requestWithdrawalOtp()}
+        >
+          {isSending ? "인증번호 전송 중..." : "휴대폰 인증 후 탈퇴"}
+        </button>
+      ) : (
+        <form className="profile-withdrawal-form" onSubmit={confirmWithdrawal} noValidate>
+          <FormField
+            id="withdrawal-otp"
+            label="인증번호"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={token}
+            onChange={(event) => {
+              setToken(event.target.value.replace(/\D/g, "").slice(0, 6));
+              setError("");
+            }}
+            placeholder="6자리 숫자"
+          />
+          <button
+            className="button profile-withdrawal-confirm"
+            type="submit"
+            disabled={isSubmitting || isSending || token.length !== 6}
+          >
+            {isSubmitting ? "탈퇴 처리 중..." : "인증 후 탈퇴"}
+          </button>
+          <button
+            className="profile-withdrawal-resend"
+            type="button"
+            disabled={isSending || isSubmitting}
+            onClick={() => void requestWithdrawalOtp()}
+          >
+            {isSending ? "다시 보내는 중..." : "인증번호 다시 받기"}
+          </button>
+        </form>
+      )}
+      {error ? <p className="profile-save-error" role="alert">{error}</p> : null}
     </ProfileDialog>
   );
 }
 
+function toWithdrawalErrorMessage(error: unknown, phase: "send" | "verify"): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) {
+      return "인증번호 요청이 너무 많아요. 잠시 후 다시 시도해 주세요.";
+    }
+    if (phase === "verify" && error.status === 401) {
+      return "인증번호가 올바르지 않거나 만료됐어요. 다시 확인해 주세요.";
+    }
+  }
+  return phase === "send"
+    ? "인증번호를 보내지 못했어요. 잠시 후 다시 시도해 주세요."
+    : "회원 탈퇴를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.";
+}
+
 function PasswordChangeDialog({
-  username,
   onClose,
-  onSuccess,
 }: {
-  username: string;
   onClose: () => void;
-  onSuccess: () => void;
 }) {
   const [values, setValues] = useState<PasswordChangeValues>(INITIAL_PASSWORD_VALUES);
   const [touched, setTouched] = useState<Partial<Record<PasswordChangeField, boolean>>>({});
@@ -257,20 +349,7 @@ function PasswordChangeDialog({
     setCurrentPasswordError("");
     setFormError("");
     try {
-      const result = await mockChangePassword(username, values.currentPassword, values.newPassword);
-      if (!result.ok) {
-        if (result.reason === "invalid_current_password") {
-          setCurrentPasswordError("현재 비밀번호가 일치하지 않습니다.");
-        } else {
-          setFormError("비밀번호를 변경하지 못했어요. 잠시 후 다시 시도해 주세요.");
-        }
-        return;
-      }
-
-      setValues(INITIAL_PASSWORD_VALUES);
-      setTouched({});
-      setVisibleFields({});
-      onSuccess();
+      setFormError("비밀번호 변경 API가 아직 연결되지 않았습니다.");
     } catch {
       setFormError("비밀번호를 변경하지 못했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
@@ -375,24 +454,23 @@ export function ProfileScreen() {
 
   const loadProfile = useCallback(async () => {
     setLoadState("loading");
-    const authenticatedRoute = getMockAuthenticatedRoute();
-    if (authenticatedRoute !== "/home") {
-      router.replace(authenticatedRoute);
-      return;
-    }
-    const username = getMockAuthenticatedUsername();
-    if (!username) {
+    const user = await restoreAuthenticatedUser();
+    if (!user) {
       router.replace("/login");
       return;
     }
 
     try {
-      const loadedProfile = await getMockUserProfile(username);
-      if (!loadedProfile) {
-        setLoadState("error");
-        return;
-      }
-      setProfile(loadedProfile);
+      setProfile({
+        id: user.id,
+        username: user.id,
+        nickname: null,
+        email: user.email,
+        phoneNumber: user.phone,
+        joinedAt: null,
+        profileImageUrl: null,
+        loginProvider: null,
+      });
       setLoadState("ready");
     } catch {
       setLoadState("error");
@@ -460,14 +538,14 @@ export function ProfileScreen() {
     setSaveNotice("");
   }
 
-  function handleLogout() {
-    clearMockAuthentication();
+  async function handleLogout() {
+    await logout();
     router.replace("/login");
   }
 
-  function completePasswordChange() {
-    setIsPasswordChangeOpen(false);
-    setSaveNotice("비밀번호가 변경되었어요.");
+  async function handleWithdrawal(token: string) {
+    await withdrawAccount(token);
+    router.replace("/login");
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -479,23 +557,7 @@ export function ProfileScreen() {
     setIsSaving(true);
     setSaveError("");
     try {
-      const update: MockUserProfileUpdate = {};
-      if (hasNicknameChange) update.nickname = normalizedNickname;
-      if (hasEmailChange) update.email = normalizedEmail;
-      const result = await updateMockUserProfile(profile.username, update);
-      if (!isMountedRef.current) return;
-      if (!result.ok) {
-        setSaveError(result.reason === "duplicate_email"
-          ? "이미 사용 중인 이메일이에요."
-          : "기본 정보를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
-        return;
-      }
-      setProfile(result.profile);
-      setEditableValues(toEditableValues(result.profile));
-      setTouched({});
-      setSaveNotice("기본 정보가 변경되었어요.");
-      setIsEditing(false);
-      focusEditButton();
+      setSaveError("프로필 수정 API가 아직 연결되지 않았습니다.");
     } catch {
       if (isMountedRef.current) {
         setSaveError("기본 정보를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
@@ -506,7 +568,8 @@ export function ProfileScreen() {
   }
 
   const displayEmail = profile?.email ?? "등록되지 않음";
-  const displayName = profile?.nickname ?? profile?.email ?? "";
+  const displayPhone = profile?.phoneNumber ?? "등록되지 않음";
+  const displayName = profile?.nickname ?? profile?.phoneNumber ?? profile?.email ?? "";
   const profileInitial = Array.from(displayName)[0]?.toUpperCase() ?? "";
 
   return (
@@ -546,7 +609,7 @@ export function ProfileScreen() {
                 <div className="profile-initial" aria-hidden="true">{profileInitial}</div>
                 <div className="profile-summary-copy">
                   <strong>{displayName}</strong>
-                  {profile.nickname ? <span>{profile.email ?? "이메일 등록 정보 없음"}</span> : null}
+                  {profile.nickname ? <span>{profile.phoneNumber ?? "휴대폰 등록 정보 없음"}</span> : null}
                 </div>
               </section>
 
@@ -598,6 +661,7 @@ export function ProfileScreen() {
                 ) : (
                   <dl className="profile-info-card">
                     <div><dt>닉네임</dt><dd className={profile.nickname ? undefined : "is-empty"}>{profile.nickname ?? "등록되지 않음"}</dd></div>
+                    <div><dt>휴대폰</dt><dd className={profile.phoneNumber ? undefined : "is-empty"}>{displayPhone}</dd></div>
                     <div><dt>이메일</dt><dd className={profile.email ? undefined : "is-empty"}>{displayEmail}</dd></div>
                   </dl>
                 )}
@@ -606,8 +670,8 @@ export function ProfileScreen() {
               <section className="profile-section profile-account-section" aria-labelledby="profile-account-title">
                 <h2 id="profile-account-title">계정 관리</h2>
                 <div className="profile-action-card">
-                  <button type="button" onClick={() => setIsPasswordChangeOpen(true)} aria-label="비밀번호 변경 창 열기">
-                    <span><strong>비밀번호 변경</strong></span>
+                  <button type="button" disabled aria-label="휴대폰 인증 사용 중">
+                    <span><strong>휴대폰 인증 사용 중</strong></span>
                     <ChevronIcon />
                   </button>
                   <button className="profile-danger-action" type="button" onClick={() => setIsWithdrawalOpen(true)} aria-label="회원 탈퇴 안내 열기">
@@ -625,12 +689,15 @@ export function ProfileScreen() {
 
         {isPasswordChangeOpen && profile ? (
           <PasswordChangeDialog
-            username={profile.username}
             onClose={() => setIsPasswordChangeOpen(false)}
-            onSuccess={completePasswordChange}
           />
         ) : null}
-        {isWithdrawalOpen ? <WithdrawalDialog onClose={() => setIsWithdrawalOpen(false)} /> : null}
+        {isWithdrawalOpen ? (
+          <WithdrawalDialog
+            onClose={() => setIsWithdrawalOpen(false)}
+            onWithdraw={handleWithdrawal}
+          />
+        ) : null}
       </main>
     </>
   );

@@ -7,8 +7,8 @@ import { DatePicker } from "@/components/home/date-picker";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { AppLogo } from "@/components/app-logo";
-import { getRecentAnalysisById, RECENT_ANALYSES } from "@/lib/mock/home";
-import { isMockAuthenticated } from "@/lib/mock/session";
+import { getRecentAnalyses, toRecentAnalysisItem, type RecentAnalysisItem } from "@/lib/api/analyses";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
 
 type AppliedRange = {
   startDate: string;
@@ -16,10 +16,6 @@ type AppliedRange = {
 };
 
 type OpenCalendar = "start" | "end" | null;
-
-function toDateInputValue(analyzedAt: string) {
-  return analyzedAt.replaceAll(".", "-");
-}
 
 export default function RecentAnalysesPage() {
   const router = useRouter();
@@ -33,24 +29,34 @@ export default function RecentAnalysesPage() {
   const [rangeError, setRangeError] = useState("");
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState("");
+  const [analyses, setAnalyses] = useState<RecentAnalysisItem[]>([]);
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      if (!isMockAuthenticated()) {
+    let cancelled = false;
+    void (async () => {
+      if (!await restoreAuthenticatedUser()) {
         router.replace("/login");
         return;
       }
+      const records = await getRecentAnalyses(20);
+      if (cancelled) return;
+      setAnalyses(records.map(toRecentAnalysisItem));
       setIsAuthorized(true);
-    }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+    })().catch(() => {
+      if (!cancelled) {
+        setAnalysisError("최근 분석 기록을 불러오지 못했어요.");
+        setIsAuthorized(true);
+      }
+    });
+    return () => { cancelled = true; };
   }, [router]);
 
-  const filteredAnalyses = useMemo(() => RECENT_ANALYSES.filter((item) => {
-    const analyzedAt = toDateInputValue(item.analyzedAt);
+  const filteredAnalyses = useMemo(() => analyses.filter((item) => {
+    const analyzedAt = item.analyzedAtIso;
     if (appliedRange.startDate && analyzedAt < appliedRange.startDate) return false;
     if (appliedRange.endDate && analyzedAt > appliedRange.endDate) return false;
     return true;
-  }), [appliedRange]);
+  }), [analyses, appliedRange]);
 
   const setStartCalendarOpen = useCallback((open: boolean) => {
     setOpenCalendar(open ? "start" : null);
@@ -75,7 +81,7 @@ export default function RecentAnalysesPage() {
   }
 
   function openPreviousAnalysis(id: string) {
-    if (!getRecentAnalysisById(id)) {
+    if (!analyses.some((analysis) => analysis.id === id)) {
       setAnalysisError("이전 분석 결과를 불러오지 못했어요.");
       setSelectedAnalysisId(null);
       return;
@@ -90,7 +96,7 @@ export default function RecentAnalysesPage() {
   }
 
   const selectedAnalysis = selectedAnalysisId
-    ? getRecentAnalysisById(selectedAnalysisId)
+    ? analyses.find((analysis) => analysis.id === selectedAnalysisId) ?? null
     : null;
 
   if (!isAuthorized) return null;

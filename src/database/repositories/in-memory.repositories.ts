@@ -482,6 +482,7 @@ export class InMemoryAnalysisPersistenceRepository implements AnalysisPersistenc
         warning_codes: [],
         created_at: now,
         updated_at: now,
+        expires_at: addDays(new Date(now), 7).toISOString(),
       };
       analysis.user_id = payload.userId;
       analysis.idempotency_key = payload.idempotencyKey;
@@ -494,6 +495,9 @@ export class InMemoryAnalysisPersistenceRepository implements AnalysisPersistenc
       analysis.result_json = null;
       analysis.warning_codes = [];
       analysis.updated_at = now;
+      if (existing) {
+        analysis.expires_at = addDays(new Date(now), 7).toISOString();
+      }
       if (!existing) {
         this.database.store.analyses.push(analysis);
       }
@@ -557,19 +561,22 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
       warning_codes: input.warning_codes ?? [],
       created_at: input.created_at ?? now,
       updated_at: input.updated_at ?? now,
+      expires_at: input.expires_at ?? addDays(new Date(input.created_at ?? now), 7).toISOString(),
     };
     this.database.store.analyses.push(row);
     return row;
   }
 
   async findById(id: string): Promise<Row<'analyses'> | null> {
-    return this.database.store.analyses.find((row) => row.id === id) ?? null;
+    return this.database.store.analyses.find((row) => (
+      row.id === id && isActiveAnalysis(row)
+    )) ?? null;
   }
 
   async findRecentByUserId(userId: string, limit: number): Promise<Row<'analyses'>[]> {
     return this.database.store.analyses
       .map((row, insertionIndex) => ({ row, insertionIndex }))
-      .filter(({ row }) => row.user_id === userId)
+      .filter(({ row }) => row.user_id === userId && isActiveAnalysis(row))
       .sort((left, right) => (
         right.row.created_at.localeCompare(left.row.created_at) ||
         right.insertionIndex - left.insertionIndex
@@ -580,7 +587,7 @@ export class InMemoryAnalysisRepository implements AnalysisRepository {
 
   async deleteByIdForUser(id: string, userId: string): Promise<boolean> {
     const index = this.database.store.analyses.findIndex((row) => (
-      row.id === id && row.user_id === userId
+      row.id === id && row.user_id === userId && isActiveAnalysis(row)
     ));
     if (index < 0) {
       return false;
@@ -954,6 +961,10 @@ function addDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
+}
+
+function isActiveAnalysis(row: Row<'analyses'>, now = new Date()): boolean {
+  return new Date(row.expires_at).getTime() > now.getTime();
 }
 
 function sortSaleRows(rows: readonly Row<'sale_calendar'>[]): Row<'sale_calendar'>[] {

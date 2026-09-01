@@ -41,12 +41,38 @@ export type ResolvedProduct = {
 
 export type BackendAnalysis = {
   id: string;
+  sourceUrl?: string;
   status: string;
   productId: string | null;
   allowedConclusions: string[];
   selectedCriteria: string[];
   warningCodes: string[];
   result: unknown;
+  createdAt?: string;
+  expiresAt?: string;
+  verdict?: string | null;
+  product?: {
+    id: string;
+    canonicalName: string;
+    brand: string | null;
+    productKey: string;
+    packageType: string | null;
+    imageUrl: string | null;
+  } | null;
+  analysisOffers?: Array<{
+    id: string;
+    sellerOfferId: string | null;
+    sellerIdentifier: string;
+    sellerName: string;
+    originalListPrice: number | null;
+    salePrice: number | null;
+    marketEffectivePrice: number | null;
+    userEffectivePrice: number | null;
+    shippingFee: number | null;
+    calculatedUnitPrice: number | null;
+    offerSnapshot: unknown;
+    createdAt: string;
+  }>;
 };
 
 export type AnalysisRequest = {

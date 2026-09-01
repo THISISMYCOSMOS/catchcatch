@@ -5,8 +5,8 @@ import { SavedProductsController } from '../saved-products/saved-products.contro
 import { SearchQuotaController } from '../search-quota/search-quota.controller';
 import { UserPreferencesController } from '../user-preferences/user-preferences.controller';
 
-const userA = { id: 'user-a', email: 'a@example.com' };
-const userB = { id: 'user-b', email: 'b@example.com' };
+const userA = { id: 'user-a', email: 'a@example.com', phone: null };
+const userB = { id: 'user-b', email: 'b@example.com', phone: null };
 
 describe('protected user controllers', () => {
   it('uses authenticated user id for POST /analyses instead of body userId', async () => {

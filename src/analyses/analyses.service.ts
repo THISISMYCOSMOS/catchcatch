@@ -91,6 +91,8 @@ export type AnalysisResponse = {
   selectedCriteria: string[];
   warningCodes: string[];
   result: Json | null;
+  createdAt: string;
+  expiresAt: string;
 };
 
 export type RecentAnalysisResponse = AnalysisResponse & {
@@ -104,6 +106,7 @@ export type ProductSummary = {
   brand: string | null;
   productKey: string;
   packageType: string | null;
+  imageUrl: string | null;
 };
 
 export type PriceHistoryPointResponse = {
@@ -265,7 +268,7 @@ export class AnalysesService {
     if (row.user_id !== userId) {
       throw new ForbiddenException('Cannot access another user analysis');
     }
-    return toAnalysisResponse(row);
+    return this.toDetailedAnalysisResponse(row);
   }
 
   async findRecentByUserId(
@@ -274,17 +277,7 @@ export class AnalysesService {
   ): Promise<RecentAnalysisResponse[]> {
     const limit = parseRecentLimit(rawLimit);
     const rows = await this.analyses.findRecentByUserId(userId, limit);
-    return Promise.all(rows.map(async (row) => {
-      const [product, offerSnapshots] = await Promise.all([
-        row.product_id ? this.products.findById(row.product_id) : Promise.resolve(null),
-        this.analysisOffers.findByAnalysisId(row.id),
-      ]);
-      return {
-        ...toAnalysisResponse(row),
-        product: product ? toProductSummary(product) : null,
-        analysisOffers: offerSnapshots.map(toAnalysisOfferSnapshotResponse),
-      };
-    }));
+    return Promise.all(rows.map((row) => this.toDetailedAnalysisResponse(row)));
   }
 
   async deleteForUser(id: string, userId: string): Promise<void> {
@@ -324,6 +317,20 @@ export class AnalysesService {
           left.observedAt.localeCompare(right.observedAt) ||
           (left.sellerName ?? '').localeCompare(right.sellerName ?? '')
         )),
+    };
+  }
+
+  private async toDetailedAnalysisResponse(
+    row: Row<'analyses'>,
+  ): Promise<RecentAnalysisResponse> {
+    const [product, offerSnapshots] = await Promise.all([
+      row.product_id ? this.products.findById(row.product_id) : Promise.resolve(null),
+      this.analysisOffers.findByAnalysisId(row.id),
+    ]);
+    return {
+      ...toAnalysisResponse(row),
+      product: product ? toProductSummary(product) : null,
+      analysisOffers: offerSnapshots.map(toAnalysisOfferSnapshotResponse),
     };
   }
 
@@ -472,6 +479,8 @@ function toAnalysisResponse(row: Row<'analyses'>): AnalysisResponse {
     selectedCriteria: row.selected_criteria,
     warningCodes: row.warning_codes,
     result: row.result_json,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
   };
 }
 
@@ -482,6 +491,7 @@ function toProductSummary(product: Row<'products'>): ProductSummary {
     brand: product.brand,
     productKey: product.product_key,
     packageType: product.package_type,
+    imageUrl: product.image_url,
   };
 }
 

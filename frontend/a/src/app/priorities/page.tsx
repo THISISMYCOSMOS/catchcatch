@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
-import { mockSavePriorities } from "@/lib/mock/auth";
-import { completeMockOnboarding, getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
-import { getStoredPriorities, PRIORITIES, PriorityId, savePriorities } from "@/lib/priorities";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
+import type { AuthUser } from "@/lib/api/client";
+import { getUserPreferences, saveUserPreferences } from "@/lib/api/user-preferences";
+import { PRIORITIES, PriorityId } from "@/lib/priorities";
 import styles from "./priorities.module.css";
 
 export default function PrioritiesPage() {
@@ -17,25 +18,31 @@ export default function PrioritiesPage() {
   const [rejectedPriority, setRejectedPriority] = useState<PriorityId | null>(null);
   const [showCompletionCue, setShowCompletionCue] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const limitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const canSubmit = selected.length >= 1 && !isSubmitting;
+  const canSubmit = selected.length === 3 && !isSubmitting;
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/priorities") {
-        router.replace(authenticatedRoute);
+    let cancelled = false;
+    void (async () => {
+      const authenticatedUser = await restoreAuthenticatedUser();
+      if (!authenticatedUser) {
+        router.replace("/login");
         return;
       }
-      const username = getMockAuthenticatedUsername();
-      if (username) setSelected(getStoredPriorities(username));
+      const preferences = await getUserPreferences(authenticatedUser.id);
+      if (cancelled) return;
+      setUser(authenticatedUser);
+      if (preferences) setSelected(preferences.selectedCriteria as PriorityId[]);
       setIsAuthorized(true);
-    }, 0);
+    })().catch(() => {
+      if (!cancelled) router.replace("/login");
+    });
 
     return () => {
-      window.clearTimeout(authorizationCheck);
+      cancelled = true;
       if (limitTimerRef.current) clearTimeout(limitTimerRef.current);
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     };
@@ -92,27 +99,17 @@ export default function PrioritiesPage() {
     setIsSubmitting(true);
     setError("");
     try {
-      const result = await mockSavePriorities();
-      if (result.ok) {
-        const username = getMockAuthenticatedUsername();
-        if (!username) {
-          router.replace("/login");
-          return;
-        }
-        savePriorities(username, selected);
-        completeMockOnboarding();
-        router.replace("/home");
+      if (!user) {
+        router.replace("/login");
+        return;
       }
+      await saveUserPreferences(user.id, selected);
+      router.replace("/home");
     } catch {
       setError("우선순위를 저장하는 중 예상하지 못한 오류가 발생했습니다.");
     } finally {
       setIsSubmitting(false);
     }
-  }
-
-  function handleSkip() {
-    completeMockOnboarding();
-    router.replace("/home");
   }
 
   if (!isAuthorized) return null;
@@ -170,9 +167,6 @@ export default function PrioritiesPage() {
           onClick={handleComplete}
         >
           {isSubmitting ? "저장 중..." : "선택 완료"}
-        </button>
-        <button className="priority-skip" type="button" onClick={handleSkip}>
-          건너뛰기
         </button>
       </div>
     </AuthShell>

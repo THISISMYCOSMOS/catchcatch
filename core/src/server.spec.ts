@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { AnalysisRequest } from './contracts.js';
 import { AnalysisHandler, createCoreServer } from './server.js';
+import { BackendPublicApiProxy } from './public-backend.proxy.js';
 
 test('requires bearer authentication and returns standardized errors', async (context) => {
   const server = createCoreServer(fakeOrchestrator(), ['https://app.example.com']);
@@ -40,6 +42,7 @@ test('allows only configured CORS origins', async (context) => {
   });
 
   assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://app.example.com');
+  assert.equal(allowed.headers.get('access-control-allow-credentials'), 'true');
   assert.equal(rejectedPreflight.status, 403);
   assert.equal(rejectedRequest.status, 403);
   assert.equal(rejectedPreflight.headers.get('access-control-allow-origin'), null);
@@ -70,7 +73,7 @@ test('rejects non-JSON and unknown request fields', async (context) => {
   assert.equal((await unknownFieldResponse.json() as { code: string }).code, 'UNKNOWN_REQUEST_FIELD');
 });
 
-test('passes a validated analysis request to the orchestrator', async (context) => {
+test('passes an HttpOnly-cookie access token to the orchestrator as backend authorization', async (context) => {
   let received: AnalysisRequest | null = null;
   const orchestrator = {
     async analyze(input: AnalysisRequest) {
@@ -101,7 +104,7 @@ test('passes a validated analysis request to the orchestrator', async (context) 
   const response = await fetch(`${baseUrl}/api/v1/analyses`, {
     method: 'POST',
     headers: {
-      authorization: 'Bearer access-token',
+      cookie: 'catchcatch_access_token=cookie-access-token',
       'content-type': 'application/json',
       'x-request-id': 'request-123',
     },
@@ -114,8 +117,69 @@ test('passes a validated analysis request to the orchestrator', async (context) 
   assert.deepEqual(received, {
     sourceUrl: 'https://www.coupang.com/vp/products/1',
     idempotencyKey: 'request-123',
-    authorization: 'Bearer access-token',
+    authorization: 'Bearer cookie-access-token',
   });
+});
+
+test('proxies allowlisted public backend routes and rewrites the auth cookie path', async (context) => {
+  const received: Array<{ method: string; path: string; authorization: string | null; body: unknown }> = [];
+  const backend = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const bodyText = Buffer.concat(chunks).toString('utf8');
+    received.push({
+      method: request.method ?? 'GET',
+      path: request.url ?? '/',
+      authorization: request.headers.authorization ?? null,
+      body: bodyText ? JSON.parse(bodyText) : null,
+    });
+    response.statusCode = 200;
+    response.setHeader('content-type', 'application/json');
+    response.setHeader('set-cookie', 'catchcatch_refresh_token=token; Path=/auth; HttpOnly; Secure');
+    response.end(JSON.stringify({ ok: true }));
+  });
+  context.after(() => backend.close());
+  const backendBaseUrl = new URL(await listen(backend));
+
+  const server = createCoreServer(
+    fakeOrchestrator(),
+    [],
+    new BackendPublicApiProxy(backendBaseUrl, 1_000),
+  );
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const response = await fetch(`${baseUrl}/api/v1/auth/phone/send-otp?source=web`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer optional-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ phone: '+821012345678', purpose: 'login' }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.match(response.headers.get('set-cookie') ?? '', /Path=\/api\/v1\/auth/);
+  assert.deepEqual(received, [{
+    method: 'POST',
+    path: '/auth/phone/send-otp?source=web',
+    authorization: 'Bearer optional-token',
+    body: { phone: '+821012345678', purpose: 'login' },
+  }]);
+});
+
+test('does not proxy non-allowlisted backend routes', async (context) => {
+  const proxy = {
+    async forward() { return false; },
+  };
+  const server = createCoreServer(fakeOrchestrator(), [], proxy);
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const response = await fetch(`${baseUrl}/api/v1/internal/admin`);
+
+  assert.equal(response.status, 404);
 });
 
 test('proxies authenticated recent, detail, and delete requests', async (context) => {

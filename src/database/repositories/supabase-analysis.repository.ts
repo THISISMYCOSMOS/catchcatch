@@ -25,6 +25,7 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
       .from('analyses')
       .select('*')
       .eq('id', id)
+      .gt('expires_at', new Date().toISOString())
       .maybeSingle();
     throwOnSupabaseError('find analysis by id', error);
     return data;
@@ -35,6 +36,7 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
       .from('analyses')
       .select('*')
       .eq('user_id', userId)
+      .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(limit);
     throwOnSupabaseError('find recent analyses by user_id', error);
@@ -47,6 +49,7 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
       .delete()
       .eq('id', id)
       .eq('user_id', userId)
+      .gt('expires_at', new Date().toISOString())
       .select('id')
       .maybeSingle();
     throwOnSupabaseError('delete analysis by id and user_id', error);
@@ -64,6 +67,7 @@ export class SupabaseAnalysisRepository implements AnalysisRepository {
       .from('analyses')
       .update(input)
       .eq('id', id)
+      .gt('expires_at', new Date().toISOString())
       .select('*')
       .maybeSingle();
     throwOnSupabaseError('update analysis result', error);

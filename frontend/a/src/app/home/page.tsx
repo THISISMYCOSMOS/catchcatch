@@ -3,12 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { HomeScreen } from "@/components/home/home-screen";
-import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
-import { getFrontendMockWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/mock/weekly-analysis-usage";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
+import { getUserPreferences } from "@/lib/api/user-preferences";
+import { getWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/api/search-quota";
+import { getRecentAnalyses, toRecentAnalysisItem, type RecentAnalysisItem } from "@/lib/api/analyses";
 
 type HomeSession = {
   username: string;
   weeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
+  recentAnalyses: RecentAnalysisItem[];
 };
 
 export default function HomePage() {
@@ -16,29 +19,39 @@ export default function HomePage() {
   const [homeSession, setHomeSession] = useState<HomeSession | null>(null);
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/home") {
-        router.replace(authenticatedRoute);
-        return;
-      }
-      const username = getMockAuthenticatedUsername();
-      if (!username) {
+    let cancelled = false;
+    void (async () => {
+      const user = await restoreAuthenticatedUser();
+      if (!user) {
         router.replace("/login");
         return;
       }
+      const preferences = await getUserPreferences(user.id);
+      if (!preferences) {
+        router.replace("/priorities");
+        return;
+      }
+      const [weeklyAnalysisUsage, recentRecords] = await Promise.all([
+        getWeeklyAnalysisUsage(),
+        getRecentAnalyses(3),
+      ]);
+      if (cancelled) return;
       setHomeSession({
-        username,
-        weeklyAnalysisUsage: getFrontendMockWeeklyAnalysisUsage(username),
+        username: user.phone ?? user.email ?? user.id,
+        weeklyAnalysisUsage,
+        recentAnalyses: recentRecords.map(toRecentAnalysisItem),
       });
-    }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+    })().catch(() => {
+      if (!cancelled) router.replace("/login");
+    });
+    return () => { cancelled = true; };
   }, [router]);
 
   return homeSession ? (
     <HomeScreen
       username={homeSession.username}
       initialWeeklyAnalysisUsage={homeSession.weeklyAnalysisUsage}
+      recentAnalyses={homeSession.recentAnalyses}
     />
   ) : null;
 }

@@ -4,11 +4,12 @@ import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { InternalApiGuard } from './internal-api.guard';
 import { AuthService } from './auth.service';
+import { SessionAuthGuard } from './session-auth.guard';
 
 @Module({
   imports: [DatabaseModule],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard, InternalApiGuard],
-  exports: [AuthService, AuthGuard, InternalApiGuard],
+  providers: [AuthService, AuthGuard, SessionAuthGuard, InternalApiGuard],
+  exports: [AuthService, AuthGuard, SessionAuthGuard, InternalApiGuard],
 })
 export class AuthModule {}

@@ -14,11 +14,17 @@ export class SupabaseSearchQuotaRepository implements SearchQuotaRepository {
   ) {}
 
   async findByUserId(userId: string): Promise<Row<'user_search_quotas'> | null> {
-    const { data, error } = await this.client
-      .from('user_search_quotas')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const { data, error } = await (this.client as CatchCatchSupabaseClient & {
+      rpc: (
+        fn: 'get_user_search_quota',
+        args: { p_user_id: string },
+      ) => {
+        maybeSingle: () => Promise<{
+          data: Row<'user_search_quotas'> | null;
+          error: SupabaseFailure | null;
+        }>;
+      };
+    }).rpc('get_user_search_quota', { p_user_id: userId }).maybeSingle();
     throwOnSupabaseError('find user search quota by user_id', error);
     return data;
   }

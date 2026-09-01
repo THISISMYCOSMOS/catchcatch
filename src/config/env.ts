@@ -3,6 +3,11 @@ export type SupabaseEnv = {
   supabaseServiceRoleKey: string;
 };
 
+export type SupabaseAuthEnv = {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+};
+
 export function loadSupabaseEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): SupabaseEnv {
@@ -17,6 +22,22 @@ export function loadSupabaseEnv(
   }
 
   return { supabaseUrl, supabaseServiceRoleKey };
+}
+
+export function loadSupabaseAuthEnv(
+  source: NodeJS.ProcessEnv = process.env,
+): SupabaseAuthEnv {
+  const supabaseUrl = source.SUPABASE_URL;
+  const supabaseAnonKey = source.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl) {
+    throw new Error('SUPABASE_URL is required');
+  }
+  if (!supabaseAnonKey) {
+    throw new Error('SUPABASE_ANON_KEY is required');
+  }
+
+  return { supabaseUrl, supabaseAnonKey };
 }
 
 export function loadInternalApiToken(

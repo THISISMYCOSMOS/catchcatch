@@ -5,7 +5,7 @@ export type MockUserProfile = {
   username: string;
   nickname: string | null;
   email: string | null;
-  phoneNumber: null;
+  phoneNumber: string | null;
   joinedAt: null;
   profileImageUrl: null;
   loginProvider: null;

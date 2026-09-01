@@ -7,19 +7,13 @@ import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame
 import { daysInMonth, firstWeekdayOfMonth, toIsoDate } from "@/components/home/date-utils";
 import { SaleDetailDialog } from "@/components/sale-calendar/sale-detail-dialog";
 import {
-  SALE_CALENDAR_ITEMS,
-  SALE_CALENDAR_MONTH,
   type SaleCalendarItem,
   type SaleStatus,
 } from "@/lib/mock/sale-calendar";
-import { getMockAuthenticatedRoute } from "@/lib/mock/session";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
+import { getSaleCalendar } from "@/lib/api/sale-calendar";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
-
-function parseMonth(value: string) {
-  const [year, month] = value.split("-").map(Number);
-  return { year, month: month - 1 };
-}
 
 function formatIsoDate(value: string) {
   const [, month, day] = value.split("-").map(Number);
@@ -81,18 +75,23 @@ function SaleCard({ sale, onSelect }: { sale: SaleCalendarItem; onSelect: (id: s
 export function SaleCalendarScreen() {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [sales, setSales] = useState<SaleCalendarItem[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
-  const [{ year, month }, setVisibleMonth] = useState(() => parseMonth(SALE_CALENDAR_MONTH));
+  const [{ year, month }, setVisibleMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
   const [todayIsoDate] = useState(() => getLocalIsoDate(new Date()));
   const visibleMonthLabel = `${year}년 ${month + 1}월`;
   const visibleMonthValue = `${year}-${String(month + 1).padStart(2, "0")}`;
   const visibleSales = useMemo(() => {
     const monthStart = toIsoDate(year, month, 1);
     const monthEnd = toIsoDate(year, month, daysInMonth(year, month));
-    return SALE_CALENDAR_ITEMS.filter((sale) => sale.startDate <= monthEnd && sale.endDate >= monthStart);
-  }, [month, year]);
+    return sales.filter((sale) => sale.startDate <= monthEnd && sale.endDate >= monthStart);
+  }, [month, sales, year]);
   const selectedSale = selectedSaleId
-    ? SALE_CALENDAR_ITEMS.find((sale) => sale.id === selectedSaleId) ?? null
+    ? sales.find((sale) => sale.id === selectedSaleId) ?? null
     : null;
   const calendarDays = useMemo(() => {
     const firstWeekday = firstWeekdayOfMonth(year, month);
@@ -116,15 +115,23 @@ export function SaleCalendarScreen() {
   }, [month, visibleSales, year]);
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/home") {
-        router.replace(authenticatedRoute);
+    let cancelled = false;
+    void (async () => {
+      if (!await restoreAuthenticatedUser()) {
+        router.replace("/login");
         return;
       }
+      const items = await getSaleCalendar();
+      if (cancelled) return;
+      setSales(items);
       setIsAuthorized(true);
-    }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+    })().catch(() => {
+      if (!cancelled) {
+        setLoadError("세일 일정을 불러오지 못했어요.");
+        setIsAuthorized(true);
+      }
+    });
+    return () => { cancelled = true; };
   }, [router]);
 
   if (!isAuthorized) return null;
@@ -178,6 +185,7 @@ export function SaleCalendarScreen() {
 
       <section className="upcoming-sales" aria-labelledby="upcoming-sales-title">
         <h2 id="upcoming-sales-title">예정된 세일</h2>
+        {loadError ? <p className="form-error" role="alert">{loadError}</p> : null}
         {visibleSales.length > 0 ? (
           <div className="sale-list">
             {visibleSales.map((sale) => <SaleCard sale={sale} onSelect={setSelectedSaleId} key={sale.id} />)}

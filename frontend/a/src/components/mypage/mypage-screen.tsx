@@ -4,11 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
-import { getMockUserProfile } from "@/lib/mock/profile";
-import {
-  getMockAuthenticatedRoute,
-  getMockAuthenticatedUsername,
-} from "@/lib/mock/session";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
 
 const MY_PAGE_ITEMS = [
   { label: "내 정보", href: "/mypage/profile" },
@@ -23,30 +19,25 @@ function ChevronIcon() {
 
 export function MyPageScreen() {
   const router = useRouter();
-  const [accountEmail, setAccountEmail] = useState("");
+  const [accountIdentity, setAccountIdentity] = useState("");
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
     let isCancelled = false;
-    const authorizationCheck = window.setTimeout(async () => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/home") {
-        router.replace(authenticatedRoute);
-        return;
-      }
-      const authenticatedUsername = getMockAuthenticatedUsername();
-      if (!authenticatedUsername) {
+    void (async () => {
+      const user = await restoreAuthenticatedUser();
+      if (!user) {
         router.replace("/login");
         return;
       }
-      const profile = await getMockUserProfile(authenticatedUsername);
       if (isCancelled) return;
-      setAccountEmail(profile?.email ?? "이메일 등록 정보 없음");
+      setAccountIdentity(user.phone ?? user.email ?? "계정 정보 없음");
       setIsAuthorized(true);
-    }, 0);
+    })().catch(() => {
+      if (!isCancelled) router.replace("/login");
+    });
     return () => {
       isCancelled = true;
-      window.clearTimeout(authorizationCheck);
     };
   }, [router]);
 
@@ -58,7 +49,7 @@ export function MyPageScreen() {
         <h1 className="section-page-title" id="mypage-title">마이페이지</h1>
         <div className="mypage-profile-summary">
           <span>로그인 계정</span>
-          <p><strong>{accountEmail}</strong></p>
+          <p><strong>{accountIdentity}</strong></p>
         </div>
       </section>
 

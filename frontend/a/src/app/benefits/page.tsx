@@ -17,13 +17,15 @@ import {
   hasAnyBenefits,
   MusinsaGrade,
   MUSINSA_GRADE_OPTIONS,
+  normalizeBenefitProfile,
   OliveYoungGrade,
   OLIVE_YOUNG_GRADE_OPTIONS,
   saveBenefitProfile,
   ZigzagGrade,
   ZIGZAG_GRADE_OPTIONS,
 } from "@/lib/benefits";
-import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
+import { getUserPreferences, saveUserPreferences, type UserPreferences } from "@/lib/api/user-preferences";
 
 type GradeOption<T extends string> = { readonly id: T; readonly label: string };
 
@@ -159,45 +161,115 @@ function MembershipGradeDropdown<T extends string>({
   );
 }
 
+function benefitProfileFromPreferences(
+  preferences: UserPreferences,
+  fallback: BenefitProfile,
+): BenefitProfile {
+  const gradeByProvider = new Map(
+    preferences.shoppingGrades.map((item) => [item.provider.toUpperCase(), item.grade]),
+  );
+  const otherMembership = preferences.memberships.find((item) => (
+    item.enabled && !["COUPANG", "OLIVE_YOUNG", "MUSINSA", "ZIGZAG"].includes(item.provider.toUpperCase())
+  ));
+  return normalizeBenefitProfile({
+    ...fallback,
+    coupangWow: preferences.memberships.some((item) => (
+      item.enabled && item.provider.toUpperCase() === "COUPANG" && item.membershipType.toUpperCase() === "WOW"
+    )),
+    oliveYoungGrade: gradeByProvider.get("OLIVE_YOUNG")?.toLowerCase() ?? "notUsing",
+    musinsaGrade: gradeByProvider.get("MUSINSA")?.toLowerCase() ?? "notUsing",
+    zigzagGrade: gradeByProvider.get("ZIGZAG")?.toLowerCase() ?? "notUsing",
+    otherMembership: {
+      enabled: Boolean(otherMembership),
+      name: otherMembership?.provider ?? "",
+    },
+    completed: true,
+  });
+}
+
+function benefitsPayload(
+  profile: BenefitProfile,
+  existing: UserPreferences,
+): Pick<UserPreferences, "memberships" | "shoppingGrades" | "cards"> {
+  const memberships: UserPreferences["memberships"] = [];
+  if (profile.coupangWow) {
+    memberships.push({ provider: "COUPANG", membershipType: "WOW", enabled: true });
+  }
+  if (profile.otherMembership.enabled && profile.otherMembership.name.trim()) {
+    memberships.push({
+      provider: profile.otherMembership.name.trim(),
+      membershipType: "OTHER",
+      enabled: true,
+    });
+  }
+
+  const shoppingGrades: UserPreferences["shoppingGrades"] = [];
+  if (profile.oliveYoungGrade !== "notUsing") {
+    shoppingGrades.push({ provider: "OLIVE_YOUNG", grade: profile.oliveYoungGrade.toUpperCase() });
+  }
+  if (profile.musinsaGrade !== "notUsing") {
+    shoppingGrades.push({ provider: "MUSINSA", grade: profile.musinsaGrade.toUpperCase() });
+  }
+  if (profile.zigzagGrade !== "notUsing") {
+    shoppingGrades.push({ provider: "ZIGZAG", grade: profile.zigzagGrade.toUpperCase() });
+  }
+  return { memberships, shoppingGrades, cards: existing.cards };
+}
+
 export default function BenefitsPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [profile, setProfile] = useState<BenefitProfile | null>(null);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/home") {
-        router.replace(authenticatedRoute);
-        return;
-      }
-
-      const authenticatedUsername = getMockAuthenticatedUsername();
-      if (!authenticatedUsername) {
+    let cancelled = false;
+    void (async () => {
+      const user = await restoreAuthenticatedUser();
+      if (!user) {
         router.replace("/login");
         return;
       }
-
-      setUsername(authenticatedUsername);
-      setProfile(getBenefitProfile(authenticatedUsername));
+      const preferences = await getUserPreferences(user.id);
+      if (!preferences) {
+        router.replace("/priorities");
+        return;
+      }
+      if (cancelled) return;
+      const identity = user.phone ?? user.email ?? user.id;
+      setUserId(user.id);
+      setUsername(identity);
+      setPreferences(preferences);
+      setProfile(benefitProfileFromPreferences(preferences, getBenefitProfile(identity)));
       setIsAuthorized(true);
-    }, 0);
+    })().catch(() => {
+      if (!cancelled) router.replace("/home");
+    });
 
-    return () => window.clearTimeout(authorizationCheck);
+    return () => { cancelled = true; };
   }, [router]);
 
   if (!isAuthorized || !profile) return null;
 
   const canSave = hasAnyBenefits(profile) && !isSaving;
 
-  function handleSave(event: FormEvent<HTMLFormElement>) {
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSave || !username || !profile) return;
+    if (!canSave || !username || !profile || !userId || !preferences) return;
     setIsSaving(true);
-    saveBenefitProfile(username, profile);
-    router.replace("/home");
+    setSaveError("");
+    try {
+      await saveUserPreferences(userId, preferences.selectedCriteria, benefitsPayload(profile, preferences));
+      saveBenefitProfile(username, profile);
+      router.replace("/home");
+    } catch {
+      setSaveError("혜택 정보를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -312,7 +384,8 @@ export default function BenefitsPage() {
             </section>
 
             <div className="benefits-actions">
-              <button className="button button-primary" type="submit" disabled={!canSave}>
+          {saveError ? <p className="form-error" role="alert">{saveError}</p> : null}
+          <button className="button button-primary" type="submit" disabled={!canSave}>
                 {isSaving ? "저장 중..." : "혜택 저장하기"}
               </button>
             </div>

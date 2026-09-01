@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
 import styles from "@/components/preferences/preferences.module.css";
-import { getMockAuthenticatedRoute, getMockAuthenticatedUsername } from "@/lib/mock/session";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
 
 type NotificationSettings = {
   sale: boolean;
@@ -68,20 +68,17 @@ export function SettingsScreen() {
   const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_SETTINGS);
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      const authenticatedRoute = getMockAuthenticatedRoute();
-      if (authenticatedRoute !== "/home") {
-        router.replace(authenticatedRoute);
-        return;
-      }
-      if (!getMockAuthenticatedUsername()) {
+    let cancelled = false;
+    void restoreAuthenticatedUser().then((user) => {
+      if (!user) {
         router.replace("/login");
         return;
       }
+      if (cancelled) return;
       setSettings(readSettings());
       setIsAuthorized(true);
-    }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+    });
+    return () => { cancelled = true; };
   }, [router]);
 
   if (!isAuthorized) return null;

@@ -8,6 +8,7 @@ import {
   RecentAnalysesRequest,
 } from './contracts.js';
 import { CoreError } from './errors.js';
+import { PublicApiProxy } from './public-backend.proxy.js';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -21,6 +22,7 @@ export type AnalysisHandler = {
 export function createCoreServer(
   orchestrator: AnalysisHandler,
   allowedOrigins: readonly string[],
+  publicApiProxy?: PublicApiProxy,
 ) {
   return createServer(async (request, response) => {
     const requestId = safeRequestId(request.headers['x-request-id']) ?? randomUUID();
@@ -32,8 +34,11 @@ export function createCoreServer(
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' });
       }
+      if (publicApiProxy && await publicApiProxy.forward(request, response, requestUrl)) {
+        return;
+      }
       if (request.method === 'POST' && requestUrl.pathname === '/api/v1/analyses') {
-        const authorization = requireBearerToken(request);
+        const authorization = requireAccessAuthorization(request);
         requireJsonContentType(request);
         const body = await readJsonBody(request);
         rejectUnknownKeys(body, ['sourceUrl', 'idempotencyKey']);
@@ -47,7 +52,7 @@ export function createCoreServer(
         return sendJson(response, 201, result);
       }
       if (request.method === 'GET' && requestUrl.pathname === '/api/v1/analyses/recent') {
-        const authorization = requireBearerToken(request);
+        const authorization = requireAccessAuthorization(request);
         const limit = optionalSingleQueryParameter(requestUrl, 'limit');
         const result = await orchestrator.findRecentAnalyses({
           authorization,
@@ -57,12 +62,12 @@ export function createCoreServer(
       }
       const analysisId = matchAnalysisId(requestUrl.pathname);
       if (request.method === 'GET' && analysisId !== null) {
-        const authorization = requireBearerToken(request);
+        const authorization = requireAccessAuthorization(request);
         const result = await orchestrator.findAnalysis({ analysisId, authorization });
         return sendJson(response, 200, result);
       }
       if (request.method === 'DELETE' && analysisId !== null) {
-        const authorization = requireBearerToken(request);
+        const authorization = requireAccessAuthorization(request);
         await orchestrator.deleteAnalysis({ analysisId, authorization });
         response.statusCode = 204;
         response.end();
@@ -99,8 +104,9 @@ function applyCors(
   if (origin) {
     response.setHeader('access-control-allow-origin', origin);
     response.setHeader('vary', 'Origin');
+    response.setHeader('access-control-allow-credentials', 'true');
     response.setHeader('access-control-allow-headers', 'authorization, content-type, x-request-id');
-    response.setHeader('access-control-allow-methods', 'GET,POST,DELETE,OPTIONS');
+    response.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   }
   if (request.method === 'OPTIONS') {
     response.statusCode = origin && allowedOrigins.includes(origin) ? 204 : 403;
@@ -119,12 +125,26 @@ function setSecurityHeaders(response: ServerResponse, requestId: string): void {
   response.setHeader('x-request-id', requestId);
 }
 
-function requireBearerToken(request: IncomingMessage): string {
+const ACCESS_COOKIE_NAME = 'catchcatch_access_token';
+
+function requireAccessAuthorization(request: IncomingMessage): string {
   const value = request.headers.authorization;
-  if (!value || !/^Bearer\s+\S+$/i.test(value)) {
-    throw new CoreError(401, 'AUTHORIZATION_REQUIRED', '로그인이 필요합니다.');
+  if (value && /^Bearer\s+\S+$/i.test(value)) {
+    return value;
   }
-  return value;
+
+  const rawCookie = request.headers.cookie;
+  if (rawCookie) {
+    const prefix = `${ACCESS_COOKIE_NAME}=`;
+    const cookie = rawCookie.split(';')
+      .map((candidate) => candidate.trim())
+      .find((candidate) => candidate.startsWith(prefix));
+    if (cookie) {
+      return `Bearer ${decodeURIComponent(cookie.slice(prefix.length))}`;
+    }
+  }
+
+  throw new CoreError(401, 'AUTHORIZATION_REQUIRED', '로그인이 필요합니다.');
 }
 
 function requireJsonContentType(request: IncomingMessage): void {

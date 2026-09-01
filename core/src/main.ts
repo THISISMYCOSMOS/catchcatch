@@ -4,6 +4,7 @@ import { BackendHttpClient } from './backend-http.client.js';
 import { loadConfig } from './config.js';
 import { HttpJsonClient } from './http-json.client.js';
 import { createCoreServer } from './server.js';
+import { BackendPublicApiProxy } from './public-backend.proxy.js';
 
 const config = loadConfig();
 const commonInternalHeaders = {
@@ -26,6 +27,10 @@ const orchestrator = new AnalysisOrchestrator(
   backend,
   config.allowedProductDomains,
 );
-const server = createCoreServer(orchestrator, config.allowedOrigins);
+const publicApiProxy = new BackendPublicApiProxy(
+  config.backendBaseUrl,
+  config.upstreamTimeoutMs,
+);
+const server = createCoreServer(orchestrator, config.allowedOrigins, publicApiProxy);
 
 server.listen(config.port, '0.0.0.0');

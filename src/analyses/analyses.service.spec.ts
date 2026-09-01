@@ -442,6 +442,7 @@ describe('AnalysesService', () => {
       warning_codes: [],
       created_at: '2026-07-26T00:00:00.000Z',
       updated_at: '2026-07-26T00:00:00.000Z',
+      expires_at: '2026-08-02T00:00:00.000Z',
     };
     const persistence: AnalysisPersistenceRepository = {
       persistAnalysisAtomically: jest.fn().mockResolvedValue(createdRow),
@@ -474,6 +475,7 @@ describe('AnalysesService', () => {
       status: 'READY_FOR_JUDGMENT',
     }));
     expect(result.id).toBe(generatedId);
+    expect(result.expiresAt).toBe('2026-08-02T00:00:00.000Z');
   });
 
   it('stores FAILED status when calculation throws', async () => {

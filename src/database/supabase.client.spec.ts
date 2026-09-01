@@ -1,5 +1,5 @@
-import { loadSupabaseEnv } from '../config/env';
-import { createSupabaseServerClient } from './supabase.client';
+import { loadSupabaseAuthEnv, loadSupabaseEnv } from '../config/env';
+import { createSupabaseAuthClient, createSupabaseServerClient } from './supabase.client';
 
 describe('Supabase server client', () => {
   it('creates a client when all required environment variables exist', () => {
@@ -22,5 +22,21 @@ describe('Supabase server client', () => {
     expect(() => loadSupabaseEnv({
       SUPABASE_URL: 'https://example.supabase.co',
     })).toThrow('SUPABASE_SERVICE_ROLE_KEY is required');
+  });
+
+  it('creates a separate public-key client for OTP authentication', () => {
+    const client = createSupabaseAuthClient({
+      supabaseUrl: 'https://example.supabase.co',
+      supabaseAnonKey: 'test-anon-key',
+    });
+
+    expect(client).toBeDefined();
+    expect(typeof client.auth.signInWithOtp).toBe('function');
+  });
+
+  it('requires SUPABASE_ANON_KEY for the public Auth client', () => {
+    expect(() => loadSupabaseAuthEnv({
+      SUPABASE_URL: 'https://example.supabase.co',
+    })).toThrow('SUPABASE_ANON_KEY is required');
   });
 });

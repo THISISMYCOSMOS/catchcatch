@@ -16,6 +16,7 @@ export type SaleCalendarItem = {
   targetCategory: string | null;
   conditions: string | null;
   markedDates: readonly string[];
+  landingUrl?: string | null;
 };
 
 export const SALE_CALENDAR_MONTH = "2026-07";

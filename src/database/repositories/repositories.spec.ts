@@ -292,19 +292,43 @@ describe('repository implementations', () => {
       user_id: 'user-1',
       source_url: 'https://example.com/first',
       created_at: '2026-07-01T00:00:00.000Z',
+      expires_at: '2999-07-08T00:00:00.000Z',
     }));
     const second = await analyses.create(analysisInput({
       user_id: 'user-1',
       source_url: 'https://example.com/second',
       created_at: '2026-07-02T00:00:00.000Z',
+      expires_at: '2999-07-09T00:00:00.000Z',
     }));
     await analyses.create(analysisInput({
       user_id: 'user-2',
       source_url: 'https://example.com/other',
       created_at: '2026-07-03T00:00:00.000Z',
+      expires_at: '2999-07-10T00:00:00.000Z',
     }));
 
     await expect(analyses.findRecentByUserId('user-1', 2)).resolves.toEqual([second, first]);
+  });
+
+  it('hides expired analyses, permits owner deletion of active analyses, and preserves price history', async () => {
+    const expired = await analyses.create(analysisInput({
+      id: 'expired-analysis',
+      user_id: 'user-1',
+      expires_at: '2000-01-01T00:00:00.000Z',
+    }));
+    const active = await analyses.create(analysisInput({
+      id: 'active-analysis',
+      user_id: 'user-1',
+      expires_at: '2999-01-01T00:00:00.000Z',
+    }));
+    await priceHistory.createMany([priceHistoryInput({ analysis_id: active.id })]);
+
+    await expect(analyses.findById(expired.id)).resolves.toBeNull();
+    await expect(analyses.findRecentByUserId('user-1', 10)).resolves.toEqual([active]);
+    await expect(analyses.deleteByIdForUser(expired.id, 'user-1')).resolves.toBe(false);
+    await expect(analyses.deleteByIdForUser(active.id, 'other-user')).resolves.toBe(false);
+    await expect(analyses.deleteByIdForUser(active.id, 'user-1')).resolves.toBe(true);
+    expect(database.store.priceHistory[0].analysis_id).toBeNull();
   });
 
   it('stores analysis offer snapshots and prevents duplicate analysis seller rows', async () => {
@@ -425,6 +449,7 @@ describe('repository implementations', () => {
       offerSnapshots: [],
       priceHistoryEntries: [],
     }));
+    failed.expires_at = '2000-01-01T00:00:00.000Z';
     const completed = await analysisPersistence.persistAnalysisAtomically(analysisPersistencePayload({
       idempotencyKey: 'retry-after-failure',
       status: 'COMPLETED',
@@ -438,6 +463,7 @@ describe('repository implementations', () => {
 
     expect(completed.id).toBe(failed.id);
     expect(completed.status).toBe('COMPLETED');
+    expect(new Date(completed.expires_at).getTime()).toBeGreaterThan(Date.now());
     expect(database.store.analyses).toHaveLength(1);
     expect(await analysisOffers.findByAnalysisId(completed.id)).toHaveLength(1);
     expect(database.store.priceHistory).toHaveLength(1);
@@ -623,9 +649,11 @@ describe('repository implementations', () => {
       warning_codes: [],
       created_at: '2026-07-26T00:00:00.000Z',
       updated_at: '2026-07-26T00:00:00.000Z',
+      expires_at: '2999-08-02T00:00:00.000Z',
     };
     const maybeSingle = jest.fn().mockResolvedValue({ data: analysisRow, error: null });
-    const eq = jest.fn(() => ({ maybeSingle }));
+    const gt = jest.fn(() => ({ maybeSingle }));
+    const eq = jest.fn(() => ({ gt }));
     const select = jest.fn(() => ({ eq }));
     const from = jest.fn(() => ({ select }));
     const repository = new SupabaseAnalysisRepository({ from } as never);
@@ -633,11 +661,13 @@ describe('repository implementations', () => {
     await expect(repository.findById('analysis-1')).resolves.toEqual(analysisRow);
     expect(from).toHaveBeenCalledWith('analyses');
     expect(eq).toHaveBeenCalledWith('id', 'analysis-1');
+    expect(gt).toHaveBeenCalledWith('expires_at', expect.any(String));
   });
 
   it('returns null for a missing Supabase analysis without throwing', async () => {
     const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
-    const eq = jest.fn(() => ({ maybeSingle }));
+    const gt = jest.fn(() => ({ maybeSingle }));
+    const eq = jest.fn(() => ({ gt }));
     const select = jest.fn(() => ({ eq }));
     const from = jest.fn(() => ({ select }));
     const repository = new SupabaseAnalysisRepository({ from } as never);
@@ -650,7 +680,8 @@ describe('repository implementations', () => {
       data: null,
       error: { message: 'TypeError: fetch failed' },
     });
-    const eq = jest.fn(() => ({ maybeSingle }));
+    const gt = jest.fn(() => ({ maybeSingle }));
+    const eq = jest.fn(() => ({ gt }));
     const select = jest.fn(() => ({ eq }));
     const from = jest.fn(() => ({ select }));
     const repository = new SupabaseAnalysisRepository({ from } as never);
@@ -708,6 +739,7 @@ function analysisRow(
     warning_codes: [],
     created_at: '2026-07-01T00:00:00.000Z',
     updated_at: '2026-07-01T00:00:00.000Z',
+    expires_at: '2999-07-08T00:00:00.000Z',
     ...overrides,
   };
 }

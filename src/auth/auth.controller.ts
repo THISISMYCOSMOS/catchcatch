@@ -1,57 +1,70 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthenticatedUser } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
 import { CurrentAccessToken } from './current-access-token.decorator';
-import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { SignupDto } from './dto/signup.dto';
-import { AuthGuard } from './auth.guard';
+import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
+import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
+import { WithdrawAccountDto } from './dto/withdraw-account.dto';
+import { ACCESS_COOKIE_NAME, AuthGuard } from './auth.guard';
+import { SessionAuthGuard } from './session-auth.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly service: AuthService) {}
 
-  @Post('signup')
-  async signup(
-    @Body() body: SignupDto,
-    @Res({ passthrough: true }) response: CookieResponse,
-  ) {
-    const result = await this.service.signup(body);
-    setRefreshCookie(response, result.refreshToken);
-    return toPublicAuthResponse(result);
+  @Post('phone/send-otp')
+  sendPhoneOtp(@Body() body: SendPhoneOtpDto) {
+    return this.service.sendPhoneOtp(body);
   }
 
-  @Post('login')
-  async login(
-    @Body() body: LoginDto,
+  @Post('phone/verify-otp')
+  async verifyPhoneOtp(
+    @Body() body: VerifyPhoneOtpDto,
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
-    const result = await this.service.login(body);
-    setRefreshCookie(response, result.refreshToken);
+    const result = await this.service.verifyPhoneOtp(body);
+    setAuthCookies(response, result);
     return toPublicAuthResponse(result);
   }
 
   @Post('refresh')
   async refresh(
-    @Body() body: RefreshTokenDto,
     @Req() request: CookieRequest,
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
-    const refreshToken = getRefreshTokenFromCookie(request) ?? body.refreshToken;
+    const refreshToken = getRefreshTokenFromCookie(request);
     const result = await this.service.refresh({ refreshToken });
-    setRefreshCookie(response, result.refreshToken);
+    setAuthCookies(response, result);
     return toPublicAuthResponse(result);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(SessionAuthGuard)
   @Post('logout')
   async logout(
     @CurrentAccessToken() accessToken: string,
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
     const result = await this.service.logout(accessToken);
-    clearRefreshCookie(response);
+    clearAuthCookies(response);
+    return result;
+  }
+
+  @UseGuards(SessionAuthGuard)
+  @Post('account/reauth/send-otp')
+  sendWithdrawalOtp(@CurrentUser() user: AuthenticatedUser) {
+    return this.service.sendWithdrawalOtp(user);
+  }
+
+  @UseGuards(SessionAuthGuard)
+  @Delete('account')
+  async withdraw(
+    @Body() body: WithdrawAccountDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) response: CookieResponse,
+  ) {
+    const result = await this.service.withdraw(user, body.token);
+    clearAuthCookies(response);
     return result;
   }
 
@@ -72,6 +85,12 @@ type CookieResponse = {
 };
 
 const REFRESH_COOKIE_NAME = 'catchcatch_refresh_token';
+const ACCESS_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'strict',
+  path: '/',
+};
 const REFRESH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
@@ -81,27 +100,37 @@ const REFRESH_COOKIE_OPTIONS = {
 
 function toPublicAuthResponse(result: {
   user: unknown;
-  accessToken: string | null;
   expiresAt: number | null;
 }) {
   return {
     user: result.user,
-    accessToken: result.accessToken,
     expiresAt: result.expiresAt,
   };
 }
 
-function setRefreshCookie(
+function setAuthCookies(
   response: CookieResponse,
-  refreshToken: string | null,
+  result: {
+    accessToken: string | null;
+    refreshToken: string | null;
+    expiresAt: number | null;
+  },
 ): void {
-  if (!refreshToken) {
-    return;
+  if (result.accessToken) {
+    response.cookie(ACCESS_COOKIE_NAME, result.accessToken, {
+      ...ACCESS_COOKIE_OPTIONS,
+      ...(result.expiresAt
+        ? { maxAge: Math.max(result.expiresAt * 1000 - Date.now(), 0) }
+        : {}),
+    });
   }
-  response.cookie(REFRESH_COOKIE_NAME, refreshToken, REFRESH_COOKIE_OPTIONS);
+  if (result.refreshToken) {
+    response.cookie(REFRESH_COOKIE_NAME, result.refreshToken, REFRESH_COOKIE_OPTIONS);
+  }
 }
 
-function clearRefreshCookie(response: CookieResponse): void {
+function clearAuthCookies(response: CookieResponse): void {
+  response.clearCookie(ACCESS_COOKIE_NAME, ACCESS_COOKIE_OPTIONS);
   response.clearCookie(REFRESH_COOKIE_NAME, {
     path: REFRESH_COOKIE_OPTIONS.path,
     httpOnly: true,
@@ -110,15 +139,15 @@ function clearRefreshCookie(response: CookieResponse): void {
   });
 }
 
-function getRefreshTokenFromCookie(request: CookieRequest): string | null {
+function getRefreshTokenFromCookie(request: CookieRequest): string | undefined {
   const rawCookie = Array.isArray(request.headers.cookie)
     ? request.headers.cookie[0]
     : request.headers.cookie;
   if (!rawCookie) {
-    return null;
+    return undefined;
   }
   const cookies = rawCookie.split(';').map((cookie) => cookie.trim());
   const prefix = `${REFRESH_COOKIE_NAME}=`;
   const cookie = cookies.find((candidate) => candidate.startsWith(prefix));
-  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : undefined;
 }

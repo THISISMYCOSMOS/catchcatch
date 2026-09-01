@@ -105,6 +105,78 @@ export type Database = {
         };
         Relationships: [];
       };
+      abuse_subjects: {
+        Row: {
+          id: string;
+          phone_hmac: string;
+          tombstone_until: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          phone_hmac: string;
+          tombstone_until?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          phone_hmac?: string;
+          tombstone_until?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      user_abuse_subjects: {
+        Row: {
+          user_id: string;
+          abuse_subject_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          abuse_subject_id: string;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          abuse_subject_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      terms_consents: {
+        Row: {
+          id: string;
+          user_id: string;
+          terms_version: string;
+          document_sha256: string;
+          accepted_at: string;
+          withdrawn_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          terms_version: string;
+          document_sha256: string;
+          accepted_at: string;
+          withdrawn_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          terms_version?: string;
+          document_sha256?: string;
+          accepted_at?: string;
+          withdrawn_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       user_memberships: {
         Row: {
           id: string;
@@ -567,6 +639,7 @@ export type Database = {
           warning_codes: WarningCode[];
           created_at: string;
           updated_at: string;
+          expires_at: string;
         };
         Insert: {
           id?: string;
@@ -582,6 +655,7 @@ export type Database = {
           warning_codes?: WarningCode[];
           created_at?: string;
           updated_at?: string;
+          expires_at?: string;
         };
         Update: {
           id?: string;
@@ -597,6 +671,7 @@ export type Database = {
           warning_codes?: WarningCode[];
           created_at?: string;
           updated_at?: string;
+          expires_at?: string;
         };
         Relationships: [
           {
@@ -756,11 +831,96 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      consume_user_search_quota: {
+        Args: {
+          p_user_id: string;
+          p_idempotency_key: string;
+          p_now?: string;
+        };
+        Returns: Json;
+      };
+      detach_user_abuse_subject: {
+        Args: {
+          p_user_id: string;
+          p_now?: string;
+        };
+        Returns: undefined;
+      };
+      get_user_search_quota: {
+        Args: {
+          p_user_id: string;
+        };
+        Returns: Row<'user_search_quotas'>[];
+      };
+      ensure_phone_user_access: {
+        Args: {
+          p_user_id: string;
+          p_phone_hmac: string;
+          p_terms_version: string;
+          p_document_sha256: string;
+        };
+        Returns: boolean;
+      };
+      has_current_terms_consent: {
+        Args: {
+          p_user_id: string;
+          p_terms_version: string;
+          p_document_sha256: string;
+        };
+        Returns: boolean;
+      };
       persist_analysis_atomically: {
         Args: {
           payload: Json;
         };
         Returns: Row<'analyses'>;
+      };
+      purge_expired_analyses: {
+        Args: {
+          p_now?: string;
+        };
+        Returns: number;
+      };
+      purge_expired_abuse_subjects: {
+        Args: {
+          p_now?: string;
+        };
+        Returns: number;
+      };
+      purge_expired_terms_consents: {
+        Args: {
+          p_now?: string;
+        };
+        Returns: number;
+      };
+      resolve_search_quota_subject: {
+        Args: {
+          p_user_id: string;
+        };
+        Returns: string;
+      };
+      record_terms_consent: {
+        Args: {
+          p_user_id: string;
+          p_terms_version: string;
+          p_document_sha256: string;
+          p_accepted_at?: string;
+        };
+        Returns: Row<'terms_consents'>;
+      };
+      upsert_phone_abuse_subject: {
+        Args: {
+          p_user_id: string;
+          p_phone_hmac: string;
+        };
+        Returns: string;
+      };
+      withdraw_user_account: {
+        Args: {
+          p_user_id: string;
+          p_now?: string;
+        };
+        Returns: boolean;
       };
     };
     Enums: Record<string, never>;

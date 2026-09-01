@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppLogo } from "@/components/app-logo";
 import { FormField } from "@/components/auth/form-field";
-import { isMockAuthenticated } from "@/lib/mock/session";
+import { restoreAuthenticatedUser } from "@/lib/api/auth";
 import styles from "./inquiry.module.css";
 
 export function InquiryScreen() {
@@ -15,14 +15,15 @@ export function InquiryScreen() {
   const [content, setContent] = useState("");
 
   useEffect(() => {
-    const authorizationCheck = window.setTimeout(() => {
-      if (!isMockAuthenticated()) {
+    let cancelled = false;
+    void restoreAuthenticatedUser().then((user) => {
+      if (!user) {
         router.replace("/login");
         return;
       }
-      setIsAuthorized(true);
-    }, 0);
-    return () => window.clearTimeout(authorizationCheck);
+      if (!cancelled) setIsAuthorized(true);
+    });
+    return () => { cancelled = true; };
   }, [router]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {

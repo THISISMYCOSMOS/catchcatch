@@ -3,22 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
-import {
-  DEMO_PRODUCT,
-  DEMO_PRODUCT_URL,
-  ProductPreview,
-  RECENT_ANALYSES,
-  getRecentAnalysisById,
-} from "@/lib/mock/home";
+import { DEMO_PRODUCT, DEMO_PRODUCT_URL, ProductPreview } from "@/lib/mock/home";
 import { AnalysisLimitDialog } from "@/components/home/analysis-limit-dialog";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
-import { getMockAuthenticatedUsername } from "@/lib/mock/session";
 import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
 import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
-import { mockAnalyzeProduct, type AnalysisFailureStatus } from "@/lib/mock/analysis";
-import { consumeFrontendMockWeeklyAnalysis, type WeeklyAnalysisUsageViewModel } from "@/lib/mock/weekly-analysis-usage";
+import { createAnalysis, toAnalysisFailureStatus, type AnalysisFailureStatus } from "@/lib/api/analyses";
+import type { RecentAnalysisItem } from "@/lib/api/analyses";
+import { getWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/api/search-quota";
 import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
@@ -27,6 +21,7 @@ type AnalysisRequest = { productUrl: string; platform: "쿠팡" };
 type HomeScreenProps = {
   username: string;
   initialWeeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
+  recentAnalyses: RecentAnalysisItem[];
 };
 
 const ANALYSIS_ERROR_MESSAGES: Record<AnalysisFailureStatus, { title: string; description: string }> = {
@@ -98,7 +93,6 @@ function ProductPreviewCard({ product, isSelecting, onSelect }: {
     event.preventDefault();
     onSelect();
   }
-
   return (
     <article
       className={`product-preview product-preview-popover${isSelecting ? " is-selecting" : ""}`}
@@ -115,15 +109,12 @@ function ProductPreviewCard({ product, isSelecting, onSelect }: {
         <p>{product.sellerName}</p>
         <strong>{formatPrice(product.price)}</strong>
       </div>
-      <div className="product-description">
-        <span>상품 설명</span>
-        <p>{product.description}</p>
-      </div>
+      <div className="product-description"><span>상품 설명</span><p>{product.description}</p></div>
     </article>
   );
 }
 
-export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenProps) {
+export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyses }: HomeScreenProps) {
   const router = useRouter();
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState("");
@@ -142,19 +133,17 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [isAnalysisLimitDialogOpen, setIsAnalysisLimitDialogOpen] = useState(false);
   const [isBenefitPromptVisible, setIsBenefitPromptVisible] = useState(false);
-  const selectedAnalysis = selectedAnalysisId ? getRecentAnalysisById(selectedAnalysisId) : null;
+  const selectedAnalysis = selectedAnalysisId ? recentAnalyses.find((item) => item.id === selectedAnalysisId) ?? null : null;
   const isWeeklyLimitReached = weeklyAnalysisUsage.remainingCount === 0 || weeklyAnalysisUsage.limitReached;
   const analysisErrorMessage = ANALYSIS_ERROR_MESSAGES[analysisErrorStatus];
 
   useEffect(() => {
     const promptCheck = window.setTimeout(() => {
-      const username = getMockAuthenticatedUsername();
-      if (!username) return;
       const profile = getBenefitProfile(username);
       setIsBenefitPromptVisible(!profile.completed && !isBenefitPromptDismissed(username));
     }, 0);
     return () => window.clearTimeout(promptCheck);
-  }, []);
+  }, [username]);
 
   useEffect(() => {
     const savedLink = window.sessionStorage.getItem(ANALYSIS_LINK_STORAGE_KEY);
@@ -215,8 +204,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
   function dismissBenefitsCard(event: ReactMouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
-    const username = getMockAuthenticatedUsername();
-    if (username) dismissBenefitPrompt(username);
+    dismissBenefitPrompt(username);
     setIsBenefitPromptVisible(false);
   }
 
@@ -225,16 +213,13 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
     setLinkValue(value);
     setLinkError("");
     const validation = validateCoupangProductUrl(value);
-    const matchedProduct = validation.ok
-      ? { ...DEMO_PRODUCT, sourceUrl: validation.productUrl }
-      : null;
+    const matchedProduct = validation.ok ? { ...DEMO_PRODUCT, sourceUrl: validation.productUrl } : null;
     setProduct(matchedProduct);
     setIsProductPopoverOpen(Boolean(matchedProduct));
   }
 
   function handleSelectProduct() {
     if (productSelectionTimerRef.current !== null) return;
-
     setIsProductSelecting(true);
     productSelectionTimerRef.current = window.setTimeout(() => {
       productSelectionTimerRef.current = null;
@@ -262,20 +247,15 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
     startAnalysisTimer();
 
     try {
-      const result = await mockAnalyzeProduct(request.productUrl);
+      const result = await createAnalysis(request.productUrl);
       stopAnalysisTimer();
-      if (!result.ok) {
-        setAnalysisErrorStatus(result.status);
-        setAnalysisState("error");
-        isAnalyzingRef.current = false;
-        return;
-      }
-      setWeeklyAnalysisUsage(consumeFrontendMockWeeklyAnalysis(username));
+      query.set("analysisId", result.analysisId);
+      setWeeklyAnalysisUsage(await getWeeklyAnalysisUsage());
       window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, request.productUrl);
       router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
-    } catch {
+    } catch (error) {
       stopAnalysisTimer();
-      setAnalysisErrorStatus("INTERNAL_ERROR");
+      setAnalysisErrorStatus(toAnalysisFailureStatus(error));
       setAnalysisState("error");
       isAnalyzingRef.current = false;
     }
@@ -424,7 +404,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage }: HomeScreenP
             <Link className="recent-more" href="/recent-analyses">더보기 <ArrowIcon /></Link>
           </div>
           <div className="recent-list">
-            {RECENT_ANALYSES.slice(0, 3).map((item) => (
+            {recentAnalyses.map((item) => (
               <RecentAnalysisCard
                 key={item.id}
                 item={item}

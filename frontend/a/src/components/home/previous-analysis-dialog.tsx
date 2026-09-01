@@ -1,10 +1,10 @@
 "use client";
 
 import { KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef } from "react";
-import { RecentAnalysisItem } from "@/lib/mock/home";
+import type { RecentAnalysisSummary } from "@/components/home/recent-analysis-card";
 
 type PreviousAnalysisDialogProps = {
-  analysis: RecentAnalysisItem;
+  analysis: RecentAnalysisSummary;
   onClose: () => void;
 };
 
@@ -16,8 +16,8 @@ function CloseIcon() {
   );
 }
 
-function formatPrice(price: number) {
-  return `${price.toLocaleString("ko-KR")}원`;
+function formatPrice(price: number | null) {
+  return price === null ? "가격 확인 필요" : `${price.toLocaleString("ko-KR")}원`;
 }
 
 export function PreviousAnalysisDialog({ analysis, onClose }: PreviousAnalysisDialogProps) {

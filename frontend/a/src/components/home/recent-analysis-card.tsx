@@ -1,12 +1,19 @@
 import { KeyboardEvent, MouseEvent } from "react";
-import { RecentAnalysisItem } from "@/lib/mock/home";
+export type RecentAnalysisSummary = {
+  id: string;
+  productName: string;
+  sellerName: string;
+  analyzedAt: string;
+  price: number | null;
+  imageUrl: string | null;
+};
 
-function formatPrice(price: number) {
-  return price.toLocaleString("ko-KR") + "원";
+function formatPrice(price: number | null) {
+  return price === null ? "가격 확인 필요" : price.toLocaleString("ko-KR") + "원";
 }
 
 type RecentAnalysisCardProps = {
-  item: RecentAnalysisItem;
+  item: RecentAnalysisSummary;
   onSelect: (id: string) => void;
   variant?: "compact" | "history";
 };
