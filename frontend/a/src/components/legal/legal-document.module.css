@@ -27,7 +27,10 @@
 .dialogHeader {
   position: relative;
   min-height: 64px;
-  padding: 18px 58px 16px 20px;
+  padding: 0 10px 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   flex: none;
   border-bottom: 1px solid var(--divider);
   background: var(--panel-surface);
@@ -35,20 +38,68 @@
 
 .dialogHeader h2 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 750;
-  line-height: 1.4;
+  flex: 1;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
   letter-spacing: -.02em;
 }
 
-.close {
+.dialogTabs {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+}
+
+.dialogTab {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dialogTab::after {
+  content: "";
   position: absolute;
-  top: 10px;
-  right: 10px;
+  right: 0;
+  bottom: -7px;
+  left: 0;
+  height: 1px;
+  background: transparent;
+}
+
+.dialogTabActive {
+  color: var(--text);
+}
+
+.dialogTabActive::after { background: var(--gold-text); }
+
+.dialogTab:focus-visible {
+  border-radius: 2px;
+  outline: 3px solid var(--gold-text);
+  outline-offset: 2px;
+}
+
+.close {
+  margin-left: auto;
   width: 44px;
   height: 44px;
   padding: 0;
   display: grid;
+  flex: none;
   place-items: center;
   border: 0;
   border-radius: 10px;
@@ -84,9 +135,27 @@
 .dialogContent {
   position: relative;
   min-height: 0;
-  padding-bottom: 68px;
+  padding-bottom: 64px;
   display: flex;
   flex: 1;
+}
+
+.dialogContent::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 64px;
+  left: 0;
+  height: 44px;
+  background: linear-gradient(to bottom, transparent, var(--panel-surface));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.dialogContentHasMore::after {
+  opacity: .92;
 }
 
 .dialogAction {
@@ -178,17 +247,22 @@
   padding-left: 22px;
 }
 
+.content ol { list-style-type: decimal; }
+.content ul { list-style-type: disc; }
+
 .content li + li { margin-top: 7px; }
 
 .pageContent { padding-bottom: 32px; }
 
 @media (max-width: 359px) {
   .dialogHeader { padding-left: 18px; }
+  .dialogTabs { gap: 10px; }
   .dialogBody { padding: 18px; }
 }
 
 @media (hover: hover) and (pointer: fine) {
   .close:hover { background: var(--inactive); }
+  .dialogTab:hover { color: var(--text); }
   .next:hover { background: var(--surface); }
 }
 

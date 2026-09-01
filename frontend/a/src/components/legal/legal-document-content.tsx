@@ -28,7 +28,7 @@ export function LegalDocumentContent({ document, className }: LegalDocumentConte
         }
 
         const items = block.items.map((item, itemIndex) => <li key={`${item}-${itemIndex}`}>{item}</li>);
-        return block.ordered
+        return block.ordered && document.id !== "privacyPolicy"
           ? <ol start={block.start} key={`ordered-${index}`}>{items}</ol>
           : <ul key={`unordered-${index}`}>{items}</ul>;
       })}

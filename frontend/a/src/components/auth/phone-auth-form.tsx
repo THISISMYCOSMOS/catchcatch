@@ -150,7 +150,6 @@ export function PhoneAuthForm({ purpose }: Props) {
             </label>
             <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("privacyConsent")}>보기</button>
           </div>
-          <Link className="signup-privacy-policy-link" href="/privacy-policy">개인정보 처리방침</Link>
         </div>
       ) : null}
       <div className="button-stack">

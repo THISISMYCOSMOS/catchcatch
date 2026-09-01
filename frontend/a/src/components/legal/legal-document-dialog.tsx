@@ -11,13 +11,18 @@ type LegalDocumentDialogProps = {
 };
 
 export function LegalDocumentDialog({ documentId, onClose }: LegalDocumentDialogProps) {
-  const document = LEGAL_DOCUMENTS[documentId];
+  const [activeDocumentId, setActiveDocumentId] = useState<LegalDocumentId>(documentId);
+  const document = LEGAL_DOCUMENTS[activeDocumentId];
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const [isAtEnd, setIsAtEnd] = useState(false);
-  const titleId = `legal-dialog-title-${document.id}`;
+  const hasPrivacyTabs = documentId === "privacyConsent";
+  const titleId = hasPrivacyTabs
+    ? `legal-dialog-tab-${document.id}`
+    : `legal-dialog-title-${document.id}`;
+  const contentId = hasPrivacyTabs ? "legal-dialog-privacy-content" : undefined;
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -29,10 +34,6 @@ export function LegalDocumentDialog({ documentId, onClose }: LegalDocumentDialog
       : null;
     const previousOverflow = globalThis.document.body.style.overflow;
     globalThis.document.body.style.overflow = "hidden";
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
-      setIsAtEnd(isScrollAtEnd(scrollContainerRef.current));
-    }
     closeButtonRef.current?.focus();
 
     function handleEscape(event: globalThis.KeyboardEvent) {
@@ -48,6 +49,12 @@ export function LegalDocumentDialog({ documentId, onClose }: LegalDocumentDialog
       previousFocus?.focus();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (!scrollContainerRef.current) return;
+    scrollContainerRef.current.scrollTop = 0;
+    setIsAtEnd(isScrollAtEnd(scrollContainerRef.current));
+  }, [activeDocumentId]);
 
   function keepFocusInside(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Tab") return;
@@ -96,7 +103,31 @@ export function LegalDocumentDialog({ documentId, onClose }: LegalDocumentDialog
         onKeyDown={keepFocusInside}
       >
         <header className={styles.dialogHeader}>
-          <h2 id={titleId}>{document.title}</h2>
+          {hasPrivacyTabs ? (
+            <div className={styles.dialogTabs} role="tablist" aria-label="개인정보 문서">
+              {(["privacyConsent", "privacyPolicy"] as const).map((tabDocumentId) => {
+                const tabDocument = LEGAL_DOCUMENTS[tabDocumentId];
+                const isSelected = activeDocumentId === tabDocumentId;
+
+                return (
+                  <button
+                    className={[styles.dialogTab, isSelected ? styles.dialogTabActive : ""].filter(Boolean).join(" ")}
+                    id={`legal-dialog-tab-${tabDocumentId}`}
+                    key={tabDocumentId}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    aria-controls={contentId}
+                    onClick={() => setActiveDocumentId(tabDocumentId)}
+                  >
+                    {tabDocument.title}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <h2 id={titleId}>{document.title}</h2>
+          )}
           <button
             className={styles.close}
             type="button"
@@ -107,8 +138,16 @@ export function LegalDocumentDialog({ documentId, onClose }: LegalDocumentDialog
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>
           </button>
         </header>
-        <div className={styles.dialogContent}>
-          <div className={styles.dialogBody} ref={scrollContainerRef} onScroll={syncScrollState}>
+        <div className={[styles.dialogContent, isAtEnd ? "" : styles.dialogContentHasMore].filter(Boolean).join(" ")}>
+          <div
+            className={styles.dialogBody}
+            id={contentId}
+            ref={scrollContainerRef}
+            role={hasPrivacyTabs ? "tabpanel" : undefined}
+            aria-labelledby={hasPrivacyTabs ? titleId : undefined}
+            tabIndex={hasPrivacyTabs ? 0 : undefined}
+            onScroll={syncScrollState}
+          >
             <LegalDocumentContent document={document} />
           </div>
           <div className={styles.dialogAction}>
