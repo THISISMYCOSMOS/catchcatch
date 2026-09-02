@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Json, Row } from '../database/database.types';
 import {
   AnalysisOfferRepository,
@@ -20,9 +20,11 @@ import {
   USER_PREFERENCE_REPOSITORY,
 } from '../database/repositories/repository.tokens';
 import { calculateMarketEffectivePrice } from '../domain/calculations';
+import { rankRecommendedOffers } from '../domain/recommendation-ranking';
 import { AllowedConclusion, CapacityUnit, ComparisonStatus, CriterionStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
 import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
 import { SearchQuotaService } from '../search-quota/search-quota.service';
+import { BigroomCatalogService } from '../bigroom/bigroom-catalog.service';
 
 type ProductComponentContract = {
   type: 'MAIN' | 'REFILL' | 'MINI' | 'TRAVEL' | 'OTHER_COSMETIC' | 'NON_COSMETIC_GIFT';
@@ -155,7 +157,7 @@ export type JudgmentInputResponse = {
     source: {
       source_type: 'SELLER_PAGE';
       source_url: string;
-      acquisition_method: 'AI_WEB_SEARCH';
+      acquisition_method: 'AI_WEB_SEARCH' | 'DIRECT_HTTP';
       observed_at: string;
       verification_status: 'CONTENT_VERIFIED';
     };
@@ -202,6 +204,7 @@ export class CoreIntegrationService {
     @Inject(ANALYSIS_OFFER_REPOSITORY)
     private readonly analysisOffers: AnalysisOfferRepository,
     private readonly searchQuota: SearchQuotaService,
+    @Optional() private readonly bigroomCatalog?: BigroomCatalogService,
   ) {}
 
   async resolveProduct(input: ResolveProductDto, userId: string): Promise<ResolvedProductResponse> {
@@ -251,7 +254,8 @@ export class CoreIntegrationService {
       throw new NotFoundException(`Product not found: ${productId}`);
     }
     const search = parseSearch(input.search);
-    const verifiedResults = search.seller_results.filter((result) => (
+    const bigroomResults = await this.findBigroomResults(search.anchor_product);
+    const verifiedResults = [...search.seller_results, ...bigroomResults].filter((result) => (
       result.availability === 'AVAILABLE' &&
       result.source?.verification_status === 'CONTENT_VERIFIED' &&
       result.candidate_offer !== null
@@ -286,7 +290,10 @@ export class CoreIntegrationService {
         official_seller_status: null,
         return_policy_status: null,
         delivery_days: null,
-        comparison_status: 'DIRECTLY_COMPARABLE' as const,
+        comparison_status: determineOfferComparisonStatus(search.anchor_product, offer),
+        app_benefit_advertised: offer.discount_conditions.some((condition) => (
+          condition.includes('앱 추가 혜택')
+        )),
         observed_at: result.source!.observed_at,
       };
     });
@@ -334,6 +341,50 @@ export class CoreIntegrationService {
     };
   }
 
+  private async findBigroomResults(
+    anchor: ProductIdentityContract,
+  ): Promise<SellerSearchResultContract[]> {
+    if (!this.bigroomCatalog) return [];
+    try {
+      const offers = await this.bigroomCatalog.findVerifiedOffers(anchor);
+      return offers.map((offer) => ({
+        seller: 'BIGROOM',
+        availability: 'AVAILABLE',
+        candidate_offer: {
+          product_name: offer.productName,
+          brand: anchor.brand,
+          product_type: anchor.product_type,
+          option: anchor.option,
+          shade_or_scent: anchor.shade_or_scent,
+          version_or_renewal: anchor.version_or_renewal,
+          list_price: offer.listedPrice,
+          listed_sale_price: offer.listedSalePrice,
+          public_coupon_amount: offer.publicCouponAmount,
+          automatic_discount_amount: null,
+          shipping_fee: offer.shippingFee,
+          discount_conditions: offer.appBenefitAdvertised
+            ? ['앱 추가 혜택 금액은 공개 웹 페이지에서 확인되지 않음']
+            : [],
+          shipping_condition: offer.shippingFee === 0 ? '무료배송' : null,
+          components: offer.components as ProductComponentContract[],
+        },
+        match_evidence: ['비그룸 공개 상품 상세 페이지에서 상품명·구성·가격을 직접 확인함'],
+        mismatch_reasons: [],
+        source: {
+          source_type: 'SELLER_PAGE',
+          source_url: offer.productUrl,
+          acquisition_method: 'DIRECT_HTTP',
+          observed_at: offer.observedAt,
+          verification_status: 'CONTENT_VERIFIED',
+        },
+      }));
+    } catch {
+      // Bigroom is an additional zero-AI seller path. Its cache/index failure
+      // must not discard otherwise verified seller results or trigger AI.
+      return [];
+    }
+  }
+
   async buildJudgmentInput(analysisId: string, userId: string): Promise<JudgmentInputResponse> {
     const analysis = await this.findOwnedAnalysis(analysisId, userId);
     if (!analysis.product_id) {
@@ -353,9 +404,16 @@ export class CoreIntegrationService {
     if (verifiedSnapshots.length === 0) {
       throw new BadRequestException('No CONTENT_VERIFIED offer snapshots are available for judgment');
     }
-    const allowedOfferIds = verifiedSnapshots
+    const comparableOfferIds = new Set(verifiedSnapshots
       .filter((snapshot) => isComparable(snapshot))
-      .map((snapshot) => snapshot.seller_identifier);
+      .map((snapshot) => snapshot.seller_identifier));
+    const rankedOfferIds = getStringArrayResultValue(analysis.result_json, 'recommendedOfferIds');
+    const allowedOfferIds = rankedOfferIds
+      .filter((offerId) => comparableOfferIds.has(offerId))
+      .slice(0, 3);
+    if (allowedOfferIds.length === 0) {
+      allowedOfferIds.push(...rankRecommendedOffers(verifiedSnapshots, selectedCriteria));
+    }
     const facts = buildFacts(analysis, product, verifiedSnapshots);
     const comparisonBasis = determineComparisonBasis(verifiedSnapshots);
     const cheapestOfferId = getContextCheapestOfferId(verifiedSnapshots, comparisonBasis);
@@ -400,7 +458,9 @@ export class CoreIntegrationService {
         source: {
           source_type: 'SELLER_PAGE',
           source_url: getSnapshotSourceUrl(snapshot) ?? analysis.source_url,
-          acquisition_method: 'AI_WEB_SEARCH',
+          acquisition_method: toAiSeller(snapshot.seller_name) === 'BIGROOM'
+            ? 'DIRECT_HTTP'
+            : 'AI_WEB_SEARCH',
           observed_at: getSnapshotObservedAt(snapshot) ?? snapshot.created_at,
           verification_status: 'CONTENT_VERIFIED',
         },
@@ -799,7 +859,17 @@ function sellerResultKey(productId: string, result: SellerSearchResultContract):
 }
 
 function normalizeUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '').toLowerCase();
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    parsed.hash = '';
+    if (parsed.pathname !== '/') {
+      parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+    }
+    return parsed.toString().replace(/\/$/, parsed.pathname === '/' ? '/' : '');
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
 }
 
 function calculateCoreMarketEffectivePrice(offer: CandidateOfferContract): number | null {
@@ -828,6 +898,42 @@ function calculateCoreMarketEffectivePrice(offer: CandidateOfferContract): numbe
     shippingFee: offer.shipping_fee,
     discounts,
   });
+}
+
+function determineOfferComparisonStatus(
+  anchor: ProductIdentityContract,
+  offer: CandidateOfferContract,
+): ComparisonStatus {
+  const anchorMain = mainComponentTotals(anchor.components);
+  const offerMain = mainComponentTotals(offer.components);
+  // Search results have already passed the product-identity match gate. Keep
+  // legacy verified offers eligible when capacity evidence is incomplete;
+  // only downgrade when known totals demonstrate a real difference.
+  if (!anchorMain || !offerMain) return 'DIRECTLY_COMPARABLE';
+  if (
+    anchorMain.unit === offerMain.unit &&
+    anchorMain.total === offerMain.total
+  ) {
+    return 'DIRECTLY_COMPARABLE';
+  }
+  return anchorMain.unit === offerMain.unit ? 'UNIT_COMPARABLE' : 'NOT_COMPARABLE';
+}
+
+function mainComponentTotals(
+  components: readonly ProductComponentContract[],
+): { unit: CapacityUnit; total: number } | null {
+  const main = components.filter((component) => component.type === 'MAIN');
+  if (main.length === 0) return null;
+  const units = new Set(main.map((component) => component.capacity_unit));
+  if (units.size !== 1) return null;
+  const unit = main[0].capacity_unit;
+  if (!unit || main.some((component) => component.capacity_value === null || component.quantity === null)) {
+    return null;
+  }
+  return {
+    unit,
+    total: main.reduce((sum, component) => sum + component.capacity_value! * component.quantity!, 0),
+  };
 }
 
 function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
@@ -882,6 +988,7 @@ function getSnapshotObservedAt(snapshot: Row<'analysis_offers'>): string | null 
 
 function toAiSeller(sellerName: string): string {
   const normalized = sellerName.toLowerCase();
+  if (normalized.includes('bigroom') || normalized.includes('비그룸')) return 'BIGROOM';
   if (normalized.includes('coupang')) return 'COUPANG';
   if (normalized.includes('musinsa')) return 'MUSINSA_BEAUTY';
   if (normalized.includes('olive')) return 'OLIVE_YOUNG';
@@ -1018,6 +1125,16 @@ function getNumericResultValue(resultJson: Json | null, key: string): number | n
   }
   const value = resultJson[key];
   return typeof value === 'number' ? value : null;
+}
+
+function getStringArrayResultValue(resultJson: Json | null, key: string): string[] {
+  if (!isJsonObject(resultJson)) {
+    return [];
+  }
+  const value = resultJson[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 function determineComparisonBasis(snapshots: readonly Row<'analysis_offers'>[]): 'PUBLIC' | 'PERSONALIZED' {

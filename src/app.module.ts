@@ -11,6 +11,7 @@ import { SavedProductsModule } from './saved-products/saved-products.module';
 import { SaleCalendarModule } from './sale-calendar/sale-calendar.module';
 import { SearchQuotaModule } from './search-quota/search-quota.module';
 import { UserPreferencesModule } from './user-preferences/user-preferences.module';
+import { BigroomModule } from './bigroom/bigroom.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { UserPreferencesModule } from './user-preferences/user-preferences.modul
     PriceAlertsModule,
     SearchQuotaModule,
     ProductsModule,
+    BigroomModule,
   ],
   controllers: [HealthController],
 })

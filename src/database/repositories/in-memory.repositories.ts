@@ -847,6 +847,7 @@ function sellerOfferRow(
     return_policy_status: input.return_policy_status ?? null,
     delivery_days: input.delivery_days ?? null,
     comparison_status: input.comparison_status ?? null,
+    app_benefit_advertised: input.app_benefit_advertised ?? false,
     observed_at: input.observed_at ?? null,
     created_at: input.created_at ?? nowIso(),
   };

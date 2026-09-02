@@ -21,6 +21,7 @@ import {
   AnalysisPersistenceRepository,
   SellerOfferRepository,
 } from '../database/repositories/repository.interfaces';
+import { rankRecommendedOffers } from '../domain/recommendation-ranking';
 import { AnalysesService } from './analyses.service';
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1023,4 +1024,102 @@ function delayOneTick(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 1);
   });
+}
+
+describe('rankRecommendedOffers', () => {
+  const single = rankingSnapshot('single', {
+    sellerName: 'BIGROOM',
+    price: 12000,
+    quantity: 1,
+    totalAmount: 60,
+    unitPrice: 200,
+  });
+  const onePlusOne = rankingSnapshot('one-plus-one', {
+    sellerName: 'BIGROOM',
+    price: 18000,
+    quantity: 2,
+    totalAmount: 120,
+    unitPrice: 150,
+    comparisonStatus: 'UNIT_COMPARABLE',
+  });
+
+  it('prefers the single item when final payment amount is the first criterion', () => {
+    expect(rankRecommendedOffers(
+      [onePlusOne, single],
+      ['FINAL_PAYMENT_AMOUNT', 'UNIT_PRICE', 'RIGHT_SIZED_PURCHASE'],
+    )).toEqual(['single', 'one-plus-one']);
+  });
+
+  it('prefers same-product 1+1 when unit price is the first criterion', () => {
+    expect(rankRecommendedOffers(
+      [single, onePlusOne],
+      ['UNIT_PRICE', 'FINAL_PAYMENT_AMOUNT', 'RIGHT_SIZED_PURCHASE'],
+    )).toEqual(['one-plus-one', 'single']);
+  });
+
+  it('returns one global top three and excludes non-comparable offers', () => {
+    const offers = [
+      single,
+      onePlusOne,
+      rankingSnapshot('third', { sellerName: 'COUPANG', price: 19000, quantity: 1, totalAmount: 60, unitPrice: 317 }),
+      rankingSnapshot('fourth', { sellerName: 'OLIVE_YOUNG', price: 20000, quantity: 1, totalAmount: 60, unitPrice: 333 }),
+      rankingSnapshot('mixed-set', { sellerName: 'BIGROOM', price: 9000, quantity: 3, totalAmount: 180, unitPrice: 50, comparisonStatus: 'NOT_COMPARABLE' }),
+    ];
+
+    expect(rankRecommendedOffers(
+      offers,
+      ['FINAL_PAYMENT_AMOUNT', 'UNIT_PRICE', 'RIGHT_SIZED_PURCHASE'],
+    )).toEqual(['single', 'one-plus-one', 'third']);
+  });
+
+  it('does not compare capacity and item count as the same right-size unit', () => {
+    const capacityOffer = rankingSnapshot('capacity', {
+      sellerName: 'BIGROOM', price: 15000, quantity: 1, totalAmount: 60, unitPrice: 250,
+    });
+    const countOnlyOffer = rankingSnapshot('count-only', {
+      sellerName: 'COUPANG', price: 12000, quantity: 2, totalAmount: null, unitPrice: 6000, unit: null,
+    });
+
+    expect(rankRecommendedOffers(
+      [capacityOffer, countOnlyOffer],
+      ['RIGHT_SIZED_PURCHASE', 'FINAL_PAYMENT_AMOUNT', 'UNIT_PRICE'],
+    )).toEqual(['count-only', 'capacity']);
+  });
+});
+
+function rankingSnapshot(
+  id: string,
+  input: {
+    sellerName: string;
+    price: number;
+    quantity: number;
+    totalAmount: number | null;
+    unitPrice: number;
+    unit?: 'ML' | 'G' | null;
+    comparisonStatus?: 'DIRECTLY_COMPARABLE' | 'UNIT_COMPARABLE' | 'NOT_COMPARABLE';
+  },
+): Row<'analysis_offers'> {
+  return {
+    id: `snapshot-${id}`,
+    analysis_id: 'analysis-ranking',
+    seller_offer_id: id,
+    seller_identifier: id,
+    seller_name: input.sellerName,
+    original_list_price: input.price + 1000,
+    sale_price: input.price,
+    market_effective_price: input.price,
+    user_effective_price: input.price,
+    shipping_fee: 0,
+    public_discount: null,
+    user_discount: null,
+    quantity: input.quantity,
+    total_amount: input.totalAmount,
+    unit: input.unit === undefined ? 'ML' : input.unit,
+    calculated_unit_price: input.unitPrice,
+    offer_snapshot: {
+      comparisonStatus: input.comparisonStatus ?? 'DIRECTLY_COMPARABLE',
+      deliveryDays: 2,
+    },
+    created_at: new Date(0).toISOString(),
+  };
 }

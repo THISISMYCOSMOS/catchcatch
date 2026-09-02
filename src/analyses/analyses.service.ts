@@ -24,7 +24,8 @@ import {
   findLowestUnitPriceOffer,
   isPriceHistorySufficient,
 } from '../domain/offer-analysis';
-import { PriceHistoryPoint, ProductComponent, SellerOffer } from '../domain/types';
+import { rankRecommendedOffers } from '../domain/recommendation-ranking';
+import { PriceHistoryPoint, ProductComponent, SellerOffer, UserCriterion } from '../domain/types';
 import { Json, Row } from '../database/database.types';
 import {
   AnalysisPersistenceRepository,
@@ -78,6 +79,7 @@ export type AnalysisCalculationResult = {
   savingFromPreviousSale: number | null;
   savingRateFromPreviousSale: number | null;
   offerCount: number;
+  recommendedOfferIds: string[];
 };
 
 export type AnalysisResponse = {
@@ -212,7 +214,7 @@ export class AnalysesService {
 
     let result: Awaited<ReturnType<AnalysesService['calculateResult']>>;
     try {
-      result = await this.calculateResult(product, input.userId);
+      result = await this.calculateResult(product, input.userId, preferences.selected_criteria);
     } catch (error) {
       await this.analysisPersistence.persistAnalysisAtomically({
         userId: input.userId,
@@ -334,7 +336,11 @@ export class AnalysesService {
     };
   }
 
-  private async calculateResult(product: Row<'products'>, userId: string): Promise<{
+  private async calculateResult(
+    product: Row<'products'>,
+    userId: string,
+    selectedCriteria: readonly UserCriterion[],
+  ): Promise<{
     allowedConclusions: Row<'analyses'>['allowed_conclusions'];
     warningCodes: Row<'analyses'>['warning_codes'];
     resultJson: Json;
@@ -401,6 +407,7 @@ export class AnalysesService {
     const warningCodes: Row<'analyses'>['warning_codes'] = priceHistorySufficient
       ? []
       : ['PRICE_HISTORY_INSUFFICIENT'];
+    const analysisOfferSnapshots = calculatedOffers.map((offer) => toAnalysisOfferSnapshot(offer, offer.components));
     const result: AnalysisCalculationResult = {
       lowestEffectivePriceOffer: lowestEffectivePriceOffer
         ? {
@@ -430,13 +437,14 @@ export class AnalysesService {
       savingFromPreviousSale,
       savingRateFromPreviousSale,
       offerCount: offerRows.length,
+      recommendedOfferIds: rankRecommendedOffers(analysisOfferSnapshots, selectedCriteria),
     };
 
     return {
       allowedConclusions,
       warningCodes,
       resultJson: result as unknown as Json,
-      analysisOfferSnapshots: calculatedOffers.map((offer) => toAnalysisOfferSnapshot(offer, offer.components)),
+      analysisOfferSnapshots,
       priceHistoryEntries: calculatedOffers.map((offer) => ({
         product_id: product.id,
         seller_offer_id: offer.source.id,
@@ -711,6 +719,7 @@ function toAnalysisOfferSnapshot(
       returnPolicyStatus: offer.return_policy_status,
       deliveryDays: offer.delivery_days,
       comparisonStatus: offer.comparison_status,
+      appBenefitAdvertised: offer.app_benefit_advertised,
       observedAt: offer.observed_at,
       sourceUrl: offer.seller_url,
       createdAt: offer.created_at,

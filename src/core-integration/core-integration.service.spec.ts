@@ -152,6 +152,91 @@ describe('CoreIntegrationService', () => {
     expect(database.store.priceHistory).toHaveLength(0);
   });
 
+  it('adds Bigroom single and same-product 1+1 offers without replacing verified sellers', async () => {
+    const findVerifiedOffers = jest.fn().mockResolvedValue([
+      {
+        seller: 'BIGROOM',
+        productName: 'Round Lab Sun Cream 50ml',
+        productUrl: 'https://bgroom.co.kr/product/round-lab-sun-cream-50ml/100/',
+        listedPrice: 20000,
+        listedSalePrice: 12000,
+        publicCouponAmount: null,
+        shippingFee: 0,
+        components: [{ type: 'MAIN', name: 'Round Lab Sun Cream', capacity_value: 50, capacity_unit: 'ML', quantity: 1 }],
+        appBenefitAdvertised: true,
+        observedAt: '2026-09-03T00:00:00.000Z',
+      },
+      {
+        seller: 'BIGROOM',
+        productName: 'Round Lab Sun Cream 50ml 1+1',
+        productUrl: 'https://bgroom.co.kr/product/round-lab-sun-cream-50ml-1-plus-1/101/',
+        listedPrice: 40000,
+        listedSalePrice: 18000,
+        publicCouponAmount: null,
+        shippingFee: 0,
+        components: [{ type: 'MAIN', name: 'Round Lab Sun Cream', capacity_value: 50, capacity_unit: 'ML', quantity: 2 }],
+        appBenefitAdvertised: false,
+        observedAt: '2026-09-03T00:00:00.000Z',
+      },
+    ]);
+    service = new CoreIntegrationService(
+      products,
+      components,
+      sellerOffers,
+      sellerOfferComponents,
+      preferences,
+      analyses,
+      analysisOffers,
+      searchQuota,
+      { findVerifiedOffers } as never,
+    );
+    const product = await resolveProduct(resolveProductRequest());
+
+    const result = await service.ingestOffers(product.productId, ingestOffersRequest());
+
+    expect(findVerifiedOffers).toHaveBeenCalledTimes(1);
+    expect(result.offers.map((offer) => offer.sellerName)).toEqual(['COUPANG', 'BIGROOM', 'BIGROOM']);
+    const bigroomOfferIds = result.offers
+      .filter((offer) => offer.sellerName === 'BIGROOM')
+      .map((offer) => offer.id);
+    const storedComponents = await sellerOfferComponents.findBySellerOfferIds(bigroomOfferIds);
+    expect(storedComponents.map((component) => component.quantity).sort()).toEqual([1, 2]);
+    const storedBigroomOffers = await sellerOffers.findByProductId(product.productId);
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/100'))?.app_benefit_advertised).toBe(true);
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/101'))?.app_benefit_advertised).toBe(false);
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/100'))?.comparison_status).toBe('DIRECTLY_COMPARABLE');
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/101'))?.comparison_status).toBe('UNIT_COMPARABLE');
+  });
+
+  it('keeps an identity-verified legacy seller comparable when capacity evidence is incomplete', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest('missing-capacity');
+
+    await service.ingestOffers(product.productId, request);
+
+    const [stored] = await sellerOffers.findByProductId(product.productId);
+    expect(stored.comparison_status).toBe('DIRECTLY_COMPARABLE');
+  });
+
+  it('keeps verified sellers when the zero-AI Bigroom adapter fails', async () => {
+    service = new CoreIntegrationService(
+      products,
+      components,
+      sellerOffers,
+      sellerOfferComponents,
+      preferences,
+      analyses,
+      analysisOffers,
+      searchQuota,
+      { findVerifiedOffers: jest.fn().mockRejectedValue(new Error('Bigroom unavailable')) } as never,
+    );
+    const product = await resolveProduct(resolveProductRequest());
+
+    const result = await service.ingestOffers(product.productId, ingestOffersRequest());
+
+    expect(result.offers.map((offer) => offer.sellerName)).toEqual(['COUPANG']);
+  });
+
   it('stores different seller offer components and replaces stale components on re-search', async () => {
     const product = await resolveProduct(resolveProductRequest());
     const request = ingestOffersRequest();
@@ -329,6 +414,44 @@ describe('CoreIntegrationService', () => {
 
     expect(result.comparison_price_basis).toBe('PUBLIC');
     expect(result.cheapest_offer_id).toBe('offer-public-lowest');
+    expect(result.allowed_offer_ids).toEqual(['offer-public-lowest', 'offer-lowest']);
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('preserves case-sensitive seller link paths and query values', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest('case-sensitive-link');
+    request.search.seller_results[0].source!.source_url = 'https://link.coupang.com/a/AbCd?lptag=CaseSensitive';
+
+    const result = await service.ingestOffers(product.productId, request);
+
+    expect(result.offers[0].sellerUrl).toBe('https://link.coupang.com/a/AbCd?lptag=CaseSensitive');
+  });
+
+  it('limits judgment recommendations to the deterministic global top three order', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis({
+      includeSecondVerifiedOffer: true,
+      recommendedOfferIds: ['offer-public-lowest', 'offer-lowest'],
+    });
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+
+    expect(result.allowed_offer_ids).toEqual(['offer-public-lowest', 'offer-lowest']);
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('passes Bigroom direct-page evidence through the judgment schema without broadening AI search sellers', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis({
+      includeSecondVerifiedOffer: true,
+      secondSellerName: 'BIGROOM',
+      recommendedOfferIds: ['offer-public-lowest'],
+    });
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+    const bigroom = result.offers.find((offer) => offer.seller === 'BIGROOM');
+
+    expect(bigroom?.source.acquisition_method).toBe('DIRECT_HTTP');
+    expect(result.allowed_offer_ids).toEqual(['offer-public-lowest']);
     expectAgentSchemaParse('judgmentInputSchema', result);
   });
 
@@ -672,6 +795,8 @@ describe('CoreIntegrationService', () => {
   async function seedJudgmentReadyAnalysis(options: {
     includeSecondVerifiedOffer?: boolean;
     lowestResultId?: string;
+    recommendedOfferIds?: string[];
+    secondSellerName?: string;
   } = {}) {
     await preferences.upsert({
       user_id: 'user-1',
@@ -720,6 +845,9 @@ describe('CoreIntegrationService', () => {
           id: options.lowestResultId ?? 'offer-lowest',
           userEffectivePrice: 9000,
         },
+        ...(options.recommendedOfferIds
+          ? { recommendedOfferIds: options.recommendedOfferIds }
+          : {}),
       },
     });
     await analysisOffers.createMany([
@@ -750,7 +878,7 @@ describe('CoreIntegrationService', () => {
         ? [{
             analysis_id: analysis.id,
             seller_identifier: 'offer-public-lowest',
-            seller_name: 'MUSINSA_BEAUTY',
+            seller_name: options.secondSellerName ?? 'MUSINSA_BEAUTY',
             original_list_price: 12000,
             sale_price: 8000,
             market_effective_price: 8000,

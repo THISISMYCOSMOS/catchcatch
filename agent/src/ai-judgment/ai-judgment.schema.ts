@@ -177,9 +177,11 @@ export const personalizedPriceStatusSchema = z.enum([
   'UNKNOWN_ELIGIBILITY',
 ]);
 
+const judgmentSellerSchema = sellerSchema.or(z.literal('BIGROOM'));
+
 export const verifiedOfferForJudgmentSchema = z.object({
   offer_id: z.string().min(1),
-  seller: sellerSchema,
+  seller: judgmentSellerSchema,
   product_name: z.string().min(1),
   comparison_status: comparisonStatusSchema,
   components: z.array(productComponentSchema),

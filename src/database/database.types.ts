@@ -30,6 +30,81 @@ export type SellerOfferBenefitType = 'MEMBERSHIP' | 'SHOPPING_GRADE' | 'CARD';
 export type Database = {
   public: {
     Tables: {
+      bigroom_catalog_items: {
+        Row: {
+          id: string;
+          external_product_id: string;
+          product_url: string;
+          product_slug: string;
+          search_text: string;
+          sitemap_indexed: boolean;
+          product_name: string | null;
+          listed_price: number | null;
+          listed_sale_price: number | null;
+          public_coupon_amount: number | null;
+          shipping_fee: number | null;
+          capacity_value: number | null;
+          capacity_unit: CapacityUnit | null;
+          quantity: number | null;
+          offer_kind: 'SINGLE' | 'SAME_PRODUCT_MULTI' | 'MIXED_SET' | 'UNKNOWN';
+          app_benefit_advertised: boolean;
+          availability_status: 'AVAILABLE' | 'NOT_AVAILABLE' | 'UNKNOWN';
+          sitemap_last_modified_at: string | null;
+          detail_verified_at: string | null;
+          last_seen_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          external_product_id: string;
+          product_url: string;
+          product_slug: string;
+          search_text: string;
+          sitemap_indexed?: boolean;
+          product_name?: string | null;
+          listed_price?: number | null;
+          listed_sale_price?: number | null;
+          public_coupon_amount?: number | null;
+          shipping_fee?: number | null;
+          capacity_value?: number | null;
+          capacity_unit?: CapacityUnit | null;
+          quantity?: number | null;
+          offer_kind?: 'SINGLE' | 'SAME_PRODUCT_MULTI' | 'MIXED_SET' | 'UNKNOWN';
+          app_benefit_advertised?: boolean;
+          availability_status?: 'AVAILABLE' | 'NOT_AVAILABLE' | 'UNKNOWN';
+          sitemap_last_modified_at?: string | null;
+          detail_verified_at?: string | null;
+          last_seen_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          external_product_id?: string;
+          product_url?: string;
+          product_slug?: string;
+          search_text?: string;
+          sitemap_indexed?: boolean;
+          product_name?: string | null;
+          listed_price?: number | null;
+          listed_sale_price?: number | null;
+          public_coupon_amount?: number | null;
+          shipping_fee?: number | null;
+          capacity_value?: number | null;
+          capacity_unit?: CapacityUnit | null;
+          quantity?: number | null;
+          offer_kind?: 'SINGLE' | 'SAME_PRODUCT_MULTI' | 'MIXED_SET' | 'UNKNOWN';
+          app_benefit_advertised?: boolean;
+          availability_status?: 'AVAILABLE' | 'NOT_AVAILABLE' | 'UNKNOWN';
+          sitemap_last_modified_at?: string | null;
+          detail_verified_at?: string | null;
+          last_seen_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       user_preferences: {
         Row: {
           id: string;
@@ -413,6 +488,7 @@ export type Database = {
           return_policy_status: ReturnPolicyStatus | null;
           delivery_days: number | null;
           comparison_status: ComparisonStatus | null;
+          app_benefit_advertised: boolean;
           observed_at: string | null;
           created_at: string;
         };
@@ -433,6 +509,7 @@ export type Database = {
           return_policy_status?: ReturnPolicyStatus | null;
           delivery_days?: number | null;
           comparison_status?: ComparisonStatus | null;
+          app_benefit_advertised?: boolean;
           observed_at?: string | null;
           created_at?: string;
         };
@@ -453,6 +530,7 @@ export type Database = {
           return_policy_status?: ReturnPolicyStatus | null;
           delivery_days?: number | null;
           comparison_status?: ComparisonStatus | null;
+          app_benefit_advertised?: boolean;
           observed_at?: string | null;
           created_at?: string;
         };

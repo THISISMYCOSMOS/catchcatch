@@ -4,9 +4,10 @@ import { DatabaseModule } from '../database/database.module';
 import { SearchQuotaModule } from '../search-quota/search-quota.module';
 import { CoreIntegrationController } from './core-integration.controller';
 import { CoreIntegrationService } from './core-integration.service';
+import { BigroomModule } from '../bigroom/bigroom.module';
 
 @Module({
-  imports: [AuthModule, DatabaseModule, SearchQuotaModule],
+  imports: [AuthModule, DatabaseModule, SearchQuotaModule, BigroomModule],
   controllers: [CoreIntegrationController],
   providers: [CoreIntegrationService],
   exports: [CoreIntegrationService],
