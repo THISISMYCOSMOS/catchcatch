@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { AddressInfo } from 'node:net';
 import test from 'node:test';
-import { AnalysisRequest } from './contracts.js';
+import { AnalysisRequest, ProductPreviewRequest } from './contracts.js';
 import { AnalysisHandler, createCoreServer } from './server.js';
 import { BackendPublicApiProxy } from './public-backend.proxy.js';
 
@@ -76,6 +76,7 @@ test('rejects non-JSON and unknown request fields', async (context) => {
 test('passes an HttpOnly-cookie access token to the orchestrator as backend authorization', async (context) => {
   let received: AnalysisRequest | null = null;
   const orchestrator = {
+    async preview() { throw new Error('must not be called'); },
     async analyze(input: AnalysisRequest) {
       received = input;
       return {
@@ -119,6 +120,81 @@ test('passes an HttpOnly-cookie access token to the orchestrator as backend auth
     idempotencyKey: 'request-123',
     authorization: 'Bearer cookie-access-token',
   });
+});
+
+test('returns an authenticated product preview and rejects unknown fields', async (context) => {
+  let received: ProductPreviewRequest | null = null;
+  const orchestrator = {
+    async preview(input: ProductPreviewRequest) {
+      received = input;
+      return {
+        sourceUrl: input.sourceUrl,
+        productName: '테스트 크림',
+        brand: '테스트 브랜드',
+        seller: 'COUPANG',
+        listedPrice: 15000,
+        imageUrl: null,
+      };
+    },
+    async analyze() { throw new Error('must not be called'); },
+    async findRecentAnalyses() { return []; },
+    async findAnalysis() { throw new Error('must not be called'); },
+    async deleteAnalysis() { throw new Error('must not be called'); },
+  } satisfies AnalysisHandler;
+  const server = createCoreServer(orchestrator, [], {
+    async forward() { throw new Error('preview must not be proxied'); },
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const sourceUrl = 'https://www.coupang.com/vp/products/1';
+
+  const response = await fetch(`${baseUrl}/api/v1/products/preview`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer access-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ sourceUrl }),
+  });
+  const unknownFieldResponse = await fetch(`${baseUrl}/api/v1/products/preview`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer access-token',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ sourceUrl, admin: true }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    sourceUrl,
+    productName: '테스트 크림',
+    brand: '테스트 브랜드',
+    seller: 'COUPANG',
+    listedPrice: 15000,
+    imageUrl: null,
+  });
+  assert.deepEqual(received, { sourceUrl, authorization: 'Bearer access-token' });
+  assert.equal(unknownFieldResponse.status, 400);
+  assert.equal(
+    (await unknownFieldResponse.json() as { code: string }).code,
+    'UNKNOWN_REQUEST_FIELD',
+  );
+});
+
+test('requires authentication for product preview', async (context) => {
+  const server = createCoreServer(fakeOrchestrator(), []);
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const response = await fetch(`${baseUrl}/api/v1/products/preview`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sourceUrl: 'https://www.coupang.com/vp/products/1' }),
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal((await response.json() as { code: string }).code, 'AUTHORIZATION_REQUIRED');
 });
 
 test('proxies allowlisted public backend routes and rewrites the auth cookie path', async (context) => {
@@ -194,6 +270,7 @@ test('proxies authenticated recent, detail, and delete requests', async (context
     result: {},
   };
   const orchestrator: AnalysisHandler = {
+    async preview() { throw new Error('must not be called'); },
     async analyze() { throw new Error('must not be called'); },
     async findRecentAnalyses(input) {
       calls.push({ operation: 'recent', input });
@@ -243,6 +320,9 @@ test('proxies authenticated recent, detail, and delete requests', async (context
 
 function fakeOrchestrator(): AnalysisHandler {
   return {
+    async preview() {
+      throw new Error('must not be called');
+    },
     async analyze() {
       throw new Error('must not be called');
     },

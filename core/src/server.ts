@@ -5,6 +5,8 @@ import {
   AnalysisRequest,
   AnalysisResult,
   BackendAnalysis,
+  ProductPreviewRequest,
+  ProductPreviewResult,
   RecentAnalysesRequest,
 } from './contracts.js';
 import { CoreError } from './errors.js';
@@ -13,6 +15,7 @@ import { PublicApiProxy } from './public-backend.proxy.js';
 const MAX_BODY_BYTES = 16 * 1024;
 
 export type AnalysisHandler = {
+  preview(request: ProductPreviewRequest): Promise<ProductPreviewResult>;
   analyze(request: AnalysisRequest): Promise<AnalysisResult>;
   findRecentAnalyses(request: RecentAnalysesRequest): Promise<BackendAnalysis[]>;
   findAnalysis(request: AnalysisAccessRequest): Promise<BackendAnalysis>;
@@ -33,6 +36,15 @@ export function createCoreServer(
       const requestUrl = new URL(request.url ?? '/', 'http://core.local');
       if (request.method === 'GET' && requestUrl.pathname === '/health') {
         return sendJson(response, 200, { status: 'ok' });
+      }
+      if (request.method === 'POST' && requestUrl.pathname === '/api/v1/products/preview') {
+        const authorization = requireAccessAuthorization(request);
+        requireJsonContentType(request);
+        const body = await readJsonBody(request);
+        rejectUnknownKeys(body, ['sourceUrl']);
+        const sourceUrl = requireString(body, 'sourceUrl');
+        const result = await orchestrator.preview({ sourceUrl, authorization });
+        return sendJson(response, 200, result);
       }
       if (publicApiProxy && await publicApiProxy.forward(request, response, requestUrl)) {
         return;

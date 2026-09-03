@@ -7,16 +7,6 @@ export type RecentAnalysisItem = {
   imageUrl: string | null;
 };
 
-export type ProductPreview = {
-  id: string;
-  productName: string;
-  sellerName: string;
-  price: number;
-  description: string;
-  imageUrl: null;
-  sourceUrl: string;
-};
-
 type HomeNotificationBase = {
   id: string;
   title: string;
@@ -33,16 +23,6 @@ export type HomeNotificationItem = HomeNotificationBase & (
 );
 
 export const DEMO_PRODUCT_URL = "https://www.coupang.com";
-
-export const DEMO_PRODUCT: ProductPreview = {
-  id: "demo-product",
-  productName: "라운드랩 독도 선크림",
-  sellerName: "쿠팡",
-  price: 15000,
-  description: "연결 확인을 위한 데모 상품 정보예요. 실제 상품 분석 API 데이터가 아닙니다.",
-  imageUrl: null,
-  sourceUrl: DEMO_PRODUCT_URL,
-};
 
 export const RECENT_ANALYSES: RecentAnalysisItem[] = [
   { id: "recent-1", productName: "상품명", sellerName: "플랫폼명", analyzedAt: "2026.07.16", price: 100000, imageUrl: null },

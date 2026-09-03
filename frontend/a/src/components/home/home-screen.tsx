@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
-import { DEMO_PRODUCT, DEMO_PRODUCT_URL, ProductPreview } from "@/lib/mock/home";
+import { DEMO_PRODUCT_URL } from "@/lib/mock/home";
 import { AnalysisLimitDialog } from "@/components/home/analysis-limit-dialog";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
@@ -12,12 +12,19 @@ import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-
 import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
 import { createAnalysis, toAnalysisFailureStatus, type AnalysisFailureStatus } from "@/lib/api/analyses";
 import type { RecentAnalysisItem } from "@/lib/api/analyses";
+import { previewProduct, type ProductPreview } from "@/lib/api/products";
 import { getWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/api/search-quota";
 import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
 type AnalysisState = "idle" | "loading" | "error";
 type AnalysisRequest = { productUrl: string; platform: "쿠팡" };
+const SELLER_LABELS: Record<string, string> = {
+  COUPANG: "쿠팡",
+  OLIVE_YOUNG: "올리브영",
+  MUSINSA_BEAUTY: "무신사",
+  BRAND_OFFICIAL: "브랜드 공식몰",
+};
 type HomeScreenProps = {
   username: string;
   initialWeeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
@@ -75,12 +82,35 @@ function AnalysisFailureIcon() {
   );
 }
 
-function formatPrice(price: number) {
-  return `${price.toLocaleString("ko-KR")}원`;
+function formatPrice(price: number | null) {
+  return price === null ? "가격 확인 필요" : `${price.toLocaleString("ko-KR")}원`;
+}
+
+function sellerLabel(seller: string | null): string {
+  if (!seller) return "판매처 확인 필요";
+  return SELLER_LABELS[seller.trim().toUpperCase()] ?? seller;
 }
 
 function ImagePlaceholder({ compact = false }: { compact?: boolean }) {
   return <div className={compact ? "product-image-placeholder compact" : "product-image-placeholder"} aria-label="상품 이미지 없음" />;
+}
+
+function ProductPreviewImage({ product }: { product: ProductPreview }) {
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
+
+  if (!product.imageUrl || failedImageUrl === product.imageUrl) return <ImagePlaceholder />;
+  return (
+    <div className="product-image-placeholder">
+      {/* Preview images may come from any supported external marketplace. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={product.imageUrl}
+        alt=""
+        onError={() => setFailedImageUrl(product.imageUrl)}
+        style={{ width: "100%", height: "100%", display: "block", objectFit: "cover", borderRadius: "inherit" }}
+      />
+    </div>
+  );
 }
 
 function ProductPreviewCard({ product, isSelecting, onSelect }: {
@@ -103,13 +133,12 @@ function ProductPreviewCard({ product, isSelecting, onSelect }: {
       onClick={onSelect}
       onKeyDown={handleKeyDown}
     >
-      <ImagePlaceholder />
+      <ProductPreviewImage product={product} />
       <div className="product-preview-main">
         <h2>{product.productName}</h2>
-        <p>{product.sellerName}</p>
-        <strong>{formatPrice(product.price)}</strong>
+        <p>{sellerLabel(product.seller)}</p>
+        <strong>{formatPrice(product.listedPrice)}</strong>
       </div>
-      <div className="product-description"><span>상품 설명</span><p>{product.description}</p></div>
     </article>
   );
 }
@@ -129,6 +158,10 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [isProductSelecting, setIsProductSelecting] = useState(false);
   const productSelectionTimerRef = useRef<number | null>(null);
+  const productPreviewTimerRef = useRef<number | null>(null);
+  const productPreviewSequenceRef = useRef(0);
+  const productPreviewSourceUrlRef = useRef<string | null>(null);
+  const productPreviewCacheRef = useRef(new Map<string, ProductPreview>());
   const productRegionRef = useRef<HTMLDivElement>(null);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [isAnalysisLimitDialogOpen, setIsAnalysisLimitDialogOpen] = useState(false);
@@ -136,6 +169,65 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
   const selectedAnalysis = selectedAnalysisId ? recentAnalyses.find((item) => item.id === selectedAnalysisId) ?? null : null;
   const isWeeklyLimitReached = weeklyAnalysisUsage.remainingCount === 0 || weeklyAnalysisUsage.limitReached;
   const analysisErrorMessage = ANALYSIS_ERROR_MESSAGES[analysisErrorStatus];
+
+  const clearProductPreview = useCallback(() => {
+    if (productPreviewTimerRef.current !== null) {
+      window.clearTimeout(productPreviewTimerRef.current);
+      productPreviewTimerRef.current = null;
+    }
+    productPreviewSequenceRef.current += 1;
+    productPreviewSourceUrlRef.current = null;
+    setProduct(null);
+    setIsProductPopoverOpen(false);
+  }, []);
+
+  const queueProductPreview = useCallback((sourceUrl: string) => {
+    const cached = productPreviewCacheRef.current.get(sourceUrl);
+    if (cached) {
+      if (productPreviewTimerRef.current !== null) {
+        window.clearTimeout(productPreviewTimerRef.current);
+        productPreviewTimerRef.current = null;
+      }
+      productPreviewSequenceRef.current += 1;
+      productPreviewSourceUrlRef.current = sourceUrl;
+      setProduct(cached);
+      setIsProductPopoverOpen(true);
+      return;
+    }
+    if (productPreviewSourceUrlRef.current === sourceUrl) return;
+
+    if (productPreviewTimerRef.current !== null) {
+      window.clearTimeout(productPreviewTimerRef.current);
+    }
+    const sequence = productPreviewSequenceRef.current + 1;
+    productPreviewSequenceRef.current = sequence;
+    productPreviewSourceUrlRef.current = sourceUrl;
+    setProduct(null);
+    setIsProductPopoverOpen(false);
+    productPreviewTimerRef.current = window.setTimeout(() => {
+      productPreviewTimerRef.current = null;
+      void previewProduct(sourceUrl)
+        .then((preview) => {
+          if (
+            productPreviewSequenceRef.current !== sequence ||
+            productPreviewSourceUrlRef.current !== sourceUrl
+          ) return;
+          productPreviewCacheRef.current.set(sourceUrl, preview);
+          setProduct(preview);
+          setLinkError("");
+          setIsProductPopoverOpen(true);
+        })
+        .catch(() => {
+          if (
+            productPreviewSequenceRef.current !== sequence ||
+            productPreviewSourceUrlRef.current !== sourceUrl
+          ) return;
+          setProduct(null);
+          setIsProductPopoverOpen(false);
+          setLinkError("상품 정보를 확인하지 못했어요. 링크를 다시 확인해주세요.");
+        });
+    }, 400);
+  }, []);
 
   useEffect(() => {
     const promptCheck = window.setTimeout(() => {
@@ -154,10 +246,10 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
 
     const restoreLink = window.setTimeout(() => {
       setLinkValue(validation.productUrl);
-      setProduct({ ...DEMO_PRODUCT, sourceUrl: validation.productUrl });
+      queueProductPreview(validation.productUrl);
     }, 0);
     return () => window.clearTimeout(restoreLink);
-  }, []);
+  }, [queueProductPreview]);
 
   const closeProductPopover = useCallback(() => {
     if (productSelectionTimerRef.current !== null) {
@@ -175,6 +267,11 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
     if (analysisTimerRef.current !== null) {
       window.clearInterval(analysisTimerRef.current);
     }
+    if (productPreviewTimerRef.current !== null) {
+      window.clearTimeout(productPreviewTimerRef.current);
+    }
+    productPreviewSequenceRef.current += 1;
+    productPreviewSourceUrlRef.current = null;
   }, []);
 
   function stopAnalysisTimer() {
@@ -213,9 +310,11 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
     setLinkValue(value);
     setLinkError("");
     const validation = validateCoupangProductUrl(value);
-    const matchedProduct = validation.ok ? { ...DEMO_PRODUCT, sourceUrl: validation.productUrl } : null;
-    setProduct(matchedProduct);
-    setIsProductPopoverOpen(Boolean(matchedProduct));
+    if (!validation.ok) {
+      clearProductPreview();
+      return;
+    }
+    queueProductPreview(validation.productUrl);
   }
 
   function handleSelectProduct() {

@@ -108,7 +108,7 @@ export function LiveAnalysisResultScreen({ analysisId, fallbackSourceUrl }: Live
             <dl>
               <div><dt>최근 평균가</dt><dd>{formatMoney(view.recentAveragePrice)}</dd></div>
               <div><dt>직전 세일가</dt><dd>{formatMoney(view.previousSalePrice)}</dd></div>
-              <div><dt>비교 판매처</dt><dd>{view.offers.length}곳</dd></div>
+              <div><dt>비교 판매처</dt><dd>{view.offerCount}곳</dd></div>
               <div><dt>주의사항</dt><dd>{view.warningCodes.length > 0 ? view.warningCodes.join(", ") : "없음"}</dd></div>
             </dl>
           </section>
@@ -128,17 +128,24 @@ export function LiveAnalysisResultScreen({ analysisId, fallbackSourceUrl }: Live
           <section className={styles.storesPanel} aria-labelledby="seller-comparison-title">
             <div className={styles.sectionHeading}><div><p className={styles.eyebrow}>SELLERS</p><h2 id="seller-comparison-title">판매처 비교</h2></div></div>
             <div className={styles.storeList}>
-              {view.offers.map((offer, index) => (
-                <article className={styles.storeCard} key={offer.id}>
-                  <div className={styles.storeCopy}>
-                    <p>가격 {index + 1}순위</p>
-                    <div className={styles.storeHeading}><h2>{offer.sellerName}</h2><strong>{formatMoney(effectivePrice(offer))}</strong></div>
-                    <span>{offer.shippingFee === null ? "배송비 확인 필요" : `배송비 ${formatMoney(offer.shippingFee)}`}</span>
-                  </div>
-                  {offerSourceUrl(offer) ? <a href={offerSourceUrl(offer) ?? undefined} target="_blank" rel="noopener noreferrer">사이트 바로가기 <span aria-hidden="true">↗</span></a> : null}
-                </article>
-              ))}
-              {!view.offers.some(isBigroomOffer) ? (
+              {view.offers.map((offer, index) => {
+                const configuration = offerConfigurationLabel(offer);
+                const unitPrice = offerUnitPriceLabel(offer);
+                return (
+                  <article className={styles.storeCard} key={offer.id}>
+                    <div className={styles.storeCopy}>
+                      <p>{view.offerRankLabel} {index + 1}순위</p>
+                      <div className={styles.storeHeading}><h2>{offer.sellerName}</h2><strong>{formatMoney(effectivePrice(offer))}</strong></div>
+                      {configuration ? <span>{configuration}</span> : null}
+                      {unitPrice ? <span>{unitPrice}</span> : null}
+                      <span>{offer.shippingFee === null ? "배송비 확인 필요" : `배송비 ${formatMoney(offer.shippingFee)}`}</span>
+                      {hasAdvertisedAppBenefit(offer) ? <span>앱에서 추가 혜택 가능 · 공개 웹 가격 기준</span> : null}
+                    </div>
+                    {offerSourceUrl(offer) ? <a href={offerSourceUrl(offer) ?? undefined} target="_blank" rel="noopener noreferrer">사이트 바로가기 <span aria-hidden="true">↗</span></a> : null}
+                  </article>
+                );
+              })}
+              {!view.hasBigroomOffer ? (
                 <article className={styles.storeCard}>
                   <div className={styles.storeCopy}>
                     <div className={styles.storeHeading}><h2>비그룸</h2><strong>검색 결과 없음</strong></div>
@@ -172,9 +179,14 @@ function toViewModel(analysis: AnalysisRecord, fallbackSourceUrl: string | null)
   const result = asRecord(analysis.result);
   const judgment = asRecord(result.aiJudgment);
   const confidence = asRecord(judgment.confidence);
-  const offers = [...(analysis.analysisOffers ?? [])].sort((left, right) => (
+  const allOffers = analysis.analysisOffers ?? [];
+  const priceSortedOffers = [...allOffers].sort((left, right) => (
     (effectivePrice(left) ?? Number.MAX_SAFE_INTEGER) - (effectivePrice(right) ?? Number.MAX_SAFE_INTEGER)
   ));
+  const recommendedOfferIds = readRecommendedOfferIds(result.recommendedOfferIds);
+  const offers = recommendedOfferIds
+    ? offersForRecommendedIds(allOffers, recommendedOfferIds).slice(0, 3)
+    : priceSortedOffers.slice(0, 3);
   const criteria = Array.isArray(judgment.criteria_results)
     ? judgment.criteria_results.map(asRecord).map((criterion) => ({
         criterion: stringValue(criterion.criterion) ?? "UNKNOWN",
@@ -196,7 +208,7 @@ function toViewModel(analysis: AnalysisRecord, fallbackSourceUrl: string | null)
     sourceUrl: analysis.sourceUrl ?? fallbackSourceUrl,
     productName: analysis.product?.canonicalName ?? "상품명 확인 필요",
     brand: analysis.product?.brand ?? null,
-    bestPrice: offers.map(effectivePrice).find((price): price is number => price !== null) ?? null,
+    bestPrice: priceSortedOffers.map(effectivePrice).find((price): price is number => price !== null) ?? null,
     verdictTitle: CONCLUSION_LABELS[conclusion] ?? (stringValue(judgment.decision_status) === "INSUFFICIENT_EVIDENCE" ? "판단 근거가 더 필요해요" : "분석이 완료됐어요"),
     verdictReason: stringValue(judgment.conclusion_reason) ?? "저장된 계산 결과를 확인해 주세요.",
     confidenceLabel: CONFIDENCE_LABELS[stringValue(confidence.level) ?? ""] ?? "확인 필요",
@@ -204,13 +216,106 @@ function toViewModel(analysis: AnalysisRecord, fallbackSourceUrl: string | null)
     discountRate: numberValue(result.discountRateFromRecentAverage),
     recentAveragePrice: numberValue(result.recentAveragePrice),
     previousSalePrice: numberValue(result.previousSalePrice),
+    offerCount: allOffers.length,
+    offerRankLabel: recommendedOfferIds ? "추천" : "가격",
+    hasBigroomOffer: allOffers.some(isBigroomOffer),
     offers,
     criteria,
   };
 }
 
+function readRecommendedOfferIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.length === 0) return [];
+  const identifiers = value
+    .map((identifier) => normalizeSellerIdentifier(stringValue(identifier)))
+    .filter((identifier): identifier is string => identifier !== null)
+    .filter((identifier, index, values) => values.indexOf(identifier) === index);
+  return identifiers.length > 0 ? identifiers : null;
+}
+
+function offersForRecommendedIds(offers: AnalysisOffer[], recommendedOfferIds: string[]): AnalysisOffer[] {
+  return recommendedOfferIds
+    .map((identifier) => offers.find((offer) => normalizeSellerIdentifier(offer.sellerIdentifier) === identifier))
+    .filter((offer): offer is AnalysisOffer => offer !== undefined);
+}
+
+function normalizeSellerIdentifier(value: string | null): string | null {
+  const normalized = value?.trim().toUpperCase();
+  return normalized ? normalized : null;
+}
+
 function effectivePrice(offer: AnalysisOffer): number | null {
   return offer.userEffectivePrice ?? offer.marketEffectivePrice ?? offer.salePrice ?? offer.originalListPrice;
+}
+
+function offerConfigurationLabel(offer: AnalysisOffer): string | null {
+  const snapshot = asRecord(offer.offerSnapshot);
+  const quantity = positiveIntegerValue(offer.quantity) ?? positiveIntegerValue(snapshot.quantity);
+  const totalAmount = positiveNumberValue(offer.totalAmount)
+    ?? positiveNumberValue(snapshot.totalAmount)
+    ?? positiveNumberValue(snapshot.total_amount);
+  const unit = offerCapacityUnit(offer, snapshot);
+  const parts: string[] = [];
+
+  if (quantity === 1) {
+    parts.push("단품");
+  } else if (quantity === 2) {
+    parts.push(isExplicitOnePlusOne(snapshot) ? "1+1" : "2개 구성");
+  } else if (quantity !== null) {
+    parts.push(`${quantity}개 구성`);
+  }
+
+  if (totalAmount !== null && unit) {
+    const totalLabel = `${formatAmount(totalAmount)}${formatCapacityUnit(unit)}`;
+    parts.push(quantity === 1 ? totalLabel : `총 ${totalLabel}`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function offerUnitPriceLabel(offer: AnalysisOffer): string | null {
+  const unitPrice = numberValue(offer.calculatedUnitPrice);
+  if (unitPrice === null) return null;
+  const unit = offerCapacityUnit(offer, asRecord(offer.offerSnapshot));
+  return unit
+    ? `1${formatCapacityUnit(unit)}당 ${formatMoney(unitPrice)}`
+    : `단가 ${formatMoney(unitPrice)}`;
+}
+
+function offerCapacityUnit(offer: AnalysisOffer, snapshot: Record<string, unknown>): string | null {
+  return nonEmptyString(offer.unit)
+    ?? nonEmptyString(snapshot.unit)
+    ?? nonEmptyString(snapshot.capacityUnit)
+    ?? nonEmptyString(snapshot.capacity_unit);
+}
+
+function isExplicitOnePlusOne(snapshot: Record<string, unknown>): boolean {
+  const explicitFlag = booleanValue(snapshot.isOnePlusOne)
+    ?? booleanValue(snapshot.is_one_plus_one)
+    ?? booleanValue(snapshot.onePlusOne)
+    ?? booleanValue(snapshot.one_plus_one);
+  if (explicitFlag !== null) return explicitFlag;
+  const explicitType = nonEmptyString(snapshot.offerKind)
+    ?? nonEmptyString(snapshot.offer_kind)
+    ?? nonEmptyString(snapshot.promotionType)
+    ?? nonEmptyString(snapshot.promotion_type);
+  const normalizedType = explicitType?.toUpperCase().replaceAll("-", "_").replaceAll(" ", "_");
+  return normalizedType === "ONE_PLUS_ONE" || normalizedType === "BUY_ONE_GET_ONE" || normalizedType === "1+1";
+}
+
+function hasAdvertisedAppBenefit(offer: AnalysisOffer): boolean {
+  const snapshot = asRecord(offer.offerSnapshot);
+  return (booleanValue(snapshot.appBenefitAdvertised) ?? booleanValue(snapshot.app_benefit_advertised)) === true;
+}
+
+function formatCapacityUnit(unit: string): string {
+  const normalized = unit.trim().toUpperCase();
+  return normalized === "ML" ? "ml" : normalized === "G" ? "g" : unit.trim();
+}
+
+function formatAmount(value: number): string {
+  return value.toLocaleString("ko-KR", { maximumFractionDigits: 3 });
 }
 
 function isBigroomOffer(offer: AnalysisOffer): boolean {
@@ -251,6 +356,25 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function nonEmptyString(value: unknown): string | null {
+  const string = stringValue(value)?.trim();
+  return string ? string : null;
+}
+
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function positiveNumberValue(value: unknown): number | null {
+  const number = numberValue(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function positiveIntegerValue(value: unknown): number | null {
+  const number = positiveNumberValue(value);
+  return number !== null && Number.isInteger(number) ? number : null;
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }

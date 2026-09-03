@@ -88,6 +88,20 @@ export type AnalysisResult = {
   judgment: unknown;
 };
 
+export type ProductPreviewRequest = {
+  sourceUrl: string;
+  authorization: string;
+};
+
+export type ProductPreviewResult = {
+  sourceUrl: string;
+  productName: string;
+  brand: string | null;
+  seller: string | null;
+  listedPrice: number | null;
+  imageUrl: string | null;
+};
+
 export type AnalysisAccessRequest = {
   analysisId: string;
   authorization: string;

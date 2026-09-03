@@ -19,6 +19,9 @@ export type AnalysisOffer = {
   marketEffectivePrice: number | null;
   userEffectivePrice: number | null;
   shippingFee: number | null;
+  quantity: number | null;
+  totalAmount: number | null;
+  unit: string | null;
   calculatedUnitPrice: number | null;
   offerSnapshot: unknown;
   createdAt: string;

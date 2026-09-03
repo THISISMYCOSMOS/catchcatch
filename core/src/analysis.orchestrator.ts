@@ -5,6 +5,8 @@ import {
   AnalysisResult,
   BackendAnalysis,
   BackendClient,
+  ProductPreviewRequest,
+  ProductPreviewResult,
   RecentAnalysesRequest,
 } from './contracts.js';
 import { CoreError } from './errors.js';
@@ -16,6 +18,42 @@ export class AnalysisOrchestrator {
     private readonly backend: BackendClient,
     private readonly allowedProductDomains: readonly string[],
   ) {}
+
+  async preview(request: ProductPreviewRequest): Promise<ProductPreviewResult> {
+    const allowedDomains = resolveAllowedProductDomains(
+      request.sourceUrl,
+      this.allowedProductDomains,
+    );
+    const identification = await this.agent.identify({
+      product_url: request.sourceUrl,
+      allowed_domains: allowedDomains,
+    });
+    const productName = identification.anchor_product?.normalized_product_name?.trim();
+    if (
+      identification.identification_status !== 'IDENTIFIED' ||
+      !identification.anchor_product ||
+      !productName
+    ) {
+      throw new CoreError(
+        422,
+        'PRODUCT_IDENTIFICATION_INCOMPLETE',
+        '상품을 확정할 수 없습니다.',
+        {
+          identificationStatus: identification.identification_status,
+          warnings: identification.warnings,
+        },
+      );
+    }
+
+    return {
+      sourceUrl: request.sourceUrl,
+      productName,
+      brand: identification.anchor_product.brand,
+      seller: identification.preview?.seller ?? null,
+      listedPrice: identification.preview?.listed_price ?? null,
+      imageUrl: identification.preview?.image_url ?? null,
+    };
+  }
 
   async analyze(request: AnalysisRequest): Promise<AnalysisResult> {
     const allowedDomains = resolveAllowedProductDomains(
