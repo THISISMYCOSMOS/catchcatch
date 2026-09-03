@@ -66,11 +66,19 @@ export class BigroomCatalogService {
     ));
   }
 
-  async syncManifest(): Promise<{ indexed: number }> {
+  async syncManifest(): Promise<{ indexed: number; deindexed: number }> {
     const response = await this.fetchPage(`${BIGROOM_ORIGIN}/sitemap.xml`, 'catalog-sync');
     const rows = extractBigroomSitemapRows(response);
+    if (rows.length === 0) {
+      throw new Error('Bigroom sitemap contained no product rows');
+    }
     await this.upsertManifestRows(rows);
-    return { indexed: rows.length };
+    const syncedAt = rows[0]?.last_seen_at;
+    if (!syncedAt) {
+      throw new Error('Bigroom sitemap rows are missing a sync timestamp');
+    }
+    const deindexed = await this.deindexMissingManifestRows(syncedAt);
+    return { indexed: rows.length, deindexed };
   }
 
   private async ensureManifestIndex(): Promise<void> {
@@ -82,12 +90,7 @@ export class BigroomCatalogService {
       .limit(1);
     if (error) throw new Error(`Bigroom catalog freshness check failed: ${error.message}`);
     const newest = data?.[0]?.last_seen_at ? Date.parse(data[0].last_seen_at) : 0;
-    const ttlHours = boundedInteger(
-      this.config.get<string>('BIGROOM_MANIFEST_TTL_HOURS'),
-      24,
-      1,
-      168,
-    );
+    const ttlHours = this.manifestTtlHours();
     if (newest === 0 || Date.now() - newest >= ttlHours * 60 * 60 * 1000) {
       await this.syncManifest();
     }
@@ -96,10 +99,14 @@ export class BigroomCatalogService {
   private async findIndexedCandidates(anchor: BigroomAnchorProduct): Promise<Row<'bigroom_catalog_items'>[]> {
     const needle = normalizeSearchText(anchor.normalized_product_name ?? '');
     if (!needle) return [];
+    const recentDiscoveryCutoff = new Date(
+      Date.now() - this.manifestTtlHours() * 60 * 60 * 1000,
+    ).toISOString();
     const { data, error } = await this.client
       .from('bigroom_catalog_items')
       .select('*')
       .like('search_text', `%${escapeLikePattern(needle)}%`)
+      .or(`sitemap_indexed.eq.true,last_seen_at.gte.${recentDiscoveryCutoff}`)
       .order('external_product_id', { ascending: false })
       .limit(20);
     if (error) throw new Error(`Bigroom catalog lookup failed: ${error.message}`);
@@ -199,6 +206,26 @@ export class BigroomCatalogService {
       .from('bigroom_catalog_items')
       .upsert(rows, { onConflict: 'external_product_id', ignoreDuplicates: false });
     if (error) throw new Error(`Bigroom catalog upsert failed: ${error.message}`);
+  }
+
+  private async deindexMissingManifestRows(syncedAt: string): Promise<number> {
+    const { data, error } = await this.client
+      .from('bigroom_catalog_items')
+      .update({ sitemap_indexed: false, updated_at: syncedAt })
+      .eq('sitemap_indexed', true)
+      .lt('last_seen_at', syncedAt)
+      .select('id');
+    if (error) throw new Error(`Bigroom stale catalog update failed: ${error.message}`);
+    return data?.length ?? 0;
+  }
+
+  private manifestTtlHours(): number {
+    return boundedInteger(
+      this.config.get<string>('BIGROOM_MANIFEST_TTL_HOURS'),
+      24,
+      1,
+      168,
+    );
   }
 
   private async updateDetail(
@@ -388,13 +415,19 @@ export function selectBigroomVerificationCandidates(
   maximum: number,
 ): Row<'bigroom_catalog_items'>[] {
   const eligible = candidates.filter((candidate) => !isMixedBigroomSet(candidate.product_slug));
-  const single = eligible.find((candidate) => !/1\s*\+\s*1/i.test(candidate.product_slug));
-  const sameProductMulti = eligible.find((candidate) => /1\s*\+\s*1/i.test(candidate.product_slug));
+  const single = eligible.find((candidate) => !isSameProductMulti(candidate.product_slug));
+  const sameProductMulti = eligible.find((candidate) => isSameProductMulti(candidate.product_slug));
   return uniqueRowsById([
     ...(single ? [single] : []),
     ...(sameProductMulti ? [sameProductMulti] : []),
     ...eligible,
   ]).slice(0, maximum);
+}
+
+function isSameProductMulti(value: string): boolean {
+  return /\d+\s*\+\s*\d+/.test(value) ||
+    /(?:x|×|\*)\s*([2-9]|\d{2,})\b/i.test(value) ||
+    /(?:^|\D)([2-9]|\d{2,})\s*개(?:입)?(?=\D|$)/i.test(value);
 }
 
 function uniqueRowsById(

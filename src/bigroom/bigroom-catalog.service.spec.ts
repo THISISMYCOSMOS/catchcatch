@@ -1,4 +1,5 @@
 import {
+  BigroomCatalogService,
   extractBigroomSearchRows,
   extractBigroomSellerPageFacts,
   extractBigroomSitemapRows,
@@ -7,6 +8,8 @@ import {
   selectBigroomVerificationCandidates,
 } from './bigroom-catalog.service';
 import { Row } from '../database/database.types';
+import { ConfigService } from '@nestjs/config';
+import { CatchCatchSupabaseClient } from '../database/supabase.client';
 
 const anchor = {
   brand: '비플레인',
@@ -112,20 +115,112 @@ describe('Bigroom catalog parsing', () => {
     expect(isMixedBigroomSet('[비플레인] 시카테롤 크림 60ml + 토너 150ml 기획')).toBe(true);
   });
 
-  it('reserves verification slots for both a single item and same-product 1+1', () => {
+  it('reserves verification slots for both a single item and same-product multi packs', () => {
     const candidates = [
       catalogRow('single-new', '[비플레인] 시카테롤 크림 60ml'),
       catalogRow('single-old', '[비플레인] 시카테롤 크림 60ml 리뉴얼'),
-      catalogRow('one-plus-one', '[비플레인] 시카테롤 크림 60ml 1+1'),
+      catalogRow('two-pack', '[비플레인] 시카테롤 크림 60ml x 2개'),
       catalogRow('mixed', '[비플레인] 시카테롤 크림 토너 세트'),
     ];
 
     expect(selectBigroomVerificationCandidates(candidates, 2).map((row) => row.id)).toEqual([
       'single-new',
-      'one-plus-one',
+      'two-pack',
     ]);
   });
 });
+
+describe('Bigroom catalog synchronization', () => {
+  const sitemap = `
+    <urlset>
+      <url>
+        <loc>https://bgroom.co.kr/product/beplain-cicaterol-cream-60ml/1172/</loc>
+        <lastmod>2026-09-01T00:00:00+09:00</lastmod>
+      </url>
+    </urlset>
+  `;
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('deindexes manifest rows not seen by a successful non-empty sync', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response(sitemap, { status: 200 }));
+    const upsert = jest.fn().mockResolvedValue({ error: null });
+    const staleBuilder = chain({ data: [{ id: 'stale-row' }], error: null });
+    const update = jest.fn(() => staleBuilder);
+    const client = {
+      from: jest.fn(() => ({ upsert, update })),
+    } as unknown as CatchCatchSupabaseClient;
+    const service = new BigroomCatalogService(client, new ConfigService());
+
+    const result = await service.syncManifest();
+
+    expect(result).toEqual({ indexed: 1, deindexed: 1 });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ external_product_id: '1172' })]),
+      { onConflict: 'external_product_id', ignoreDuplicates: false },
+    );
+    const syncedAt = (upsert.mock.calls[0][0] as Array<{ last_seen_at: string }>)[0].last_seen_at;
+    expect(update).toHaveBeenCalledWith({ sitemap_indexed: false, updated_at: syncedAt });
+    expect(staleBuilder.eq).toHaveBeenCalledWith('sitemap_indexed', true);
+    expect(staleBuilder.lt).toHaveBeenCalledWith('last_seen_at', syncedAt);
+    expect(staleBuilder.select).toHaveBeenCalledWith('id');
+  });
+
+  it('fails closed without changing catalog rows when the sitemap has no products', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(new Response('<urlset />', { status: 200 }));
+    const client = { from: jest.fn() } as unknown as CatchCatchSupabaseClient;
+    const service = new BigroomCatalogService(client, new ConfigService());
+
+    await expect(service.syncManifest()).rejects.toThrow('contained no product rows');
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it('searches active sitemap rows and recently discovered internal-search rows only', async () => {
+    const now = Date.parse('2026-09-04T00:00:00.000Z');
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const queryBuilder = chain({ data: [], error: null });
+    const client = {
+      from: jest.fn(() => queryBuilder),
+    } as unknown as CatchCatchSupabaseClient;
+    const service = new BigroomCatalogService(
+      client,
+      new ConfigService({ BIGROOM_MANIFEST_TTL_HOURS: '24' }),
+    );
+
+    await (service as unknown as {
+      findIndexedCandidates(value: typeof anchor): Promise<unknown>;
+    }).findIndexedCandidates(anchor);
+
+    expect(queryBuilder.or).toHaveBeenCalledWith(
+      'sitemap_indexed.eq.true,last_seen_at.gte.2026-09-03T00:00:00.000Z',
+    );
+  });
+});
+
+function chain(result: unknown) {
+  const builder = {
+    eq: jest.fn(),
+    lt: jest.fn(),
+    select: jest.fn(),
+    like: jest.fn(),
+    or: jest.fn(),
+    order: jest.fn(),
+    limit: jest.fn(),
+  };
+  builder.eq.mockReturnValue(builder);
+  builder.lt.mockReturnValue(builder);
+  builder.select.mockReturnValue(builder);
+  builder.like.mockReturnValue(builder);
+  builder.or.mockReturnValue(builder);
+  builder.order.mockReturnValue(builder);
+  builder.limit.mockResolvedValue(result);
+  builder.select.mockImplementation((columns: string) => (
+    columns === 'id' ? Promise.resolve(result) : builder
+  ));
+  return builder;
+}
 
 function catalogRow(id: string, productSlug: string): Row<'bigroom_catalog_items'> {
   return {

@@ -65,6 +65,15 @@ describe('CoreIntegrationService', () => {
     expect(await components.findByProductId(first.productId)).toHaveLength(1);
   });
 
+  it('accepts Zigzag as an identified source seller', async () => {
+    const request = resolveProductRequest();
+    request.identification.preview.seller = 'ZIGZAG';
+
+    await expect(resolveProduct(request)).resolves.toMatchObject({
+      productId: expect.stringMatching(UUID_V4_PATTERN),
+    });
+  });
+
   it('separates product identity variants while reusing canonical equivalent identities', async () => {
     const fiftyMl = resolveProductRequest();
     const hundredMl = resolveProductRequest('request-100ml');
@@ -358,6 +367,18 @@ describe('CoreIntegrationService', () => {
     }));
   });
 
+  it('ingests a content-verified Zigzag offer', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest();
+    request.search.seller_results[0].seller = 'ZIGZAG';
+    request.search.seller_results[0].source!.source_url = 'https://zigzag.kr/catalog/products/1';
+
+    const result = await service.ingestOffers(product.productId, request);
+
+    expect(result.offers).toHaveLength(1);
+    expect(result.offers[0]).toMatchObject({ sellerName: 'ZIGZAG' });
+  });
+
   it('builds judgment context from real snapshots and excludes non CONTENT_VERIFIED snapshots', async () => {
     const { analysisId, productId } = await seedJudgmentReadyAnalysis();
 
@@ -452,6 +473,20 @@ describe('CoreIntegrationService', () => {
 
     expect(bigroom?.source.acquisition_method).toBe('DIRECT_HTTP');
     expect(result.allowed_offer_ids).toEqual(['offer-public-lowest']);
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('preserves Zigzag as a seller in the Agent judgment contract', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis({
+      includeSecondVerifiedOffer: true,
+      secondSellerName: 'ZIGZAG',
+    });
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+    const zigzag = result.offers.find((offer) => offer.seller === 'ZIGZAG');
+
+    expect(zigzag).toBeDefined();
+    expect(zigzag?.source.acquisition_method).toBe('AI_WEB_SEARCH');
     expectAgentSchemaParse('judgmentInputSchema', result);
   });
 

@@ -682,6 +682,7 @@ function parseIdentificationPreview(value: unknown): ProductIdentificationContra
     seller !== 'OLIVE_YOUNG' &&
     seller !== 'MUSINSA_BEAUTY' &&
     seller !== 'COUPANG' &&
+    seller !== 'ZIGZAG' &&
     seller !== 'BRAND_OFFICIAL'
   ) {
     throw new BadRequestException('preview.seller is invalid');
@@ -847,6 +848,7 @@ function isSeller(value: unknown): value is SellerSearchResultContract['seller']
   return value === 'OLIVE_YOUNG' ||
     value === 'MUSINSA_BEAUTY' ||
     value === 'COUPANG' ||
+    value === 'ZIGZAG' ||
     value === 'BRAND_OFFICIAL';
 }
 
@@ -992,6 +994,7 @@ function toAiSeller(sellerName: string): string {
   if (normalized.includes('coupang')) return 'COUPANG';
   if (normalized.includes('musinsa')) return 'MUSINSA_BEAUTY';
   if (normalized.includes('olive')) return 'OLIVE_YOUNG';
+  if (normalized.includes('zigzag') || normalized.includes('지그재그')) return 'ZIGZAG';
   return 'BRAND_OFFICIAL';
 }
 
