@@ -189,6 +189,30 @@ describe('AiJudgmentService', () => {
     })).toThrow('Manufacturing cost language is forbidden');
   });
 
+  it('rejects changing a positive criterion assessment to negative', () => {
+    const positiveInput: JudgmentInput = {
+      ...input,
+      criterion_assessments: input.criterion_assessments.map((assessment) => (
+        assessment.criterion === 'FINAL_PAYMENT_AMOUNT'
+          ? { ...assessment, status: 'POSITIVE' as const }
+          : assessment
+      )),
+    };
+    const flippedJudgment: AiJudgment = {
+      ...validJudgment,
+      criteria_results: validJudgment.criteria_results.map((result) => (
+        result.criterion === 'FINAL_PAYMENT_AMOUNT'
+          ? { ...result, status: 'NEGATIVE' as const }
+          : result
+      )),
+    };
+
+    expect(() => validateAiJudgmentBusinessRules(
+      positiveInput,
+      flippedJudgment,
+    )).toThrow('Criterion status was changed');
+  });
+
   it('rejects confidence facts that are not globally disclosed', () => {
     expect(() => validateAiJudgmentBusinessRules(input, {
       ...validJudgment,

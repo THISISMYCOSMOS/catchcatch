@@ -138,6 +138,13 @@ export function LiveAnalysisResultScreen({ analysisId, fallbackSourceUrl }: Live
                   {offerSourceUrl(offer) ? <a href={offerSourceUrl(offer) ?? undefined} target="_blank" rel="noopener noreferrer">사이트 바로가기 <span aria-hidden="true">↗</span></a> : null}
                 </article>
               ))}
+              {!view.offers.some(isBigroomOffer) ? (
+                <article className={styles.storeCard}>
+                  <div className={styles.storeCopy}>
+                    <div className={styles.storeHeading}><h2>비그룸</h2><strong>검색 결과 없음</strong></div>
+                  </div>
+                </article>
+              ) : null}
             </div>
           </section>
 
@@ -204,6 +211,11 @@ function toViewModel(analysis: AnalysisRecord, fallbackSourceUrl: string | null)
 
 function effectivePrice(offer: AnalysisOffer): number | null {
   return offer.userEffectivePrice ?? offer.marketEffectivePrice ?? offer.salePrice ?? offer.originalListPrice;
+}
+
+function isBigroomOffer(offer: AnalysisOffer): boolean {
+  const sellerName = offer.sellerName.trim().toUpperCase();
+  return sellerName === "BIGROOM" || sellerName === "비그룸";
 }
 
 function offerSourceUrl(offer: AnalysisOffer): string | null {
