@@ -1,0 +1,148 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: __SERVICE__
+  labels:
+    cloud.googleapis.com/location: __REGION__
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/container-dependencies: '{"core":["backend","agent"],"web":["core"]}'
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: gen1
+        run.googleapis.com/startup-cpu-boost: "false"
+    spec:
+      serviceAccountName: catchcatch-runner@__PROJECT_ID__.iam.gserviceaccount.com
+      containerConcurrency: 1
+      timeoutSeconds: 300
+      containers:
+        - name: web
+          image: __REGION__-docker.pkg.dev/__PROJECT_ID__/__REPOSITORY__/web:__TAG__
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: CORE_INTERNAL_BASE_URL
+              value: http://127.0.0.1:3002
+          resources:
+            limits:
+              cpu: "0.25"
+              memory: 256Mi
+        - name: core
+          image: __REGION__-docker.pkg.dev/__PROJECT_ID__/__REPOSITORY__/core:__TAG__
+          env:
+            - name: CORE_PORT
+              value: "3002"
+            - name: BACKEND_BASE_URL
+              value: http://127.0.0.1:3000
+            - name: AGENT_BASE_URL
+              value: http://127.0.0.1:3001
+            - name: CORE_ALLOWED_ORIGINS
+              value: ""
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-internal-api-token
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-gemini-api-key
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3002
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: "0.25"
+              memory: 256Mi
+        - name: backend
+          image: __REGION__-docker.pkg.dev/__PROJECT_ID__/__REPOSITORY__/backend:__TAG__
+          env:
+            - name: PORT
+              value: "3000"
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-supabase-url
+            - name: SUPABASE_ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-supabase-anon-key
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-supabase-service-role-key
+            - name: PHONE_IDENTITY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-phone-identity-hmac-secret
+            - name: TERMS_VERSION
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-terms-version
+            - name: TERMS_DOCUMENT_SHA256
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-terms-document-sha256
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-internal-api-token
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: "0.25"
+              memory: 256Mi
+        - name: agent
+          image: __REGION__-docker.pkg.dev/__PROJECT_ID__/__REPOSITORY__/agent:__TAG__
+          env:
+            - name: PORT
+              value: "3001"
+            - name: PRODUCT_DATA_MODE
+              value: web_search
+            - name: AI_JUDGMENT_MODE
+              value: real
+            - name: INTERNAL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-internal-api-token
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: catchcatch-openai-api-key
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi

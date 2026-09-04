@@ -1,6 +1,6 @@
 "use client";
 
-const CORE_BASE_URL = (process.env.NEXT_PUBLIC_CORE_BASE_URL ?? "http://localhost:3002").replace(/\/$/, "");
+const CORE_BASE_URL = (process.env.NEXT_PUBLIC_CORE_BASE_URL ?? "").replace(/\/$/, "");
 const LEGACY_MOCK_AUTH_KEYS = [
   "catchcatch:auth-session",
   "catchcatch:authenticated",
