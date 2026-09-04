@@ -184,6 +184,8 @@
   background: linear-gradient(135deg, #fff8d8, #fffdf3);
 }
 
+.verdictCardContentOnly { grid-template-columns: minmax(0, 1fr); gap: 0; }
+
 .verdictIcon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); }
 .verdictIcon svg { width: 22px; height: 22px; fill: none; stroke: #5c470a; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .eyebrow { margin: 0; color: var(--gold-text); font-size: 11px; font-weight: 650; line-height: 1.4; letter-spacing: .08em; }

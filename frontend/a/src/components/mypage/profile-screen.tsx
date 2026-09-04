@@ -6,12 +6,21 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useRouter } from "next/navigation";
 import { AppLogo } from "@/components/app-logo";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
-import type { MockUserProfile } from "@/lib/mock/profile";
 import { logout, restoreAuthenticatedUser, sendWithdrawalOtp, withdrawAccount } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { getEmailError, getPasswordError } from "@/lib/validation/auth";
 
 type ProfileLoadState = "loading" | "ready" | "error";
+type UserProfile = {
+  id: string;
+  username: string;
+  nickname: string | null;
+  email: string | null;
+  phoneNumber: string | null;
+  joinedAt: null;
+  profileImageUrl: null;
+  loginProvider: null;
+};
 type EditableProfileValues = {
   nickname: string;
   email: string;
@@ -422,7 +431,7 @@ function ProfileSkeleton() {
   );
 }
 
-function toEditableValues(profile: MockUserProfile): EditableProfileValues {
+function toEditableValues(profile: UserProfile): EditableProfileValues {
   return {
     nickname: profile.nickname ?? "",
     email: profile.email ?? "",
@@ -442,7 +451,7 @@ export function ProfileScreen() {
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const isMountedRef = useRef(true);
   const [loadState, setLoadState] = useState<ProfileLoadState>("loading");
-  const [profile, setProfile] = useState<MockUserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editableValues, setEditableValues] = useState<EditableProfileValues>({ nickname: "", email: "" });
   const [touched, setTouched] = useState<Partial<Record<EditableProfileField, boolean>>>({});

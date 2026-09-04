@@ -210,7 +210,10 @@ export class ProductSearchService {
       ));
       const screened = promoted.map(({ result }) => screenCandidateIdentity(input.anchor_product, result));
       const directVerified = await Promise.all(
-        screened.map(({ result }) => this.verifySameProductSellerResult(result)),
+        screened.map(({ result }) => this.verifySameProductSellerResult(
+          result,
+          input.anchor_product,
+        )),
       );
 
       const verifiedResult = {
@@ -515,6 +518,8 @@ export class ProductSearchService {
       const directVerification = await this.verifyDynamicSellerPage(
         sellerResult.seller,
         promoted.result,
+        input.anchor_product,
+        'ALTERNATIVE_CONFIGURATION',
       );
       warnings.push(...directVerification.warnings.map((warning) => `${sellerResult.seller}: ${warning}`));
       if (!directVerification.candidate) {
@@ -641,11 +646,13 @@ export class ProductSearchService {
   private async verifyDynamicSellerPage<T extends DirectSellerPageCandidate>(
     seller: Seller,
     candidate: T,
+    anchor: ProductIdentity,
+    verificationScope: 'SAME_PRODUCT' | 'ALTERNATIVE_CONFIGURATION',
   ): Promise<{
     candidate: T | null;
     warnings: string[];
   }> {
-    if (seller !== 'MUSINSA_BEAUTY') {
+    if (seller !== 'MUSINSA_BEAUTY' && seller !== 'ZIGZAG') {
       return { candidate, warnings: [] };
     }
 
@@ -662,7 +669,11 @@ export class ProductSearchService {
       if (contentLength > 2_000_000) {
         throw new Error('seller page exceeded the 2 MB verification limit');
       }
-      const facts = extractMusinsaSellerPageFacts(await response.text());
+      const html = await readResponseTextWithByteLimit(response, 2_000_000);
+      if (seller === 'ZIGZAG') {
+        return verifyZigzagSellerPageCandidate(candidate, html, anchor, verificationScope);
+      }
+      const facts = extractMusinsaSellerPageFacts(html);
       if (facts.available === false) {
         return { candidate: null, warnings: ['direct seller page reports the offer is not purchasable'] };
       }
@@ -711,9 +722,10 @@ export class ProductSearchService {
 
   private async verifySameProductSellerResult(
     sellerResult: SellerSearchResult,
+    anchor: ProductIdentity,
   ): Promise<{ result: SellerSearchResult; warnings: string[] }> {
     if (
-      sellerResult.seller !== 'MUSINSA_BEAUTY' ||
+      (sellerResult.seller !== 'MUSINSA_BEAUTY' && sellerResult.seller !== 'ZIGZAG') ||
       sellerResult.availability !== 'AVAILABLE' ||
       !sellerResult.candidate_offer ||
       !sellerResult.source
@@ -724,6 +736,8 @@ export class ProductSearchService {
     const directVerification = await this.verifyDynamicSellerPage(
       sellerResult.seller,
       sellerResult as SellerSearchResult & DirectSellerPageCandidate,
+      anchor,
+      'SAME_PRODUCT',
     );
     if (directVerification.candidate) {
       return {
@@ -1614,6 +1628,309 @@ export function extractMusinsaSellerPageFacts(html: string): {
       ? null
       : /^(?:주문가능|in stock|available)$/i.test(availability),
   };
+}
+
+export type ZigzagSellerPageFacts = {
+  productId: string | null;
+  productName: string | null;
+  listedSalePrice: number | null;
+  listPrice: number | null;
+  publicCouponAmount: number | null;
+  shippingFee: number | null;
+  available: boolean | null;
+  mainCapacity: {
+    value: number;
+    unit: 'ML' | 'G';
+    quantity: number;
+  } | null;
+};
+
+export function extractZigzagSellerPageFacts(html: string): ZigzagSellerPageFacts {
+  const product = extractZigzagProductRecord(html);
+  if (!product) {
+    return emptyZigzagSellerPageFacts();
+  }
+
+  const productPrice = readUnknownRecord(product.product_price);
+  const displayFinalPrice = readUnknownRecord(productPrice?.display_final_price);
+  const displayedPrice = readUnknownRecord(displayFinalPrice?.final_price);
+  const additionalPrice = readUnknownRecord(displayFinalPrice?.final_price_additional);
+  const maxPrice = readUnknownRecord(productPrice?.max_price_info);
+  const couponInfo = readUnknownRecord(productPrice?.coupon_discount_info);
+  const shippingFee = readUnknownRecord(product.shipping_fee);
+  const listedSalePrice = readNonNegativeInteger(displayedPrice?.price);
+  const couponAmount = readNonNegativeInteger(couponInfo?.discount_amount);
+  const couponPrice = readNonNegativeInteger(additionalPrice?.price);
+  const publicCouponAmount = listedSalePrice !== null && couponAmount !== null && couponPrice !== null &&
+    listedSalePrice - couponAmount === couponPrice
+    ? couponAmount
+    : null;
+  const productId = typeof product.id === 'string' || typeof product.id === 'number'
+    ? String(product.id)
+    : null;
+  const productName = typeof product.name === 'string' && product.name.trim()
+    ? product.name.trim()
+    : null;
+  const available = typeof product.is_purchasable === 'boolean'
+    ? product.is_purchasable
+    : null;
+  const mainCapacity = extractZigzagMainCapacity(product, productName);
+
+  return {
+    productId,
+    productName,
+    listedSalePrice,
+    listPrice: readNonNegativeInteger(maxPrice?.price),
+    publicCouponAmount,
+    shippingFee: readNonNegativeInteger(shippingFee?.base_fee),
+    available,
+    mainCapacity,
+  };
+}
+
+function verifyZigzagSellerPageCandidate<T extends DirectSellerPageCandidate>(
+  candidate: T,
+  html: string,
+  anchor: ProductIdentity,
+  verificationScope: 'SAME_PRODUCT' | 'ALTERNATIVE_CONFIGURATION',
+): { candidate: T | null; warnings: string[] } {
+  const facts = extractZigzagSellerPageFacts(html);
+  const sourceProductId = extractZigzagProductId(candidate.source.source_url);
+  if (!sourceProductId || !facts.productId || sourceProductId !== facts.productId) {
+    throw new Error('Zigzag product id did not match the seller page');
+  }
+  if (facts.available === false) {
+    return { candidate: null, warnings: ['direct seller page reports the offer is not purchasable'] };
+  }
+  if (facts.available !== true) {
+    throw new Error('current Zigzag purchasability was not present in page data');
+  }
+  if (!facts.productName || facts.listedSalePrice === null || !facts.mainCapacity) {
+    throw new Error('current Zigzag product name, public sale price, or capacity was not present in page data');
+  }
+  const productNameIssues: string[] = [];
+  compareConfigurationProductName(
+    anchor.normalized_product_name,
+    facts.productName,
+    productNameIssues,
+  );
+  compareConfigurationProductName(
+    candidate.candidate_offer.product_name,
+    facts.productName,
+    productNameIssues,
+  );
+  if (productNameIssues.length > 0) {
+    throw new Error('Zigzag seller-page product name conflicts with the searched offer');
+  }
+  const expectedComponents = verificationScope === 'SAME_PRODUCT'
+    ? anchor.components
+    : candidate.candidate_offer.components;
+  if (
+    expectedComponents.some((component) => component.type !== 'MAIN') ||
+    candidate.candidate_offer.components.some((component) => component.type !== 'MAIN')
+  ) {
+    throw new Error('Zigzag seller page did not verify non-main set or gift components');
+  }
+  const expectedCapacity = calculateMainCapacityTotal(
+    expectedComponents,
+    verificationScope === 'SAME_PRODUCT'
+      ? anchor.normalized_product_name
+      : candidate.candidate_offer.product_name,
+  );
+  const directCapacity = {
+    unit: facts.mainCapacity.unit,
+    totalAmount: facts.mainCapacity.value * facts.mainCapacity.quantity,
+  };
+  if (
+    !expectedCapacity ||
+    expectedCapacity.unit !== directCapacity.unit ||
+    expectedCapacity.totalAmount !== directCapacity.totalAmount
+  ) {
+    throw new Error('Zigzag seller-page capacity conflicts with the searched offer');
+  }
+  const directComponents: ProductIdentity['components'] = [{
+    type: 'MAIN',
+    name: anchor.normalized_product_name,
+    capacity_value: facts.mainCapacity.value,
+    capacity_unit: facts.mainCapacity.unit,
+    quantity: facts.mainCapacity.quantity,
+  }];
+
+  const directDiscountConditions = facts.publicCouponAmount === null
+    ? []
+    : [`지그재그 공개 쿠폰 ${facts.publicCouponAmount}원 적용`];
+  const corrected = candidate.candidate_offer.product_name !== facts.productName ||
+    candidate.candidate_offer.listed_sale_price !== facts.listedSalePrice ||
+    candidate.candidate_offer.list_price !== facts.listPrice ||
+    candidate.candidate_offer.public_coupon_amount !== facts.publicCouponAmount ||
+    candidate.candidate_offer.shipping_fee !== facts.shippingFee;
+  return {
+    candidate: {
+      ...candidate,
+      candidate_offer: {
+        ...candidate.candidate_offer,
+        product_name: facts.productName,
+        option: facts.productName,
+        listed_sale_price: facts.listedSalePrice,
+        list_price: facts.listPrice,
+        public_coupon_amount: facts.publicCouponAmount,
+        automatic_discount_amount: null,
+        shipping_fee: facts.shippingFee,
+        discount_conditions: directDiscountConditions,
+        shipping_condition: facts.shippingFee === 0 ? '무료배송' : null,
+        components: directComponents,
+      },
+      source: {
+        ...candidate.source,
+        verification_status: 'CONTENT_VERIFIED',
+      },
+    } as T,
+    warnings: corrected
+      ? [
+          `direct Zigzag page corrected searched facts to sale=${facts.listedSalePrice}, list=${facts.listPrice ?? 'unknown'}, coupon=${facts.publicCouponAmount ?? 'none'}, shipping=${facts.shippingFee ?? 'unknown'}`,
+        ]
+      : [],
+  };
+}
+
+async function readResponseTextWithByteLimit(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      throw new Error('seller page exceeded the 2 MB verification limit');
+    }
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new Error('seller page exceeded the 2 MB verification limit');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function extractZigzagProductRecord(html: string): Record<string, unknown> | null {
+  for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    const script = match[0];
+    const openingTagEnd = script.indexOf('>');
+    if (openingTagEnd < 0 || readHtmlAttribute(script.slice(0, openingTagEnd + 1), 'id') !== '__NEXT_DATA__') {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(match[1] ?? '') as unknown;
+      const root = readUnknownRecord(parsed);
+      const props = readUnknownRecord(root?.props);
+      const pageProps = readUnknownRecord(props?.pageProps);
+      const dehydratedState = readUnknownRecord(pageProps?.dehydratedState);
+      const queries = dehydratedState?.queries;
+      if (!Array.isArray(queries)) {
+        return null;
+      }
+      for (const rawQuery of queries) {
+        const query = readUnknownRecord(rawQuery);
+        const state = readUnknownRecord(query?.state);
+        const data = readUnknownRecord(state?.data);
+        const product = readUnknownRecord(data?.product);
+        if (product) {
+          return product;
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function emptyZigzagSellerPageFacts(): ZigzagSellerPageFacts {
+  return {
+    productId: null,
+    productName: null,
+    listedSalePrice: null,
+    listPrice: null,
+    publicCouponAmount: null,
+    shippingFee: null,
+    available: null,
+    mainCapacity: null,
+  };
+}
+
+function extractZigzagMainCapacity(
+  product: Record<string, unknown>,
+  productName: string | null,
+): ZigzagSellerPageFacts['mainCapacity'] {
+  let capacityText = productName ?? '';
+  let capacityMatch = capacityText.match(/(\d+(?:\.\d+)?)\s*(ml|g)\b/i);
+  if (!capacityMatch && Array.isArray(product.essentials)) {
+    for (const rawEssential of product.essentials) {
+      const essential = readUnknownRecord(rawEssential);
+      if (
+        typeof essential?.name !== 'string' ||
+        !/(?:용량|중량)/.test(essential.name) ||
+        typeof essential.value !== 'string'
+      ) {
+        continue;
+      }
+      const match = essential.value.match(/(\d+(?:\.\d+)?)\s*(ml|g)\b/i);
+      if (match) {
+        capacityText = essential.value;
+        capacityMatch = match;
+        break;
+      }
+    }
+  }
+  if (!capacityMatch) {
+    return null;
+  }
+  const bonusQuantity = capacityText.match(/(\d+)\s*\+\s*(\d+)/);
+  const quantity = bonusQuantity
+    ? Number(bonusQuantity[1]) + Number(bonusQuantity[2])
+    : Number(capacityText.match(/(?:x|×|\*)\s*(\d+)\b/i)?.[1]
+      ?? capacityText.match(/(?:^|\D)(\d+)\s*개(?:입)?(?=\D|$)/i)?.[1]
+      ?? '1');
+  const value = Number(capacityMatch[1]);
+  if (!Number.isFinite(value) || value <= 0 || !Number.isSafeInteger(quantity) || quantity <= 0) {
+    return null;
+  }
+  return {
+    value,
+    unit: capacityMatch[2].toUpperCase() as 'ML' | 'G',
+    quantity,
+  };
+}
+
+function readUnknownRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function extractZigzagProductId(value: string): string | null {
+  try {
+    return new URL(value).pathname.match(/\/(?:app\/)?catalog\/products\/(\d+)(?:\/|$)/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function extractMusinsaProductUrls(html: string, limit = 5): string[] {

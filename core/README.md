@@ -34,3 +34,9 @@ Core는 공개 프론트엔드와 내부 Backend·Agent 사이의 오케스트�
 환경에만 두며 Frontend 환경 변수나 응답에 포함하지 않습니다.
 
 Backend 내부 계약은 `src/contracts.ts`의 `BackendClient` 호출 형태를 기준으로 구현합니다.
+
+## 실행과 로컬 환경
+
+`npm start`는 `core/.env`가 있으면 자동으로 읽고, 파일이 없으면 배포 환경에서 주입된 변수를 사용합니다. 로컬에서는 `.env.example`을 기준으로 실제 비밀값을 별도 설정하세요. 기본 상품 도메인에는 `zigzag.kr`가 포함됩니다.
+
+저장소 루트의 `npm run verify:local-integration`은 유료 API나 원격 DB 없이 Core의 전체 HTTP 계약을 재현합니다.

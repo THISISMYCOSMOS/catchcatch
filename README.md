@@ -7,7 +7,7 @@
 ## 하려는 것
 
 - 상품 링크에서 이름, 브랜드, 용량, 옵션, 구성품을 읽어옵니다.
-- 올리브영, 무신사 뷰티, 쿠팡, 브랜드 공식몰의 가격 조건을 비교합니다.
+- 올리브영, 무신사 뷰티, 쿠팡, 지그재그, 브랜드 공식몰의 가격 조건을 비교합니다.
 - 쿠폰과 배송비를 포함한 실구매가를 계산합니다.
 - 1ml 또는 1g 기준으로 용량당 가격을 계산합니다.
 - 최근 평균가와 직전 세일가를 비교합니다.
@@ -101,6 +101,16 @@ work/frontend/b   /
 `015_terms_withdrawal.sql`은 약관 버전, 공개 문서의 SHA-256, 동의 시각과 탈퇴 시각을 저장하고 회원탈퇴를 단일 DB 트랜잭션으로 처리합니다. 약관 원문이 확정되기 전에는 `TERMS_VERSION`과 `TERMS_DOCUMENT_SHA256`을 설정하지 않으며 신규 가입도 허용되지 않습니다. 시범 운영 중에는 활성 계정의 동의 기록을 유지하고, 탈퇴 처리된 동의 기록은 탈퇴 시각부터 1개월 뒤 `public.purge_expired_terms_consents()`로 삭제합니다. 실제 삭제를 위해서는 운영 환경의 service-role 작업이 이 함수를 정기 호출해야 하며, 스케줄러와 DB 배포는 별도 운영 승인 대상입니다.
 
 브라우저에는 access token이나 refresh token을 저장하지 않습니다. 두 토큰은 `HttpOnly`, `Secure`, `SameSite=Strict` 쿠키로만 전달되며 Core가 access cookie를 Backend용 Bearer 헤더로 변환합니다. 운영 배포에서는 Frontend와 Core를 같은 site의 HTTPS 도메인으로 구성해야 합니다.
+
+## 로컬 통합 검증
+
+다음 명령은 외부 AI 호출과 원격 DB 변경 없이 Backend 인메모리 저장소, Core HTTP 오케스트레이션, Agent 계약 스키마와 mock 판단을 연결해 분석 생성·저장·조회·최근 목록·삭제를 검증합니다. Agent의 실제 `sample` 모드가 `CONTENT_VERIFIED`로 근거 수준을 과장하지 않는지도 함께 확인합니다.
+
+```powershell
+npm run verify:local-integration
+```
+
+원격 배포 전에는 별도로 Supabase 프로젝트 연결 및 16개 마이그레이션 적용 상태, Backend·Core·Agent 환경 변수, Frontend의 `NEXT_PUBLIC_CORE_BASE_URL`, 실제 판매처 검색과 AI 비용 한도를 대상 환경에서 확인해야 합니다. 비밀값은 저장소에 커밋하지 않습니다.
 
 
 ## 서비스 이용약관

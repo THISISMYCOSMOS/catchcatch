@@ -22,4 +22,5 @@ test('keeps Core runnable with template fallback when Gemini is not configured',
   const config = loadConfig({ INTERNAL_API_TOKEN: 'internal-test-token' });
 
   assert.equal(config.gemini.apiKey, null);
+  assert.ok(config.allowedProductDomains.includes('zigzag.kr'));
 });

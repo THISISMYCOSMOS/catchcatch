@@ -85,7 +85,7 @@ export function LiveAnalysisResultScreen({ analysisId, fallbackSourceUrl }: Live
         </section>
 
         <section className={styles.analysisPanel} aria-label="구매 판단 결과">
-          <div className={styles.verdictCard}>
+          <div className={`${styles.verdictCard} ${styles.verdictCardContentOnly}`}>
             <div>
               <p className={styles.eyebrow}>구매 판단</p>
               <h2>{view.verdictTitle}</h2>
@@ -167,7 +167,7 @@ function ResultState({ title, description }: { title: string; description: strin
     <main className={styles.resultPage}>
       <div className={styles.appShell}>
         <section className={styles.analysisPanel} role="status">
-          <div className={styles.verdictCard}><div><h1>{title}</h1><p>{description}</p></div></div>
+          <div className={`${styles.verdictCard} ${styles.verdictCardContentOnly}`}><div><h1>{title}</h1><p>{description}</p></div></div>
           <Link className={styles.confirmButton} href="/home">홈으로 돌아가기</Link>
         </section>
       </div>
