@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { HomeScreen } from "@/components/home/home-screen";
 import { restoreAuthenticatedUser } from "@/lib/api/auth";
 import { getUserPreferences } from "@/lib/api/user-preferences";
-import { getWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/api/search-quota";
+import { getAnalysisUsage, type AnalysisUsageViewModel } from "@/lib/api/search-quota";
 import { getRecentAnalyses, toRecentAnalysisItem, type RecentAnalysisItem } from "@/lib/api/analyses";
 
 type HomeSession = {
   username: string;
-  weeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
+  analysisUsage: AnalysisUsageViewModel;
   recentAnalyses: RecentAnalysisItem[];
 };
 
@@ -31,14 +31,14 @@ export default function HomePage() {
         router.replace("/priorities");
         return;
       }
-      const [weeklyAnalysisUsage, recentRecords] = await Promise.all([
-        getWeeklyAnalysisUsage(),
+      const [analysisUsage, recentRecords] = await Promise.all([
+        getAnalysisUsage(),
         getRecentAnalyses(3),
       ]);
       if (cancelled) return;
       setHomeSession({
         username: user.phone ?? user.email ?? user.id,
-        weeklyAnalysisUsage,
+        analysisUsage,
         recentAnalyses: recentRecords.map(toRecentAnalysisItem),
       });
     })().catch(() => {
@@ -50,7 +50,7 @@ export default function HomePage() {
   return homeSession ? (
     <HomeScreen
       username={homeSession.username}
-      initialWeeklyAnalysisUsage={homeSession.weeklyAnalysisUsage}
+      initialAnalysisUsage={homeSession.analysisUsage}
       recentAnalyses={homeSession.recentAnalyses}
     />
   ) : null;

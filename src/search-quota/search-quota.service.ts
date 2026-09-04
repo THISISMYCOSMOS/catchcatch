@@ -47,7 +47,7 @@ export class SearchQuotaService {
       throw new HttpException({
         statusCode: HttpStatus.TOO_MANY_REQUESTS,
         code: SEARCH_QUOTA_EXCEEDED_CODE,
-        message: 'Weekly search limit exceeded',
+        message: '14-day search limit exceeded',
         limit: result.limit,
         used: result.used,
         remaining: result.remaining,

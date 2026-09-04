@@ -3,29 +3,36 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FormField } from "@/components/auth/form-field";
+import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
 import { LegalDocumentDialog } from "@/components/legal/legal-document-dialog";
-import { restoreAuthenticatedUser, sendPhoneOtp, verifyPhoneOtp, type PhoneAuthPurpose } from "@/lib/api/auth";
+import { restoreAuthenticatedUser, sendPhoneOtp, verifyPhoneOtp } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { authenticatedRoute } from "@/lib/api/user-preferences";
 import type { LegalDocumentId } from "@/lib/legal/documents";
+import { formatE164Phone, formatKoreanPhoneInput, toE164KoreanPhone } from "@/lib/phone";
+import { getSignupError, isSignupValid, type SignupField, type SignupValues } from "@/lib/validation/auth";
 
-type Props = {
-  purpose: PhoneAuthPurpose;
+const INITIAL_VALUES: SignupValues = {
+  username: "",
+  password: "",
+  passwordConfirmation: "",
+  agreedToTerms: false,
 };
 
-export function PhoneAuthForm({ purpose }: Props) {
+export function PhoneAuthForm() {
   const router = useRouter();
+  const [values, setValues] = useState(INITIAL_VALUES);
   const [phone, setPhone] = useState("");
   const [verifiedPhone, setVerifiedPhone] = useState("");
   const [otp, setOtp] = useState("");
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
+  const [touched, setTouched] = useState<Partial<Record<SignupField, boolean>>>({});
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
   const [openLegalDocument, setOpenLegalDocument] = useState<LegalDocumentId | null>(null);
-  const [step, setStep] = useState<"phone" | "otp">("phone");
+  const [step, setStep] = useState<"details" | "otp">("details");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const isSignup = purpose === "signup";
 
   useEffect(() => {
     let cancelled = false;
@@ -37,21 +44,32 @@ export function PhoneAuthForm({ purpose }: Props) {
     return () => { cancelled = true; };
   }, [router]);
 
+  function update(field: SignupField, value: string | boolean) {
+    setValues((current) => ({ ...current, [field]: value }));
+    setError("");
+  }
+
+  function errorFor(field: SignupField) {
+    return touched[field] ? getSignupError(field, values) : undefined;
+  }
+
   async function requestOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTouched({ username: true, password: true, passwordConfirmation: true, agreedToTerms: true });
     const normalizedPhone = toE164KoreanPhone(phone);
+    if (!isSignupValid(values) || !agreedToPrivacy) {
+      if (!agreedToPrivacy) setError("필수 약관에 모두 동의해주세요.");
+      return;
+    }
     if (!normalizedPhone) {
       setError("휴대폰 번호를 정확히 입력해주세요.");
       return;
     }
-    if (isSignup && (!agreedToTerms || !agreedToPrivacy)) {
-      setError("필수 약관에 모두 동의해주세요.");
-      return;
-    }
+
     setIsSubmitting(true);
     setError("");
     try {
-      await sendPhoneOtp(normalizedPhone, purpose);
+      await sendPhoneOtp(normalizedPhone);
       setVerifiedPhone(normalizedPhone);
       setStep("otp");
     } catch (cause) {
@@ -72,14 +90,21 @@ export function PhoneAuthForm({ purpose }: Props) {
     setIsSubmitting(true);
     setError("");
     try {
-      const user = await verifyPhoneOtp(verifiedPhone, otp, isSignup && agreedToTerms && agreedToPrivacy);
+      const user = await verifyPhoneOtp(
+        verifiedPhone,
+        otp,
+        values.username.trim(),
+        values.password,
+      );
       router.replace(await authenticatedRoute(user));
     } catch (cause) {
       setError(cause instanceof ApiError && cause.status === 401
         ? "인증번호가 일치하지 않거나 만료되었습니다."
-        : cause instanceof ApiError && cause.status === 403
-          ? "현재 약관 동의가 필요합니다. 회원가입 화면에서 약관에 동의한 뒤 인증해주세요."
-          : "인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        : cause instanceof ApiError && cause.status === 409
+          ? "이미 사용 중인 아이디입니다."
+          : cause instanceof ApiError && cause.status === 403
+            ? "현재 약관 동의가 필요합니다."
+            : "회원가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
     } finally {
       setIsSubmitting(false);
     }
@@ -89,26 +114,10 @@ export function PhoneAuthForm({ purpose }: Props) {
     return (
       <form className="stage-form" onSubmit={confirmOtp} noValidate>
         <p className="stage-description">{formatE164Phone(verifiedPhone)}로 전송된 인증번호를 입력해주세요.</p>
-        <FormField
-          id={`${purpose}-otp`}
-          label="인증번호"
-          type="text"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          maxLength={6}
-          placeholder="6자리 숫자"
-          value={otp}
-          onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
-          error={error || undefined}
-          autoFocus
-        />
+        <FormField id="signup-otp" label="인증번호" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6자리 숫자" value={otp} onChange={(event) => { setOtp(event.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }} error={error || undefined} autoFocus />
         <div className="button-stack">
-          <button className="button button-primary" type="submit" disabled={isSubmitting || otp.length !== 6}>
-            {isSubmitting ? "확인 중..." : isSignup ? "인증하고 가입하기" : "인증하고 로그인"}
-          </button>
-          <button className="button button-secondary" type="button" disabled={isSubmitting} onClick={() => { setStep("phone"); setOtp(""); setError(""); }}>
-            번호 다시 입력
-          </button>
+          <button className="button button-primary" type="submit" disabled={isSubmitting || otp.length !== 6}>{isSubmitting ? "확인 중..." : "인증하고 가입하기"}</button>
+          <button className="button button-secondary" type="button" disabled={isSubmitting} onClick={() => { setStep("details"); setOtp(""); setError(""); }}>정보 다시 입력</button>
         </div>
       </form>
     );
@@ -116,76 +125,32 @@ export function PhoneAuthForm({ purpose }: Props) {
 
   return (
     <form className="stage-form" onSubmit={requestOtp} noValidate>
-      <FormField
-        id={`${purpose}-phone`}
-        label="휴대폰 번호"
-        type="tel"
-        inputMode="tel"
-        autoComplete="tel"
-        placeholder="010-1234-5678"
-        value={phone}
-        onChange={(event) => { setPhone(event.target.value); setError(""); }}
-        error={error || undefined}
-        autoFocus
-      />
-      {isSignup ? (
-        <div className="terms-group">
-          <div className="terms-row">
-            <label className="checkbox-label">
-              <input type="checkbox" checked={agreedToTerms} onChange={(event) => { setAgreedToTerms(event.target.checked); setError(""); }} />
-              <span className="terms-copy">
-                <span className="terms-required">[필수]</span>
-                <span>서비스 이용약관에 동의합니다.</span>
-              </span>
-            </label>
-            <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("terms")}>보기</button>
-          </div>
-          <div className="terms-row">
-            <label className="checkbox-label">
-              <input type="checkbox" checked={agreedToPrivacy} onChange={(event) => { setAgreedToPrivacy(event.target.checked); setError(""); }} />
-              <span className="terms-copy">
-                <span className="terms-required">[필수]</span>
-                <span>개인정보 수집·이용에 동의합니다.</span>
-              </span>
-            </label>
-            <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("privacyConsent")}>보기</button>
-          </div>
+      <FormField id="signup-username" label="아이디" type="text" homeLinkFocus placeholder="영문/숫자 4~12자" autoComplete="username" value={values.username} onChange={(event) => update("username", event.target.value)} onBlur={() => setTouched((current) => ({ ...current, username: true }))} error={errorFor("username")} autoFocus />
+      <FormField id="signup-password" label="비밀번호" type={showPassword ? "text" : "password"} homeLinkFocus placeholder="영문, 숫자, 특수문자 조합 8~16자" autoComplete="new-password" value={values.password} onChange={(event) => update("password", event.target.value)} onBlur={() => setTouched((current) => ({ ...current, password: true }))} error={errorFor("password")} trailingControl={<PasswordVisibilityButton visible={showPassword} onToggle={() => setShowPassword((value) => !value)} />} />
+      <FormField id="password-confirmation" label="비밀번호 재확인" type={showPasswordConfirmation ? "text" : "password"} homeLinkFocus placeholder="비밀번호를 한 번 더 입력해주세요." autoComplete="new-password" value={values.passwordConfirmation} onChange={(event) => update("passwordConfirmation", event.target.value)} onBlur={() => setTouched((current) => ({ ...current, passwordConfirmation: true }))} error={errorFor("passwordConfirmation")} trailingControl={<PasswordVisibilityButton visible={showPasswordConfirmation} onToggle={() => setShowPasswordConfirmation((value) => !value)} />} />
+      <FormField id="signup-phone" label="휴대폰 번호" type="tel" inputMode="tel" autoComplete="tel" maxLength={13} placeholder="010-1234-5678" value={phone} onChange={(event) => { setPhone(formatKoreanPhoneInput(event.target.value)); setError(""); }} />
+      <div className="terms-group">
+        <div className="terms-row">
+          <label className="checkbox-label">
+            <input type="checkbox" checked={values.agreedToTerms} onChange={(event) => { update("agreedToTerms", event.target.checked); setTouched((current) => ({ ...current, agreedToTerms: true })); }} />
+            <span className="terms-copy"><span className="terms-required">[필수]</span><span>서비스 이용약관에 동의합니다.</span></span>
+          </label>
+          <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("terms")}>보기</button>
         </div>
-      ) : null}
-      <div className="button-stack">
-        <button className="button button-primary" type="submit" disabled={isSubmitting || !phone.trim() || (isSignup && (!agreedToTerms || !agreedToPrivacy))}>
-          {isSubmitting ? "전송 중..." : "인증번호 받기"}
-        </button>
-        <Link className="button button-secondary" href={isSignup ? "/login" : "/signup"}>
-          {isSignup ? "로그인" : "회원가입"}
-        </Link>
+        <div className="terms-row">
+          <label className="checkbox-label">
+            <input type="checkbox" checked={agreedToPrivacy} onChange={(event) => { setAgreedToPrivacy(event.target.checked); setError(""); }} />
+            <span className="terms-copy"><span className="terms-required">[필수]</span><span>개인정보 수집·이용에 동의합니다.</span></span>
+          </label>
+          <button className="terms-view-button" type="button" onClick={() => setOpenLegalDocument("privacyConsent")}>보기</button>
+        </div>
       </div>
-      {openLegalDocument ? (
-        <LegalDocumentDialog documentId={openLegalDocument} onClose={() => setOpenLegalDocument(null)} />
-      ) : null}
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <div className="button-stack">
+        <button className="button button-primary" type="submit" disabled={isSubmitting || !phone.trim() || !isSignupValid(values) || !agreedToPrivacy}>{isSubmitting ? "전송 중..." : "인증번호 받기"}</button>
+        <Link className="button button-secondary" href="/login">로그인</Link>
+      </div>
+      {openLegalDocument ? <LegalDocumentDialog documentId={openLegalDocument} onClose={() => setOpenLegalDocument(null)} /> : null}
     </form>
   );
-}
-
-function toE164KoreanPhone(input: string): string | null {
-  const trimmed = input.trim();
-  const digits = trimmed.replace(/\D/g, "");
-  if (!trimmed.startsWith("+") && digits.startsWith("0") && !/^010\d{8}$/.test(digits)) {
-    return null;
-  }
-  const candidate = trimmed.startsWith("+")
-    ? `+${digits}`
-    : digits.startsWith("82")
-      ? `+${digits}`
-      : digits.startsWith("0")
-        ? `+82${digits.slice(1)}`
-        : "";
-  return /^\+[1-9]\d{7,14}$/.test(candidate) ? candidate : null;
-}
-
-function formatE164Phone(phone: string): string {
-  if (/^\+8210\d{8}$/.test(phone)) {
-    return `010-${phone.slice(5, 9)}-${phone.slice(9)}`;
-  }
-  return phone;
 }

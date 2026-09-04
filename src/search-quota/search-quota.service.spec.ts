@@ -63,18 +63,18 @@ describe('SearchQuotaService', () => {
     });
   });
 
-  it('does not reset before seven days and resets at the exact expiry time', async () => {
+  it('does not reset before 14 days and resets at the exact expiry time', async () => {
     const start = new Date('2026-08-17T14:30:00.000Z');
     await service.consumeForUser('user-1', 'first', start);
-    await service.consumeForUser('user-1', 'second', new Date('2026-08-24T14:29:59.999Z'));
+    await service.consumeForUser('user-1', 'second', new Date('2026-08-31T14:29:59.999Z'));
     expect(database.store.userSearchQuotas[0]).toMatchObject({ used_count: 2 });
 
-    const reset = await service.consumeForUser('user-1', 'third', new Date('2026-08-24T14:30:00.000Z'));
+    const reset = await service.consumeForUser('user-1', 'third', new Date('2026-08-31T14:30:00.000Z'));
     expect(reset).toMatchObject({
       used: 1,
       remaining: 9,
-      windowStartedAt: '2026-08-24T14:30:00.000Z',
-      resetsAt: '2026-08-31T14:30:00.000Z',
+      windowStartedAt: '2026-08-31T14:30:00.000Z',
+      resetsAt: '2026-09-14T14:30:00.000Z',
     });
   });
 

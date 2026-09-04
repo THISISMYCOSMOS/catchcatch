@@ -2,8 +2,8 @@
 
 import { apiRequest } from "@/lib/api/client";
 
-export type WeeklyAnalysisUsageViewModel = {
-  weeklyLimit: number;
+export type AnalysisUsageViewModel = {
+  limit: number;
   usedCount: number;
   remainingCount: number;
   limitReached: boolean;
@@ -17,10 +17,10 @@ type SearchQuotaResponse = {
   resetsAt: string | null;
 };
 
-export async function getWeeklyAnalysisUsage(): Promise<WeeklyAnalysisUsageViewModel> {
+export async function getAnalysisUsage(): Promise<AnalysisUsageViewModel> {
   const response = await apiRequest<SearchQuotaResponse>("/api/v1/search-quota/me");
   return {
-    weeklyLimit: response.limit,
+    limit: response.limit,
     usedCount: response.used,
     remainingCount: response.remaining,
     limitReached: response.remaining <= 0,

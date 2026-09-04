@@ -7,27 +7,36 @@ type AuthResponse = {
   expiresAt: number | null;
 };
 
-export type PhoneAuthPurpose = "login" | "signup";
+export async function login(accountId: string, password: string): Promise<AuthUser> {
+  const response = await apiRequest<AuthResponse>("/api/v1/auth/login", {
+    method: "POST",
+    authenticated: false,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ accountId, password }),
+  });
+  return response.user;
+}
 
-export async function sendPhoneOtp(phone: string, purpose: PhoneAuthPurpose): Promise<void> {
+export async function sendPhoneOtp(phone: string): Promise<void> {
   await apiRequest<{ sent: true }>("/api/v1/auth/phone/send-otp", {
     method: "POST",
     authenticated: false,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ phone, purpose }),
+    body: JSON.stringify({ phone }),
   });
 }
 
 export async function verifyPhoneOtp(
   phone: string,
   token: string,
-  acceptTerms: boolean,
+  accountId: string,
+  password: string,
 ): Promise<AuthUser> {
   const response = await apiRequest<AuthResponse>("/api/v1/auth/phone/verify-otp", {
     method: "POST",
     authenticated: false,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ phone, token, acceptTerms }),
+    body: JSON.stringify({ phone, token, accountId, password, acceptTerms: true }),
   });
   return response.user;
 }

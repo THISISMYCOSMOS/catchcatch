@@ -914,7 +914,7 @@ function getOrCreateConsumableQuota(
   }
   if (new Date(existing.window_expires_at).getTime() <= now.getTime()) {
     existing.window_started_at = now.toISOString();
-    existing.window_expires_at = addDays(now, 7).toISOString();
+    existing.window_expires_at = addDays(now, 14).toISOString();
     existing.used_count = 0;
     existing.limit_count = 10;
     existing.updated_at = now.toISOString();
@@ -931,7 +931,7 @@ function createQuotaRow(
   const row: Row<'user_search_quotas'> = {
     user_id: userId,
     window_started_at: now.toISOString(),
-    window_expires_at: addDays(now, 7).toISOString(),
+    window_expires_at: addDays(now, 14).toISOString(),
     used_count: usedCount,
     limit_count: 10,
     created_at: now.toISOString(),

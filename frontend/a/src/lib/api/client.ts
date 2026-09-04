@@ -1,7 +1,13 @@
 "use client";
 
 const CORE_BASE_URL = (process.env.NEXT_PUBLIC_CORE_BASE_URL ?? "http://localhost:3002").replace(/\/$/, "");
-const LEGACY_SESSION_KEY = "catchcatch:auth-session";
+const LEGACY_MOCK_AUTH_KEYS = [
+  "catchcatch:auth-session",
+  "catchcatch:authenticated",
+  "catchcatch:authenticated-user",
+  "catchcatch:mock-accounts",
+  "catchcatch:onboarding-status",
+] as const;
 
 export type AuthUser = {
   id: string;
@@ -71,8 +77,10 @@ export async function refreshHttpOnlySession(): Promise<boolean> {
 
 function clearLegacySession(): void {
   if (typeof window === "undefined") return;
-  window.sessionStorage.removeItem(LEGACY_SESSION_KEY);
-  window.localStorage.removeItem(LEGACY_SESSION_KEY);
+  for (const key of LEGACY_MOCK_AUTH_KEYS) {
+    window.sessionStorage.removeItem(key);
+    window.localStorage.removeItem(key);
+  }
 }
 
 async function readPayload(response: Response): Promise<unknown> {

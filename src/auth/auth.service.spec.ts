@@ -16,18 +16,50 @@ const TERMS_VERSION = 'pending-test-version';
 const TERMS_SHA256 = 'a'.repeat(64);
 
 describe('AuthService', () => {
-  it('creates users only on the signup OTP path', async () => {
+  it('logs in with account ID and password without sending an OTP', async () => {
+    const rpc = defaultRpc();
+    const from = jest.fn(() => ({
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          maybeSingle: jest.fn().mockResolvedValue({ data: { user_id: 'user-1' }, error: null }),
+        })),
+      })),
+    }));
+    const getUserById = jest.fn().mockResolvedValue({
+      data: { user: { id: 'user-1', phone: '+821012345678' } }, error: null,
+    });
+    const signInWithPassword = jest.fn().mockResolvedValue({
+      data: {
+        user: { id: 'user-1', phone: '+821012345678' },
+        session: { access_token: 'access-token', refresh_token: 'refresh-token', expires_at: 123 },
+      },
+      error: null,
+    });
+    const service = new AuthService(
+      mockClient({ from, rpc, auth: { admin: { getUserById } } }),
+      new ConfigService({
+        PHONE_IDENTITY_HMAC_SECRET: HMAC_SECRET,
+        TERMS_VERSION,
+        TERMS_DOCUMENT_SHA256: TERMS_SHA256,
+      }),
+      () => mockClient({ auth: { signInWithPassword } }),
+    );
+
+    await expect(service.login({ accountId: 'User1234', password: 'Password1!' }))
+      .resolves.toMatchObject({ user: { id: 'user-1', phone: '+821012345678' } });
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      phone: '+821012345678', password: 'Password1!',
+    });
+    expect(rpc).toHaveBeenCalledWith('ensure_phone_user_access', expect.any(Object));
+  });
+
+  it('uses phone OTP only to create a signup user', async () => {
     const signInWithOtp = jest.fn().mockResolvedValue({ data: {}, error: null });
     const service = authServiceWithAuthClient({ signInWithOtp });
 
-    await service.sendPhoneOtp({ phone: '+821012345678', purpose: 'login' });
-    await service.sendPhoneOtp({ phone: '+821012345678', purpose: 'signup', captchaToken: 'captcha' });
+    await service.sendPhoneOtp({ phone: '+821012345678', captchaToken: 'captcha' });
 
-    expect(signInWithOtp).toHaveBeenNthCalledWith(1, {
-      phone: '+821012345678',
-      options: { shouldCreateUser: false, captchaToken: undefined },
-    });
-    expect(signInWithOtp).toHaveBeenNthCalledWith(2, {
+    expect(signInWithOtp).toHaveBeenCalledWith({
       phone: '+821012345678',
       options: { shouldCreateUser: true, captchaToken: 'captcha' },
     });
@@ -39,12 +71,16 @@ describe('AuthService', () => {
       TERMS_DOCUMENT_SHA256: '',
     });
 
-    await expect(service.sendPhoneOtp({ phone: '+821012345678', purpose: 'signup' }))
+    await expect(service.sendPhoneOtp({ phone: '+821012345678' }))
       .rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   it('records terms after OTP verification and derives only an HMAC for access checks', async () => {
     const rpc = defaultRpc();
+    const updateUser = jest.fn().mockResolvedValue({
+      data: { user: { id: 'user-1', phone: '+821012345678', user_metadata: { account_id: 'user1234' } } },
+      error: null,
+    });
     const service = authServiceWithAuthClient({
       verifyOtp: jest.fn().mockResolvedValue({
         data: {
@@ -53,15 +89,19 @@ describe('AuthService', () => {
         },
         error: null,
       }),
+      updateUser,
     }, { rpc });
 
-    const result = await service.verifyPhoneOtp({
-      phone: '+821012345678', token: '123456', acceptTerms: true,
-    });
+    const result = await service.verifyPhoneOtp(signupInput());
 
     expect(result.user).toEqual({ id: 'user-1', email: null, phone: '+821012345678' });
-    expect(rpc).toHaveBeenCalledWith('record_terms_consent', expect.objectContaining({
+    expect(updateUser).toHaveBeenCalledWith({
+      password: 'Password1!',
+      data: { account_id: 'user1234' },
+    });
+    expect(rpc).toHaveBeenCalledWith('register_user_account', expect.objectContaining({
       p_user_id: 'user-1',
+      p_account_id: 'user1234',
       p_terms_version: TERMS_VERSION,
       p_document_sha256: TERMS_SHA256,
     }));
@@ -90,10 +130,13 @@ describe('AuthService', () => {
           session: { access_token: 'a2', refresh_token: 'r2', expires_at: 2 },
         }, error: null,
       });
-    const service = authServiceWithAuthClient({ verifyOtp }, { rpc });
+    const updateUser = jest.fn()
+      .mockResolvedValueOnce({ data: { user: { id: 'deleted-user-id', phone: '+821012345678' } }, error: null })
+      .mockResolvedValueOnce({ data: { user: { id: 'new-user-id', phone: '+821012345678' } }, error: null });
+    const service = authServiceWithAuthClient({ verifyOtp, updateUser }, { rpc });
 
-    await service.verifyPhoneOtp({ phone: '+821012345678', token: '123456', acceptTerms: true });
-    await service.verifyPhoneOtp({ phone: '+821012345678', token: '654321', acceptTerms: true });
+    await service.verifyPhoneOtp(signupInput('123456', 'firstuser'));
+    await service.verifyPhoneOtp(signupInput('654321', 'seconduser'));
 
     const accessCalls = rpc.mock.calls.filter((call) => call[0] === 'ensure_phone_user_access');
     expect(accessCalls).toHaveLength(2);
@@ -109,9 +152,8 @@ describe('AuthService', () => {
       }),
     });
 
-    await expect(service.verifyPhoneOtp({
-      phone: '+821012345678', token: '000000', acceptTerms: false,
-    })).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(service.verifyPhoneOtp(signupInput('000000')))
+      .rejects.toBeInstanceOf(UnauthorizedException);
     expect(() => authServiceWithAuthClient({}, {}, 'short'))
       .toThrow('PHONE_IDENTITY_HMAC_SECRET must be at least 32 characters');
   });
@@ -189,12 +231,13 @@ describe('AuthService', () => {
   it('validates E.164 phone, six-digit OTP, and explicit consent state', async () => {
     const send = new SendPhoneOtpDto();
     send.phone = '010-1234-5678';
-    send.purpose = 'login';
     await expect(validate(send)).resolves.not.toHaveLength(0);
 
     const verify = new VerifyPhoneOtpDto();
     verify.phone = '+821012345678';
     verify.token = '12345';
+    verify.accountId = 'ab';
+    verify.password = 'weak';
     verify.acceptTerms = false;
     await expect(validate(verify)).resolves.not.toHaveLength(0);
 
@@ -260,9 +303,7 @@ describe('AuthController HttpOnly cookie responses', () => {
     } as never);
     const response = mockResponse();
 
-    const result = await controller.verifyPhoneOtp({
-      phone: '+821012345678', token: '123456', acceptTerms: true,
-    }, response);
+    const result = await controller.verifyPhoneOtp(signupInput(), response);
 
     expect(result).toEqual({
       user: { id: 'user-1', email: null, phone: '+821012345678' }, expiresAt: 4_102_444_800,
@@ -307,20 +348,33 @@ describe('AuthController HttpOnly cookie responses', () => {
 
 function defaultRpc() {
   return jest.fn((fn: string, _args: Record<string, unknown>) => Promise.resolve({
-    data: fn === 'ensure_phone_user_access' || fn === 'withdraw_user_account' ? true : {},
+    data: fn === 'ensure_phone_user_access' || fn === 'withdraw_user_account' || fn === 'register_user_account' ? true : {},
     error: null,
   }));
 }
 
 function mockClient(overrides: Record<string, unknown> = {}) {
   const authOverride = (overrides.auth ?? {}) as Record<string, unknown>;
+  const maybeSingle = jest.fn().mockResolvedValue({ data: null, error: null });
   return {
     rpc: jest.fn(),
+    from: jest.fn(() => ({ select: jest.fn(() => ({ eq: jest.fn(() => ({ maybeSingle })) })) })),
     ...overrides,
     auth: {
-      refreshSession: jest.fn(), getUser: jest.fn(), admin: { signOut: jest.fn() }, ...authOverride,
+      refreshSession: jest.fn(), getUser: jest.fn(), updateUser: jest.fn(),
+      admin: { signOut: jest.fn(), getUserById: jest.fn() }, ...authOverride,
     },
   } as never;
+}
+
+function signupInput(token = '123456', accountId = 'user1234') {
+  return {
+    phone: '+821012345678',
+    token,
+    accountId,
+    password: 'Password1!',
+    acceptTerms: true as const,
+  };
 }
 
 function authServiceWithAuthClient(

@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { AuthenticatedUser } from './auth.types';
 import { CurrentUser } from './current-user.decorator';
 import { CurrentAccessToken } from './current-access-token.decorator';
+import { LoginDto } from './dto/login.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { WithdrawAccountDto } from './dto/withdraw-account.dto';
@@ -12,6 +13,16 @@ import { SessionAuthGuard } from './session-auth.guard';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly service: AuthService) {}
+
+  @Post('login')
+  async login(
+    @Body() body: LoginDto,
+    @Res({ passthrough: true }) response: CookieResponse,
+  ) {
+    const result = await this.service.login(body);
+    setAuthCookies(response, result);
+    return toPublicAuthResponse(result);
+  }
 
   @Post('phone/send-otp')
   sendPhoneOtp(@Body() body: SendPhoneOtpDto) {

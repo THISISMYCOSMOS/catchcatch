@@ -6,8 +6,8 @@ type AnalysisLimitDialogProps = {
   onClose: () => void;
 };
 
-// 주간 분석 안내 문구 입력 위치
-const WEEKLY_ANALYSIS_NOTICE = {
+// 분석 제한 안내 문구 입력 위치
+const ANALYSIS_LIMIT_NOTICE = {
   title: "",
   content: "",
 } as const;
@@ -21,8 +21,8 @@ export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
-  const title = WEEKLY_ANALYSIS_NOTICE.title.trim();
-  const content = WEEKLY_ANALYSIS_NOTICE.content.trim();
+  const title = ANALYSIS_LIMIT_NOTICE.title.trim();
+  const content = ANALYSIS_LIMIT_NOTICE.content.trim();
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -90,7 +90,7 @@ export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
         className="previous-analysis-dialog analysis-limit-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={title ? undefined : "주간 분석 이용 안내"}
+        aria-label={title ? undefined : "14일 분석 이용 안내"}
         aria-labelledby={title ? "analysis-limit-title" : undefined}
         aria-describedby={content ? "analysis-limit-description" : undefined}
         ref={dialogRef}
@@ -103,7 +103,7 @@ export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
           <button
             className="previous-analysis-close"
             type="button"
-            aria-label="주간 분석 이용 안내 닫기"
+            aria-label="14일 분석 이용 안내 닫기"
             onClick={closeFromControl}
             ref={closeButtonRef}
           >

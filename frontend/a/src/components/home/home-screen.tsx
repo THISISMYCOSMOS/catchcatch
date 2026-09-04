@@ -13,7 +13,7 @@ import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } fro
 import { createAnalysis, toAnalysisFailureStatus, type AnalysisFailureStatus } from "@/lib/api/analyses";
 import type { RecentAnalysisItem } from "@/lib/api/analyses";
 import { previewProduct, type ProductPreview } from "@/lib/api/products";
-import { getWeeklyAnalysisUsage, type WeeklyAnalysisUsageViewModel } from "@/lib/api/search-quota";
+import { getAnalysisUsage, type AnalysisUsageViewModel } from "@/lib/api/search-quota";
 import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
@@ -27,7 +27,7 @@ const SELLER_LABELS: Record<string, string> = {
 };
 type HomeScreenProps = {
   username: string;
-  initialWeeklyAnalysisUsage: WeeklyAnalysisUsageViewModel;
+  initialAnalysisUsage: AnalysisUsageViewModel;
   recentAnalyses: RecentAnalysisItem[];
 };
 
@@ -143,14 +143,14 @@ function ProductPreviewCard({ product, isSelecting, onSelect }: {
   );
 }
 
-export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyses }: HomeScreenProps) {
+export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: HomeScreenProps) {
   const router = useRouter();
   const [linkValue, setLinkValue] = useState("");
   const [linkError, setLinkError] = useState("");
   const [analysisState, setAnalysisState] = useState<AnalysisState>("idle");
   const [analysisErrorStatus, setAnalysisErrorStatus] = useState<AnalysisFailureStatus>("INTERNAL_ERROR");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [weeklyAnalysisUsage, setWeeklyAnalysisUsage] = useState(initialWeeklyAnalysisUsage);
+  const [analysisUsage, setAnalysisUsage] = useState(initialAnalysisUsage);
   const [lastAnalysisRequest, setLastAnalysisRequest] = useState<AnalysisRequest | null>(null);
   const isAnalyzingRef = useRef(false);
   const analysisTimerRef = useRef<number | null>(null);
@@ -167,7 +167,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
   const [isAnalysisLimitDialogOpen, setIsAnalysisLimitDialogOpen] = useState(false);
   const [isBenefitPromptVisible, setIsBenefitPromptVisible] = useState(false);
   const selectedAnalysis = selectedAnalysisId ? recentAnalyses.find((item) => item.id === selectedAnalysisId) ?? null : null;
-  const isWeeklyLimitReached = weeklyAnalysisUsage.remainingCount === 0 || weeklyAnalysisUsage.limitReached;
+  const isAnalysisLimitReached = analysisUsage.remainingCount === 0 || analysisUsage.limitReached;
   const analysisErrorMessage = ANALYSIS_ERROR_MESSAGES[analysisErrorStatus];
 
   const clearProductPreview = useCallback(() => {
@@ -329,7 +329,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
 
   async function runAnalysis(request: AnalysisRequest) {
     if (isAnalyzingRef.current) return;
-    if (isWeeklyLimitReached) {
+    if (isAnalysisLimitReached) {
       setIsAnalysisLimitDialogOpen(true);
       return;
     }
@@ -349,7 +349,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
       const result = await createAnalysis(request.productUrl);
       stopAnalysisTimer();
       query.set("analysisId", result.analysisId);
-      setWeeklyAnalysisUsage(await getWeeklyAnalysisUsage());
+      setAnalysisUsage(await getAnalysisUsage());
       window.sessionStorage.setItem(ANALYSIS_LINK_STORAGE_KEY, request.productUrl);
       router.push(`${ANALYSIS_RESULT_PATH}?${query.toString()}`);
     } catch (error) {
@@ -363,7 +363,7 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
   function handleAnalyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isAnalyzingRef.current) return;
-    if (isWeeklyLimitReached) {
+    if (isAnalysisLimitReached) {
       setIsAnalysisLimitDialogOpen(true);
       return;
     }
@@ -475,18 +475,18 @@ export function HomeScreen({ username, initialWeeklyAnalysisUsage, recentAnalyse
             <button
               className="analysis-submit"
               type="submit"
-              disabled={isWeeklyLimitReached}
+              disabled={isAnalysisLimitReached}
             >
               분석하기
             </button>
-            <div className={`analysis-usage${isWeeklyLimitReached ? " is-limit-reached" : ""}`}>
+            <div className={`analysis-usage${isAnalysisLimitReached ? " is-limit-reached" : ""}`}>
               <span className="analysis-usage-text">
-                이번 주 분석<strong>{weeklyAnalysisUsage.remainingCount}회 남음</strong>
+                14일간 분석<strong>{analysisUsage.remainingCount}회 남음</strong>
               </span>
               <button
                 className="analysis-usage-help"
                 type="button"
-                aria-label="주간 분석 이용 안내"
+                aria-label="14일 분석 이용 안내"
                 aria-haspopup="dialog"
                 onClick={() => setIsAnalysisLimitDialogOpen(true)}
               >

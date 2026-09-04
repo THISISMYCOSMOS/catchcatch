@@ -1,9 +1,10 @@
 import { createHmac } from 'node:crypto';
-import { ForbiddenException, HttpException, Inject, Injectable, InternalServerErrorException, Optional, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, HttpException, Inject, Injectable, InternalServerErrorException, Optional, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthError, Session, User } from '@supabase/supabase-js';
 import { CatchCatchSupabaseClient, createSupabaseAuthClient, SUPABASE_CLIENT } from '../database/supabase.client';
 import { AuthenticatedUser } from './auth.types';
+import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
@@ -40,14 +41,43 @@ export class AuthService {
     this.phoneHmacSecret = secret;
   }
 
-  async sendPhoneOtp(input: SendPhoneOtpDto): Promise<{ sent: true }> {
-    if (input.purpose === 'signup') {
-      this.currentTerms();
+  async login(input: LoginDto): Promise<AuthResponse> {
+    const accountId = normalizeAccountId(input.accountId);
+    const { data: account, error: accountError } = await this.client
+      .from('user_accounts')
+      .select('user_id')
+      .eq('account_id', accountId)
+      .maybeSingle();
+    if (accountError || !account) {
+      throw new UnauthorizedException('Invalid account ID or password');
     }
+
+    const { data: adminData, error: adminError } = await this.client.auth.admin.getUserById(account.user_id);
+    const phone = adminData.user?.phone?.trim();
+    if (adminError || !adminData.user || !phone) {
+      throw new UnauthorizedException('Invalid account ID or password');
+    }
+
+    const { data, error } = await this.createAuthClient().auth.signInWithPassword({
+      phone,
+      password: input.password,
+    });
+    if (error || !data.user || !data.session) {
+      if (error?.status === 429) {
+        throw new HttpException('Failed to login', 429);
+      }
+      throw new UnauthorizedException('Invalid account ID or password');
+    }
+    await this.assertPhoneUserAccess(data.user);
+    return toAuthResponse(data.user, data.session, true);
+  }
+
+  async sendPhoneOtp(input: SendPhoneOtpDto): Promise<{ sent: true }> {
+    this.currentTerms();
     const { error } = await this.createAuthClient().auth.signInWithOtp({
       phone: input.phone,
       options: {
-        shouldCreateUser: input.purpose === 'signup',
+        shouldCreateUser: true,
         captchaToken: input.captchaToken,
       },
     });
@@ -58,7 +88,11 @@ export class AuthService {
   }
 
   async verifyPhoneOtp(input: VerifyPhoneOtpDto): Promise<AuthResponse> {
-    const { data, error } = await this.createAuthClient().auth.verifyOtp({
+    const terms = this.currentTerms();
+    const accountId = normalizeAccountId(input.accountId);
+
+    const authClient = this.createAuthClient();
+    const { data, error } = await authClient.auth.verifyOtp({
       phone: input.phone,
       token: input.token,
       type: 'sms',
@@ -66,11 +100,34 @@ export class AuthService {
     if (error || !data.user || !data.session) {
       throw new UnauthorizedException('Invalid or expired phone verification code');
     }
-    if (input.acceptTerms) {
-      await this.recordTermsConsent(data.user.id);
+    await this.assertAccountIdAvailable(accountId);
+
+    const { data: updated, error: updateError } = await authClient.auth.updateUser({
+      password: input.password,
+      data: { account_id: accountId },
+    });
+    if (updateError || !updated.user) {
+      if (updateError) {
+        throw toAuthException(updateError, 'Failed to create account credentials');
+      }
+      throw new InternalServerErrorException('Failed to create account credentials');
     }
-    await this.assertPhoneUserAccess(data.user);
-    return toAuthResponse(data.user, data.session, true);
+
+    const { data: registered, error: registerError } = await this.client.rpc('register_user_account', {
+      p_user_id: data.user.id,
+      p_account_id: accountId,
+      p_terms_version: terms.version,
+      p_document_sha256: terms.documentSha256,
+      p_accepted_at: new Date().toISOString(),
+    });
+    if (registerError || registered !== true) {
+      if (registerError?.code === '23505') {
+        throw new ConflictException('Account ID is already in use');
+      }
+      throw new InternalServerErrorException('Failed to register user account');
+    }
+    await this.assertPhoneUserAccess(updated.user);
+    return toAuthResponse(updated.user, data.session, true);
   }
 
   async refresh(input: RefreshTokenDto): Promise<AuthResponse> {
@@ -177,16 +234,17 @@ export class AuthService {
     }
   }
 
-  private async recordTermsConsent(userId: string): Promise<void> {
-    const terms = this.currentTerms();
-    const { error } = await this.client.rpc('record_terms_consent', {
-      p_user_id: userId,
-      p_terms_version: terms.version,
-      p_document_sha256: terms.documentSha256,
-      p_accepted_at: new Date().toISOString(),
-    });
-    if (error) {
-      throw new InternalServerErrorException('Failed to record terms consent');
+  private async assertAccountIdAvailable(accountId: string): Promise<void> {
+    const accountResult = await this.client
+      .from('user_accounts')
+      .select('user_id')
+      .eq('account_id', accountId)
+      .maybeSingle();
+    if (accountResult.error) {
+      throw new InternalServerErrorException('Failed to validate account ID');
+    }
+    if (accountResult.data) {
+      throw new ConflictException('Account ID is already in use');
     }
   }
 
@@ -207,7 +265,7 @@ export class AuthService {
 function toAuthenticatedUser(user: User): AuthenticatedUser {
   return {
     id: user.id,
-    email: user.email ?? null,
+    email: user.email ?? metadataString(user, 'contact_email'),
     phone: user.phone ?? null,
   };
 }
@@ -231,13 +289,22 @@ function toAuthResponse(
   return {
     user: {
       id: user.id,
-      email: user.email ?? null,
+      email: user.email ?? metadataString(user, 'contact_email'),
       phone: user.phone ?? null,
     },
     accessToken: session?.access_token ?? null,
     refreshToken: session?.refresh_token ?? null,
     expiresAt: session?.expires_at ?? null,
   };
+}
+
+function normalizeAccountId(accountId: string): string {
+  return accountId.trim().toLowerCase();
+}
+
+function metadataString(user: User, key: string): string | null {
+  const value = user.user_metadata?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function toAuthException(error: AuthError, fallbackMessage: string): Error {

@@ -30,6 +30,30 @@ export type SellerOfferBenefitType = 'MEMBERSHIP' | 'SHOPPING_GRADE' | 'CARD';
 export type Database = {
   public: {
     Tables: {
+      user_accounts: {
+        Row: {
+          user_id: string;
+          account_id: string;
+          email: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          account_id: string;
+          email?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          account_id?: string;
+          email?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       bigroom_catalog_items: {
         Row: {
           id: string;
@@ -909,6 +933,16 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      register_user_account: {
+        Args: {
+          p_user_id: string;
+          p_account_id: string;
+          p_terms_version: string;
+          p_document_sha256: string;
+          p_accepted_at?: string;
+        };
+        Returns: boolean;
+      };
       consume_user_search_quota: {
         Args: {
           p_user_id: string;
