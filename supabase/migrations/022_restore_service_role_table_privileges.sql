@@ -10,8 +10,3 @@ alter default privileges for role postgres in schema public
   grant select, insert, update, delete on tables to service_role;
 alter default privileges for role postgres in schema public
   grant usage, select, update on sequences to service_role;
-
-alter default privileges for role supabase_admin in schema public
-  grant select, insert, update, delete on tables to service_role;
-alter default privileges for role supabase_admin in schema public
-  grant usage, select, update on sequences to service_role;
