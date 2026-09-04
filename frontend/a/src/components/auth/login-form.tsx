@@ -39,7 +39,14 @@ export function LoginForm() {
     setIsSubmitting(true);
     try {
       const user = await login(accountId.trim(), password);
-      router.replace(await authenticatedRoute(user));
+      let destination: "/priorities" | "/home" = "/priorities";
+      try {
+        destination = await authenticatedRoute(user);
+      } catch {
+        // Login already succeeded. Keep post-login routing failures separate
+        // from credential validation so the user is not shown a false error.
+      }
+      router.replace(destination);
     } catch (cause) {
       setErrors({
         form: cause instanceof ApiError && cause.status === 429

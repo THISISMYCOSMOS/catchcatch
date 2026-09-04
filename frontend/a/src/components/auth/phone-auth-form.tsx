@@ -96,7 +96,14 @@ export function PhoneAuthForm() {
         values.username.trim(),
         values.password,
       );
-      router.replace(await authenticatedRoute(user));
+      let destination: "/priorities" | "/home" = "/priorities";
+      try {
+        destination = await authenticatedRoute(user);
+      } catch {
+        // Account creation already succeeded. A follow-up preference lookup must
+        // never be reported as an invalid or expired one-time code.
+      }
+      router.replace(destination);
     } catch (cause) {
       setError(cause instanceof ApiError && cause.status === 401
         ? "인증번호가 일치하지 않거나 만료되었습니다."
