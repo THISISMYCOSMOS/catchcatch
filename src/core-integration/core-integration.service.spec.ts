@@ -195,6 +195,30 @@ describe('CoreIntegrationService', () => {
     });
   });
 
+  it('reuses a stored Coupang Partners URL without converting the same source URL again', async () => {
+    const convert = jest.fn().mockResolvedValue('https://link.coupang.com/a/test');
+    service = new CoreIntegrationService(
+      products,
+      components,
+      sellerOffers,
+      sellerOfferComponents,
+      preferences,
+      analyses,
+      analysisOffers,
+      searchQuota,
+      undefined,
+      { convert } as never,
+    );
+    const product = await resolveProduct(resolveProductRequest());
+
+    const first = await service.ingestOffers(product.productId, ingestOffersRequest());
+    const second = await service.ingestOffers(product.productId, ingestOffersRequest('same-coupang-url'));
+
+    expect(convert).toHaveBeenCalledTimes(1);
+    expect(first.offers[0].purchaseUrl).toBe('https://link.coupang.com/a/test');
+    expect(second.offers[0].purchaseUrl).toBe('https://link.coupang.com/a/test');
+  });
+
   it('adds Bigroom single and same-product 1+1 offers without replacing verified sellers', async () => {
     const findVerifiedOffers = jest.fn().mockResolvedValue([
       {

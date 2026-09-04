@@ -277,6 +277,7 @@ export class CoreIntegrationService {
     ));
 
     const existingOffers = await this.sellerOffers.findAllByProductId(productId);
+    const existingOffersByKey = new Map(existingOffers.map((offer) => [sellerOfferKey(offer), offer]));
     const existingKeys = new Set(existingOffers.map(sellerOfferKey));
     const seenInputKeys = new Set<string>();
     const uniqueVerifiedResults = verifiedResults.filter((result) => {
@@ -291,8 +292,9 @@ export class CoreIntegrationService {
     const rowsToUpsert = await Promise.all(uniqueVerifiedResults.map(async (result) => {
       const offer = result.candidate_offer!;
       const sourceUrl = normalizeUrl(result.source!.source_url);
+      const existingOffer = existingOffersByKey.get(sellerResultKey(productId, result));
       const purchaseUrl = result.seller === 'COUPANG'
-        ? await this.coupangPartners?.convert(sourceUrl) ?? undefined
+        ? existingOffer?.purchase_url ?? await this.coupangPartners?.convert(sourceUrl) ?? undefined
         : undefined;
       return {
         id: randomUUID(),
