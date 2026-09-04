@@ -216,6 +216,10 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
   constructor(private readonly database = new InMemoryDatabase()) {}
 
   async findByProductId(productId: string): Promise<Row<'seller_offers'>[]> {
+    return this.database.store.sellerOffers.filter((row) => row.product_id === productId && row.is_active);
+  }
+
+  async findAllByProductId(productId: string): Promise<Row<'seller_offers'>[]> {
     return this.database.store.sellerOffers.filter((row) => row.product_id === productId);
   }
 
@@ -257,6 +261,9 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
           return_policy_status: input.return_policy_status ?? null,
           delivery_days: input.delivery_days ?? null,
           comparison_status: input.comparison_status ?? null,
+          app_benefit_advertised: input.app_benefit_advertised ?? false,
+          is_active: input.is_active ?? true,
+          ...(input.purchase_url === undefined ? {} : { purchase_url: input.purchase_url }),
           observed_at: input.observed_at ?? null,
         });
         rows.push(existing);
@@ -267,6 +274,15 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
       rows.push(row);
     }
     return rows;
+  }
+
+  async deactivateExcept(productId: string, activeOfferIds: string[]): Promise<void> {
+    const activeIds = new Set(activeOfferIds);
+    for (const row of this.database.store.sellerOffers) {
+      if (row.product_id === productId && !activeIds.has(row.id)) {
+        row.is_active = false;
+      }
+    }
   }
 }
 
@@ -848,6 +864,8 @@ function sellerOfferRow(
     delivery_days: input.delivery_days ?? null,
     comparison_status: input.comparison_status ?? null,
     app_benefit_advertised: input.app_benefit_advertised ?? false,
+    is_active: input.is_active ?? true,
+    purchase_url: input.purchase_url ?? null,
     observed_at: input.observed_at ?? null,
     created_at: input.created_at ?? nowIso(),
   };

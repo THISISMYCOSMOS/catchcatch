@@ -56,8 +56,16 @@ describe('CoreIntegrationService', () => {
     const first = await resolveProduct(resolveProductRequest());
     const second = await resolveProduct(resolveProductRequest('request-2'));
 
-    expect(first).toEqual({ productId: expect.stringMatching(UUID_V4_PATTERN), brandId: null });
-    expect(second).toEqual({ productId: first.productId, brandId: null });
+    expect(first).toEqual({
+      productId: expect.stringMatching(UUID_V4_PATTERN),
+      brandId: null,
+      cachedSellerOffers: [],
+    });
+    expect(second).toEqual({
+      productId: first.productId,
+      brandId: null,
+      cachedSellerOffers: [],
+    });
     expect(await products.findById(first.productId)).toMatchObject({
       canonical_name: 'Round Lab Sun Cream',
       product_key: expect.stringMatching(/^identity:v2:[0-9a-f]{32}$/),
@@ -147,6 +155,7 @@ describe('CoreIntegrationService', () => {
         id: expect.stringMatching(UUID_V4_PATTERN),
         sellerName: 'COUPANG',
         sellerUrl: 'https://example.com/coupang',
+        purchaseUrl: 'https://example.com/coupang',
         marketEffectivePrice: 10000,
         reusedExisting: false,
       },
@@ -159,6 +168,31 @@ describe('CoreIntegrationService', () => {
     ]);
     expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(1);
     expect(database.store.priceHistory).toHaveLength(0);
+  });
+
+  it('keeps old seller URLs as history but returns only the newest URL for refresh', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    await service.ingestOffers(product.productId, ingestOffersRequest());
+
+    const next = ingestOffersRequest('new-coupang-url');
+    next.search.seller_results[0].source!.source_url = 'https://example.com/coupang-new';
+    next.search.seller_results[0].source!.observed_at = '2026-08-11T00:00:00.000Z';
+    next.search.seller_results[0].candidate_offer!.listed_sale_price = 9_000;
+    await service.ingestOffers(product.productId, next);
+
+    expect(await sellerOffers.findByProductId(product.productId)).toHaveLength(1);
+    expect(await sellerOffers.findAllByProductId(product.productId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ seller_url: 'https://example.com/coupang', is_active: false }),
+      expect.objectContaining({ seller_url: 'https://example.com/coupang-new', is_active: true }),
+    ]));
+    await expect(resolveProduct(resolveProductRequest('resolve-after-refresh'))).resolves.toMatchObject({
+      cachedSellerOffers: [expect.objectContaining({
+        seller: 'COUPANG',
+        source_url: 'https://example.com/coupang-new',
+        observed_at: '2026-08-11T00:00:00.000Z',
+        candidate_offer: expect.objectContaining({ listed_sale_price: 9_000 }),
+      })],
+    });
   });
 
   it('adds Bigroom single and same-product 1+1 offers without replacing verified sellers', async () => {

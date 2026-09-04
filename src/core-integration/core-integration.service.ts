@@ -25,6 +25,7 @@ import { AllowedConclusion, CapacityUnit, ComparisonStatus, CriterionStatus, Use
 import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
 import { SearchQuotaService } from '../search-quota/search-quota.service';
 import { BigroomCatalogService } from '../bigroom/bigroom-catalog.service';
+import { CoupangPartnersService } from './coupang-partners.service';
 
 type ProductComponentContract = {
   type: 'MAIN' | 'REFILL' | 'MINI' | 'TRAVEL' | 'OTHER_COSMETIC' | 'NON_COSMETIC_GIFT';
@@ -97,6 +98,14 @@ type ProductSearchContract = {
 export type ResolvedProductResponse = {
   productId: string;
   brandId: string | null;
+  cachedSellerOffers: CachedSellerOfferResponse[];
+};
+
+export type CachedSellerOfferResponse = {
+  seller: string;
+  source_url: string;
+  observed_at: string;
+  candidate_offer: CandidateOfferContract;
 };
 
 export type PersistSellerOffersResponse = {
@@ -108,6 +117,7 @@ export type SellerOfferPersistenceResponse = {
   id: string;
   sellerName: string;
   sellerUrl: string;
+  purchaseUrl: string;
   marketEffectivePrice: number | null;
   reusedExisting: boolean;
 };
@@ -205,6 +215,7 @@ export class CoreIntegrationService {
     private readonly analysisOffers: AnalysisOfferRepository,
     private readonly searchQuota: SearchQuotaService,
     @Optional() private readonly bigroomCatalog?: BigroomCatalogService,
+    @Optional() private readonly coupangPartners?: CoupangPartnersService,
   ) {}
 
   async resolveProduct(input: ResolveProductDto, userId: string): Promise<ResolvedProductResponse> {
@@ -218,7 +229,11 @@ export class CoreIntegrationService {
     const productKey = createProductKey(identity);
     const existing = await this.products.findByProductKey(productKey);
     if (existing) {
-      return { productId: existing.id, brandId: null };
+      return {
+        productId: existing.id,
+        brandId: null,
+        cachedSellerOffers: await this.buildCachedSellerOffers(existing),
+      };
     }
 
     const product = await this.products.create({
@@ -242,7 +257,7 @@ export class CoreIntegrationService {
       capacity_unit: component.capacity_unit,
       quantity: component.quantity,
     })));
-    return { productId: product.id, brandId: null };
+    return { productId: product.id, brandId: null, cachedSellerOffers: [] };
   }
 
   async ingestOffers(
@@ -261,10 +276,10 @@ export class CoreIntegrationService {
       result.candidate_offer !== null
     ));
 
-    const existingOffers = await this.sellerOffers.findByProductId(productId);
+    const existingOffers = await this.sellerOffers.findAllByProductId(productId);
     const existingKeys = new Set(existingOffers.map(sellerOfferKey));
     const seenInputKeys = new Set<string>();
-    const rowsToUpsert = verifiedResults.filter((result) => {
+    const uniqueVerifiedResults = verifiedResults.filter((result) => {
       const key = sellerResultKey(productId, result);
       if (seenInputKeys.has(key)) {
         seenInputKeys.add(key);
@@ -272,13 +287,19 @@ export class CoreIntegrationService {
       }
       seenInputKeys.add(key);
       return true;
-    }).map((result) => {
+    });
+    const rowsToUpsert = await Promise.all(uniqueVerifiedResults.map(async (result) => {
       const offer = result.candidate_offer!;
+      const sourceUrl = normalizeUrl(result.source!.source_url);
+      const purchaseUrl = result.seller === 'COUPANG'
+        ? await this.coupangPartners?.convert(sourceUrl) ?? undefined
+        : undefined;
       return {
         id: randomUUID(),
         product_id: productId,
         seller_name: result.seller,
-        seller_url: normalizeUrl(result.source!.source_url),
+        seller_url: sourceUrl,
+        purchase_url: purchaseUrl,
         listed_price: offer.list_price,
         listed_sale_price: offer.listed_sale_price,
         market_effective_price: calculateCoreMarketEffectivePrice(offer),
@@ -294,10 +315,12 @@ export class CoreIntegrationService {
         app_benefit_advertised: offer.discount_conditions.some((condition) => (
           condition.includes('앱 추가 혜택')
         )),
+        is_active: true,
         observed_at: result.source!.observed_at,
       };
-    });
+    }));
     const upserted = await this.sellerOffers.upsertMany(rowsToUpsert);
+    await this.sellerOffers.deactivateExcept(productId, upserted.map((offer) => offer.id));
 
     const allOffersByKey = new Map<string, { row: Row<'seller_offers'>; reusedExisting: boolean }>();
     for (const offer of upserted) {
@@ -335,6 +358,7 @@ export class CoreIntegrationService {
           id: item.row.id,
           sellerName: item.row.seller_name,
           sellerUrl: item.row.seller_url,
+          purchaseUrl: item.row.purchase_url ?? item.row.seller_url,
           marketEffectivePrice: item.row.market_effective_price,
           reusedExisting: item.reusedExisting,
         })),
@@ -383,6 +407,56 @@ export class CoreIntegrationService {
       // must not discard otherwise verified seller results or trigger AI.
       return [];
     }
+  }
+
+  private async buildCachedSellerOffers(product: Row<'products'>): Promise<CachedSellerOfferResponse[]> {
+    const offers = await this.sellerOffers.findAllByProductId(product.id);
+    const latestBySeller = new Map<string, Row<'seller_offers'>>();
+    for (const offer of offers) {
+      if (!isSeller(offer.seller_name) || !offer.observed_at) continue;
+      const previous = latestBySeller.get(offer.seller_name);
+      if (!previous?.observed_at || previous.observed_at < offer.observed_at) {
+        latestBySeller.set(offer.seller_name, offer);
+      }
+    }
+    const cachedOffers = [...latestBySeller.values()];
+    const componentRows = await this.sellerOfferComponents.findBySellerOfferIds(
+      cachedOffers.map((offer) => offer.id),
+    );
+    const componentsByOfferId = new Map<string, ProductComponentContract[]>();
+    for (const component of componentRows) {
+      if (component.component_type === 'UNKNOWN') continue;
+      const existing = componentsByOfferId.get(component.seller_offer_id) ?? [];
+      existing.push({
+        type: component.component_type,
+        name: component.name,
+        capacity_value: component.capacity_value,
+        capacity_unit: component.capacity_unit,
+        quantity: component.quantity,
+      });
+      componentsByOfferId.set(component.seller_offer_id, existing);
+    }
+    return cachedOffers.map((offer) => ({
+      seller: offer.seller_name,
+      source_url: offer.seller_url,
+      observed_at: offer.observed_at!,
+      candidate_offer: {
+        product_name: product.canonical_name,
+        brand: product.brand,
+        product_type: product.product_type,
+        option: product.option,
+        shade_or_scent: product.shade_or_scent,
+        version_or_renewal: product.version_or_renewal,
+        list_price: offer.listed_price,
+        listed_sale_price: offer.listed_sale_price,
+        public_coupon_amount: offer.public_discount_amount,
+        automatic_discount_amount: offer.automatic_discount_amount,
+        shipping_fee: offer.shipping_fee,
+        discount_conditions: [],
+        shipping_condition: null,
+        components: componentsByOfferId.get(offer.id) ?? [],
+      },
+    }));
   }
 
   async buildJudgmentInput(analysisId: string, userId: string): Promise<JudgmentInputResponse> {
@@ -1269,6 +1343,7 @@ function validateJudgment(
       throw new BadRequestException('Judgment references an unknown fact ID');
     }
   }
+
   const selected = new Set(context.selected_criteria);
   const criteriaResults = judgment.criteria_results;
   if (!Array.isArray(criteriaResults) || criteriaResults.length !== 3) {

@@ -18,8 +18,10 @@ export interface ProductComponentRepository {
 
 export interface SellerOfferRepository {
   findByProductId(productId: string): Promise<Row<'seller_offers'>[]>;
+  findAllByProductId(productId: string): Promise<Row<'seller_offers'>[]>;
   createMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
   upsertMany(inputs: Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]>;
+  deactivateExcept(productId: string, activeOfferIds: string[]): Promise<void>;
 }
 
 export interface SellerOfferComponentRepository {

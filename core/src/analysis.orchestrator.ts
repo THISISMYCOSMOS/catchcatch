@@ -89,6 +89,7 @@ export class AnalysisOrchestrator {
       product_url: request.sourceUrl,
       anchor_product: identification.anchor_product,
       brand_id: resolved.brandId,
+      cached_seller_offers: resolved.cachedSellerOffers ?? [],
     });
     await this.backend.ingestOffers({
       productId: resolved.productId,

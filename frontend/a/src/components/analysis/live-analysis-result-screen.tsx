@@ -153,6 +153,9 @@ export function LiveAnalysisResultScreen({ analysisId, fallbackSourceUrl }: Live
                 </article>
               ) : null}
             </div>
+            {view.offers.some(isCoupangAffiliateOffer) ? (
+              <p className={styles.affiliateDisclosure}>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>
+            ) : null}
           </section>
 
           <Link className={styles.confirmButton} href="/home">확인</Link>
@@ -325,7 +328,10 @@ function isBigroomOffer(offer: AnalysisOffer): boolean {
 
 function offerSourceUrl(offer: AnalysisOffer): string | null {
   const snapshot = asRecord(offer.offerSnapshot);
-  const candidate = stringValue(snapshot.sourceUrl) ?? stringValue(snapshot.source_url);
+  const candidate = stringValue(snapshot.purchaseUrl)
+    ?? stringValue(snapshot.purchase_url)
+    ?? stringValue(snapshot.sourceUrl)
+    ?? stringValue(snapshot.source_url);
   if (!candidate) return null;
   try {
     const url = new URL(candidate);
@@ -333,6 +339,11 @@ function offerSourceUrl(offer: AnalysisOffer): string | null {
   } catch {
     return null;
   }
+}
+
+function isCoupangAffiliateOffer(offer: AnalysisOffer): boolean {
+  const snapshot = asRecord(offer.offerSnapshot);
+  return snapshot.isCoupangAffiliate === true;
 }
 
 function formatMoney(value: number | null): string {

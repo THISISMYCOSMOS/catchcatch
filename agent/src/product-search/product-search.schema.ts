@@ -42,6 +42,13 @@ export const searchedOfferSchema = z.object({
   components: z.array(productComponentSchema),
 });
 
+export const cachedSellerOfferSchema = z.object({
+  seller: sellerSchema,
+  source_url: z.string().url(),
+  observed_at: z.string().datetime(),
+  candidate_offer: searchedOfferSchema,
+});
+
 const sellerSearchResultShape = {
   seller: sellerSchema,
   availability: availabilitySchema,
@@ -112,6 +119,12 @@ export const productSearchAiResultSchema = z.object({
   warnings: z.array(z.string()),
 }).superRefine(addSellerCoverageIssues);
 
+export const productSearchPartialAiResultSchema = z.object({
+  anchor_product: productIdentitySchema,
+  seller_results: z.array(aiSellerSearchResultSchema).max(sellerSchema.options.length),
+  warnings: z.array(z.string()),
+}).superRefine(addDuplicateSellerIssues);
+
 // Not passed to zodTextFormat, so a .transform() here is safe. This is the
 // schema every search result (real web_search and sample) is parsed through
 // as its last step, so appendOmittedSellerWarnings always gets applied.
@@ -129,21 +142,29 @@ function addSellerCoverageIssues(
   result: { seller_results: Array<{ seller: z.infer<typeof sellerSchema> }> },
   context: z.RefinementCtx,
 ): void {
+  addDuplicateSellerIssues(result, context);
   const sellers = result.seller_results.map((item) => item.seller);
   const uniqueSellers = new Set(sellers);
-  if (uniqueSellers.size !== sellers.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['seller_results'],
-      message: 'A registered seller cannot appear more than once in seller_results',
-    });
-    return;
-  }
+  if (uniqueSellers.size !== sellers.length) return;
   if (uniqueSellers.size < MIN_SELLER_COVERAGE) {
     context.addIssue({
       code: 'custom',
       path: ['seller_results'],
       message: `At least ${MIN_SELLER_COVERAGE} distinct registered sellers are required in seller_results`,
+    });
+  }
+}
+
+function addDuplicateSellerIssues(
+  result: { seller_results: Array<{ seller: z.infer<typeof sellerSchema> }> },
+  context: z.RefinementCtx,
+): void {
+  const sellers = result.seller_results.map((item) => item.seller);
+  if (new Set(sellers).size !== sellers.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['seller_results'],
+      message: 'A registered seller cannot appear more than once in seller_results',
     });
   }
 }
@@ -182,6 +203,7 @@ export const productSearchInputSchema = z.object({
   product_url: z.string().url(),
   anchor_product: productIdentitySchema,
   brand_id: z.string().min(1).nullable(),
+  cached_seller_offers: z.array(cachedSellerOfferSchema).max(sellerSchema.options.length).optional(),
 }).superRefine((input, context) => {
   if (
     !input.anchor_product.brand ||
@@ -204,12 +226,25 @@ export const productSearchInputSchema = z.object({
     });
   }
   addTextLimitIssue(input.product_url, MAX_URL_LENGTH, ['product_url'], context);
+  const cachedSellers = new Set<string>();
+  (input.cached_seller_offers ?? []).forEach((offer, index) => {
+    addTextLimitIssue(offer.source_url, MAX_URL_LENGTH, ['cached_seller_offers', index, 'source_url'], context);
+    if (cachedSellers.has(offer.seller)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cached_seller_offers', index, 'seller'],
+        message: 'A cached seller offer may appear at most once per seller',
+      });
+    }
+    cachedSellers.add(offer.seller);
+  });
   addTextLimitIssue(input.brand_id, MAX_IDENTITY_TEXT_LENGTH, ['brand_id'], context);
   addProductIdentityLimitIssues(input.anchor_product, ['anchor_product'], context);
   addSerializedSizeIssue(input, context);
 });
 
 export type ProductSearchInput = z.infer<typeof productSearchInputSchema>;
+export type CachedSellerOffer = z.infer<typeof cachedSellerOfferSchema>;
 export type ProductSearchAiResult = z.infer<typeof productSearchAiResultSchema>;
 export type ProductSearchResult = z.infer<typeof productSearchResultSchema>;
 

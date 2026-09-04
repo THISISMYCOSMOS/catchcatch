@@ -14,8 +14,18 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
     const { data, error } = await this.client
       .from('seller_offers')
       .select('*')
-      .eq('product_id', productId);
+      .eq('product_id', productId)
+      .eq('is_active', true);
     throwOnSupabaseError('find seller offers by product_id', error);
+    return data ?? [];
+  }
+
+  async findAllByProductId(productId: string): Promise<Row<'seller_offers'>[]> {
+    const { data, error } = await this.client
+      .from('seller_offers')
+      .select('*')
+      .eq('product_id', productId);
+    throwOnSupabaseError('find all seller offers by product_id', error);
     return data ?? [];
   }
 
@@ -76,6 +86,22 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
       .filter((row): row is Row<'seller_offers'> => row !== undefined);
   }
 
+  async deactivateExcept(productId: string, activeOfferIds: string[]): Promise<void> {
+    const all = await this.findAllByProductId(productId);
+    const activeIds = new Set(activeOfferIds);
+    const idsToDeactivate = all
+      .filter((row) => !activeIds.has(row.id))
+      .map((row) => row.id);
+    if (idsToDeactivate.length === 0) {
+      return;
+    }
+    const { error } = await this.client
+      .from('seller_offers')
+      .update({ is_active: false })
+      .in('id', idsToDeactivate);
+    throwOnSupabaseError('deactivate stale seller offers', error);
+  }
+
   private async findExistingOffers(inputs: readonly Insert<'seller_offers'>[]): Promise<Row<'seller_offers'>[]> {
     const productIds = Array.from(new Set(inputs.map((input) => input.product_id)));
     const { data, error } = await this.client
@@ -104,6 +130,9 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
       return_policy_status: input.return_policy_status ?? null,
       delivery_days: input.delivery_days ?? null,
       comparison_status: input.comparison_status ?? null,
+      app_benefit_advertised: input.app_benefit_advertised ?? false,
+      is_active: input.is_active ?? true,
+      ...(input.purchase_url === undefined ? {} : { purchase_url: input.purchase_url }),
       observed_at: input.observed_at ?? null,
     };
     const { data, error } = await this.client

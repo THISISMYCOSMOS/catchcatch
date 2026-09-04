@@ -21,11 +21,11 @@ describe('CatchCatch product search prompt', () => {
   };
 
   it('requires link-first exact-product search without making a judgment', () => {
-    expect(PRODUCT_SEARCH_PROMPT_VERSION).toBe('catchcatch-product-search-v7');
+    expect(PRODUCT_SEARCH_PROMPT_VERSION).toBe('catchcatch-product-search-v8');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('anchor_product를 유일한 기준 상품');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('유사상품 탐색은 별도 요청');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('ML과 G는 변환하지 않는다');
-    expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('다섯 판매처를 seller_results에 정확히 한 번씩');
+    expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('target_sellers의 판매처만 seller_results에 정확히 한 번씩');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('PRODUCT_SEARCH_PROVIDER_UNAVAILABLE');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('다른 사용자의 검색 결과를 기억하거나 재사용하지 않는다');
     expect(CATCHCATCH_PRODUCT_SEARCH_INSTRUCTIONS).toContain('백엔드의 신뢰된 브랜드 등록 정보');

@@ -4,12 +4,14 @@ import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import {
   ProductSearchAiResult,
+  CachedSellerOffer,
   ProductSearchInput,
   ProductSearchResult,
   brandOfficialDomainCandidateSchema,
   collectAnchorProductWarnings,
   mergeWarnings,
   productSearchAiResultSchema,
+  productSearchPartialAiResultSchema,
   productSearchInputSchema,
   productSearchResultSchema,
 } from './product-search.schema';
@@ -110,6 +112,19 @@ export class ProductSearchService {
       throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be sample or web_search');
     }
 
+    assertAllowedSellerUrl(input.product_url, buildAllowedSearchDomains(null));
+
+    const cachedRefresh = await this.refreshCachedSellerOffers(input);
+    const directlyRefreshedSellers = new Set(cachedRefresh.results.keys());
+    const targetSellers = sellerSchema.options.filter((seller) => !directlyRefreshedSellers.has(seller));
+    if (targetSellers.length === 0) {
+      return productSearchResultSchema.parse({
+        anchor_product: input.anchor_product,
+        seller_results: sellerSchema.options.map((seller) => cachedRefresh.results.get(seller)),
+        warnings: mergeWarnings(relaxedFieldWarnings, cachedRefresh.warnings),
+      });
+    }
+
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
       throw createSearchProviderUnavailableException(
@@ -120,7 +135,6 @@ export class ProductSearchService {
     // Reject an out-of-scope input before spending anything on official-domain
     // discovery. The discovered domain only expands output search scope; it
     // must never legitimize an unregistered input seller URL.
-    assertAllowedSellerUrl(input.product_url, buildAllowedSearchDomains(null));
 
     const client = new OpenAI({
       apiKey,
@@ -138,7 +152,7 @@ export class ProductSearchService {
     // by brand_id (Core no longer supplies a meaningful one). It is
     // discovered from the identified brand name and gated in code before it
     // is ever added to the search allowlist.
-    const brandDiscovery = input.anchor_product.brand
+    const brandDiscovery = input.anchor_product.brand && targetSellers.includes('BRAND_OFFICIAL')
       ? await this.discoverBrandOfficialDomain(
         client,
         input.anchor_product.brand,
@@ -150,6 +164,7 @@ export class ProductSearchService {
     assertAllowedSellerUrl(input.product_url, allowedDomains);
     const preSearchWarnings = mergeWarnings(
       relaxedFieldWarnings,
+      cachedRefresh.warnings,
       brandDiscovery.warnings,
     );
 
@@ -169,6 +184,7 @@ export class ProductSearchService {
           input,
           allowedDomains,
           brandDiscovery.domain,
+          targetSellers,
         ),
         tools: [
           {
@@ -184,7 +200,7 @@ export class ProductSearchService {
         include: ['web_search_call.action.sources'],
         store: false,
         text: {
-          format: zodTextFormat(productSearchAiResultSchema, 'catchcatch_product_search'),
+          format: zodTextFormat(productSearchPartialAiResultSchema, 'catchcatch_product_search'),
         },
       });
       this.costBudget.settle(searchReservation, model, response);
@@ -195,11 +211,17 @@ export class ProductSearchService {
       }
 
       const searchSourceUrls = collectWebSearchSourceUrls(response.output);
-      const parsedResult = productSearchAiResultSchema.parse(response.output_parsed);
+      const parsedResult = productSearchPartialAiResultSchema.parse(response.output_parsed);
       assertAnchorProductUnchanged(input.anchor_product, parsedResult.anchor_product);
+      const targetSellerSet = new Set<Seller>(targetSellers);
+      const unexpectedSellers = parsedResult.seller_results
+        .map((result) => result.seller)
+        .filter((seller) => !targetSellerSet.has(seller));
 
       const observedAt = new Date().toISOString();
-      const promoted = parsedResult.seller_results.map((sellerResult) => verifyAndPromoteSellerResult(
+      const promoted = parsedResult.seller_results
+        .filter((sellerResult) => targetSellerSet.has(sellerResult.seller))
+        .map((sellerResult) => verifyAndPromoteSellerResult(
         sellerResult,
         {
           allowedDomains,
@@ -207,7 +229,7 @@ export class ProductSearchService {
           searchSourceUrls,
           observedAt,
         },
-      ));
+        ));
       const screened = promoted.map(({ result }) => screenCandidateIdentity(input.anchor_product, result));
       const directVerified = await Promise.all(
         screened.map(({ result }) => this.verifySameProductSellerResult(
@@ -216,6 +238,7 @@ export class ProductSearchService {
         )),
       );
 
+      const searchedBySeller = new Map(directVerified.map((entry) => [entry.result.seller, entry.result]));
       const verifiedResult = {
         ...parsedResult,
         warnings: mergeWarnings(
@@ -224,8 +247,16 @@ export class ProductSearchService {
           promoted.map((entry) => entry.warning).filter((warning): warning is string => Boolean(warning)),
           screened.flatMap((entry) => entry.warnings),
           directVerified.flatMap((entry) => entry.warnings),
+          unexpectedSellers.map((seller) => `Provider returned non-target seller ${seller}; result was ignored`),
+          targetSellers
+            .filter((seller) => !searchedBySeller.has(seller))
+            .map((seller) => `Provider omitted target seller ${seller}; result was recorded as UNKNOWN`),
         ),
-        seller_results: directVerified.map((entry) => entry.result),
+        seller_results: sellerSchema.options.map((seller) => (
+          cachedRefresh.results.get(seller) ??
+          searchedBySeller.get(seller) ??
+          unknownSellerResult(seller)
+        )),
       };
       return productSearchResultSchema.parse(verifiedResult);
     } catch (error) {
@@ -250,6 +281,39 @@ export class ProductSearchService {
     } finally {
       this.costBudget.finish(budgetSession);
     }
+  }
+
+  private async refreshCachedSellerOffers(input: ProductSearchInput): Promise<{
+    results: Map<Seller, SellerSearchResult>;
+    warnings: string[];
+  }> {
+    const results = new Map<Seller, SellerSearchResult>();
+    const warnings: string[] = [];
+    for (const cached of input.cached_seller_offers ?? []) {
+      if (cached.seller !== 'MUSINSA_BEAUTY' && cached.seller !== 'ZIGZAG') {
+        continue;
+      }
+      try {
+        assertAllowedSellerUrl(cached.source_url, buildAllowedSearchDomains(null));
+        assertSellerMatchesUrl(cached.seller, cached.source_url, null);
+      } catch (error) {
+        warnings.push(
+          `${cached.seller}: cached seller URL was rejected (${error instanceof Error ? error.message : 'invalid URL'})`,
+        );
+        continue;
+      }
+      const screened = screenCandidateIdentity(input.anchor_product, cachedSellerOfferToResult(cached));
+      if (screened.result.availability !== 'AVAILABLE') {
+        warnings.push(...screened.warnings.map((warning) => `${cached.seller}: ${warning}`));
+        continue;
+      }
+      const refreshed = await this.verifySameProductSellerResult(screened.result, input.anchor_product);
+      warnings.push(...screened.warnings, ...refreshed.warnings.map((warning) => `${cached.seller}: ${warning}`));
+      if (refreshed.result.source?.verification_status === 'CONTENT_VERIFIED') {
+        results.set(cached.seller, refreshed.result);
+      }
+    }
+    return { results, warnings };
   }
 
   async searchAlternativeConfigurations(
@@ -693,6 +757,8 @@ export class ProductSearchService {
           },
           source: {
             ...candidate.source,
+            acquisition_method: 'DIRECT_HTTP',
+            observed_at: new Date().toISOString(),
             verification_status: 'CONTENT_VERIFIED',
           },
         } as T,
@@ -756,6 +822,14 @@ export class ProductSearchService {
           ...sellerResult.mismatch_reasons,
           'direct seller page reports the offer is not purchasable',
         ],
+        source: sellerResult.source
+          ? {
+            ...sellerResult.source,
+            acquisition_method: 'DIRECT_HTTP',
+            observed_at: new Date().toISOString(),
+            verification_status: 'URL_VERIFIED',
+          }
+          : null,
       },
       warnings: directVerification.warnings,
     };
@@ -1782,6 +1856,8 @@ function verifyZigzagSellerPageCandidate<T extends DirectSellerPageCandidate>(
       },
       source: {
         ...candidate.source,
+        acquisition_method: 'DIRECT_HTTP',
+        observed_at: new Date().toISOString(),
         verification_status: 'CONTENT_VERIFIED',
       },
     } as T,
@@ -2145,6 +2221,34 @@ export function assertAnchorProductUnchanged(
 
 type AiSellerResult = ProductSearchAiResult['seller_results'][number];
 type SellerSearchResult = ProductSearchResult['seller_results'][number];
+
+function cachedSellerOfferToResult(cached: CachedSellerOffer): SellerSearchResult {
+  return {
+    seller: cached.seller,
+    availability: 'AVAILABLE',
+    candidate_offer: cached.candidate_offer,
+    match_evidence: ['Previously content-verified seller URL; current price requires direct refresh'],
+    mismatch_reasons: [],
+    source: {
+      source_type: 'SELLER_PAGE',
+      source_url: cached.source_url,
+      acquisition_method: 'DIRECT_HTTP',
+      observed_at: cached.observed_at,
+      verification_status: 'URL_VERIFIED',
+    },
+  };
+}
+
+function unknownSellerResult(seller: Seller): SellerSearchResult {
+  return {
+    seller,
+    availability: 'UNKNOWN',
+    candidate_offer: null,
+    match_evidence: [],
+    mismatch_reasons: ['Current seller result was not verified'],
+    source: null,
+  };
+}
 
 // T6: assertSellerMatchesUrl is a strict, throwing assertion (correct for
 // its other caller, product-identification, which has only one result to

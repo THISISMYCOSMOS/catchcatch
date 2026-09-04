@@ -513,6 +513,8 @@ export type Database = {
           delivery_days: number | null;
           comparison_status: ComparisonStatus | null;
           app_benefit_advertised: boolean;
+          is_active: boolean;
+          purchase_url: string | null;
           observed_at: string | null;
           created_at: string;
         };
@@ -534,6 +536,8 @@ export type Database = {
           delivery_days?: number | null;
           comparison_status?: ComparisonStatus | null;
           app_benefit_advertised?: boolean;
+          is_active?: boolean;
+          purchase_url?: string | null;
           observed_at?: string | null;
           created_at?: string;
         };
@@ -555,6 +559,8 @@ export type Database = {
           delivery_days?: number | null;
           comparison_status?: ComparisonStatus | null;
           app_benefit_advertised?: boolean;
+          is_active?: boolean;
+          purchase_url?: string | null;
           observed_at?: string | null;
           created_at?: string;
         };

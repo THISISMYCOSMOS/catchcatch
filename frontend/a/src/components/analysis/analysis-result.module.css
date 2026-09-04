@@ -349,6 +349,7 @@
 .storeHeading strong { flex: none; font-size: 17px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
 .storeCopy > span { margin-top: 6px; display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .storeCard a { width: fit-content; min-height: 38px; margin-top: 13px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--panel); font-size: 11px; font-weight: 650; text-decoration: none; }
+.affiliateDisclosure { margin: 12px 2px 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 
 .modalBackdrop { position: fixed; z-index: 80; inset: 0; padding: 20px; display: grid; place-items: center; overscroll-behavior: contain; background: rgba(21, 20, 18, .54); }
 .modal { width: calc(100% - 40px); max-width: calc(var(--app-width) - 80px); max-height: min(88dvh, 720px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 20px; color: var(--text); background: var(--surface); box-shadow: 0 16px 40px rgba(31, 31, 31, .14); }

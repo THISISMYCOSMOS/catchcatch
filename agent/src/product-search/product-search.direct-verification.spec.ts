@@ -487,6 +487,43 @@ describe('ProductSearchService normal direct seller-page price verification', ()
     });
   });
 
+  it('refreshes a cached Musinsa URL and excludes that seller from the paid web search', async () => {
+    const cachedCandidate = musinsaSearchResponse({ list: 25_000, sale: 19_900 })
+      .output_parsed.seller_results[1].candidate_offer;
+    parseMock
+      .mockResolvedValueOnce(noOfficialDomainResponse())
+      .mockResolvedValueOnce(oliveYoungSearchResponse());
+    fetchSpy.mockResolvedValueOnce(sellerPage(
+      '<meta property="product:price:amount" content="16900"><meta property="product:price:normal_price" content="25000"><meta property="product:availability" content="주문가능">',
+    ));
+
+    const result = await new ProductSearchService(new ConfigService({
+      PRODUCT_DATA_MODE: 'web_search',
+      OPENAI_API_KEY: 'test-key',
+    })).searchSameProduct({
+      ...input,
+      cached_seller_offers: [{
+        seller: 'MUSINSA_BEAUTY',
+        source_url: musinsaUrl,
+        observed_at: '2026-09-01T00:00:00.000Z',
+        candidate_offer: cachedCandidate,
+      }],
+    });
+
+    expect(musinsaResult(result)).toMatchObject({
+      availability: 'AVAILABLE',
+      candidate_offer: { listed_sale_price: 16_900 },
+      source: {
+        source_url: musinsaUrl,
+        acquisition_method: 'DIRECT_HTTP',
+        verification_status: 'CONTENT_VERIFIED',
+      },
+    });
+    expect(parseMock.mock.calls[1][0].input).toContain(
+      '"target_sellers":["OLIVE_YOUNG","COUPANG","ZIGZAG","BRAND_OFFICIAL"]',
+    );
+  });
+
   it('replaces searched Zigzag facts with public page data and marks the source content-verified', async () => {
     parseMock
       .mockResolvedValueOnce(noOfficialDomainResponse())

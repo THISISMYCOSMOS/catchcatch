@@ -487,8 +487,10 @@ describe('AnalysesService', () => {
     });
     const throwingOffers: SellerOfferRepository = {
       findByProductId: jest.fn().mockRejectedValue(new Error('boom')),
+      findAllByProductId: jest.fn(),
       createMany: jest.fn(),
       upsertMany: jest.fn(),
+      deactivateExcept: jest.fn(),
     };
     service = new AnalysesService(
       preferences,

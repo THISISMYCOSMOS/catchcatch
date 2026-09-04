@@ -700,6 +700,8 @@ function toAnalysisOfferSnapshot(
       sellerOfferId: offer.id,
       sellerName: offer.seller_name,
       sellerUrl: offer.seller_url,
+      purchaseUrl: offer.purchase_url ?? offer.seller_url,
+      isCoupangAffiliate: offer.seller_name === 'COUPANG' && Boolean(offer.purchase_url),
       originalListPrice: offer.listed_price,
       salePrice: offer.listed_sale_price,
       marketEffectivePrice: calculatedOffer.marketPrice.price,

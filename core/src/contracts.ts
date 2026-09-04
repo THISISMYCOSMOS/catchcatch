@@ -34,9 +34,32 @@ export type ProductSearchResult = {
   warnings: string[];
 };
 
+export type CachedSellerOffer = {
+  seller: 'OLIVE_YOUNG' | 'MUSINSA_BEAUTY' | 'COUPANG' | 'ZIGZAG' | 'BRAND_OFFICIAL';
+  source_url: string;
+  observed_at: string;
+  candidate_offer: {
+    product_name: string | null;
+    brand: string | null;
+    product_type: string | null;
+    option: string | null;
+    shade_or_scent: string | null;
+    version_or_renewal: string | null;
+    list_price: number | null;
+    listed_sale_price: number | null;
+    public_coupon_amount: number | null;
+    automatic_discount_amount: number | null;
+    shipping_fee: number | null;
+    discount_conditions: string[];
+    shipping_condition: string | null;
+    components: ProductComponent[];
+  };
+};
+
 export type ResolvedProduct = {
   productId: string;
   brandId: string | null;
+  cachedSellerOffers?: CachedSellerOffer[];
 };
 
 export type BackendAnalysis = {
@@ -121,6 +144,7 @@ export interface AgentClient {
     product_url: string;
     anchor_product: ProductIdentity;
     brand_id: string | null;
+    cached_seller_offers: CachedSellerOffer[];
   }): Promise<ProductSearchResult>;
   judge(input: unknown): Promise<unknown>;
 }
