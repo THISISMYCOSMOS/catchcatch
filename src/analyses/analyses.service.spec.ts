@@ -172,6 +172,26 @@ describe('AnalysesService', () => {
     });
   });
 
+  it('keeps a verified later seller rankable when the first offer is unverified', async () => {
+    const product = await seedAnalysisReadyProduct('unknown-first-offer');
+    const first = database.store.sellerOffers.find((offer) => offer.id === 'offer-high')!;
+    first.source_verification_status = 'UNKNOWN';
+    first.selected_option_verification_status = 'UNKNOWN';
+    first.paid_configuration_verification_status = 'UNKNOWN';
+
+    const result = await service.create({
+      userId: 'user-1',
+      sourceUrl: 'https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000263178',
+      productId: product.id,
+    });
+
+    expect(result.status).toBe('READY_FOR_JUDGMENT');
+    expect(result.result).toMatchObject({ recommendedOfferIds: ['offer-lowest'] });
+    const snapshots = await analysisOffers.findByAnalysisId(result.id);
+    expect(snapshots.find((snapshot) => snapshot.seller_identifier === 'offer-high')?.offer_snapshot)
+      .toMatchObject({ comparisonStatus: 'UNKNOWN' });
+  });
+
   it('writes price history at seller observed_at and skips duplicate observations on retry', async () => {
     const product = await seedAnalysisReadyProduct('observed-at-history');
     const offer = database.store.sellerOffers.find((row) => row.id === 'offer-lowest')!;

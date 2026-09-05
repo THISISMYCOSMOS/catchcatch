@@ -267,11 +267,12 @@ export class CoreIntegrationService {
     const canonicalName = requiredString(identity.normalized_product_name, 'normalized_product_name');
     const productKey = createProductKey(identity);
     const existing = await this.products.findByProductKey(productKey);
-    if (existing) {
+    const legacy = existing ?? await this.findExactLegacyV2Product(identity);
+    if (legacy) {
       return {
-        productId: existing.id,
+        productId: legacy.id,
         brandId: null,
-        cachedSellerOffers: await this.buildCachedSellerOffers(existing),
+        cachedSellerOffers: await this.buildCachedSellerOffers(legacy),
       };
     }
 
@@ -301,6 +302,17 @@ export class CoreIntegrationService {
       verification_status: component.verification_status,
     })));
     return { productId: product.id, brandId: null, cachedSellerOffers: [] };
+  }
+
+  private async findExactLegacyV2Product(
+    identity: ProductIdentityContract,
+  ): Promise<Row<'products'> | null> {
+    const legacy = await this.products.findByProductKey(createLegacyProductKeyV2(identity));
+    if (!legacy || !sameStoredProductIdentity(legacy, identity)) {
+      return null;
+    }
+    const storedComponents = await this.productComponents.findByProductId(legacy.id);
+    return sameStoredComponents(storedComponents, identity.components) ? legacy : null;
   }
 
   async ingestOffers(
@@ -827,6 +839,14 @@ function requiredString(value: string | null, name: string): string {
 }
 
 function createProductKey(identity: ProductIdentityContract): string {
+  return `identity:v3:${productIdentityHash(identity, true)}`;
+}
+
+function createLegacyProductKeyV2(identity: ProductIdentityContract): string {
+  return `identity:v2:${productIdentityHash(identity, false)}`;
+}
+
+function productIdentityHash(identity: ProductIdentityContract, includeDimensions: boolean): string {
   const components = identity.components
     .map((component) => [
       normalizeIdentityText(component.type),
@@ -834,10 +854,12 @@ function createProductKey(identity: ProductIdentityContract): string {
       normalizeNumber(component.capacity_value),
       component.capacity_unit ?? '',
       normalizeNumber(component.quantity),
-      component.physical_type,
-      component.commercial_inclusion,
-      component.product_identity,
-      component.verification_status,
+      ...(includeDimensions ? [
+        component.physical_type,
+        component.commercial_inclusion,
+        component.product_identity,
+        component.verification_status,
+      ] : []),
     ].join('|'))
     .sort();
   const canonical = [
@@ -849,7 +871,48 @@ function createProductKey(identity: ProductIdentityContract): string {
     normalizeIdentityText(identity.version_or_renewal),
     components.join(';'),
   ].join('::');
-  return `identity:v2:${createHash('sha256').update(canonical).digest('hex').slice(0, 32)}`;
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 32);
+}
+
+function sameStoredProductIdentity(
+  product: Row<'products'>,
+  identity: ProductIdentityContract,
+): boolean {
+  return normalizeIdentityText(product.brand) === normalizeIdentityText(identity.brand) &&
+    normalizeIdentityText(product.canonical_name) === normalizeIdentityText(identity.normalized_product_name) &&
+    normalizeIdentityText(product.product_type) === normalizeIdentityText(identity.product_type) &&
+    normalizeIdentityText(product.option) === normalizeIdentityText(identity.option) &&
+    normalizeIdentityText(product.shade_or_scent) === normalizeIdentityText(identity.shade_or_scent) &&
+    normalizeIdentityText(product.version_or_renewal) === normalizeIdentityText(identity.version_or_renewal);
+}
+
+function sameStoredComponents(
+  stored: readonly Row<'product_components'>[],
+  incoming: readonly ProductComponentContract[],
+): boolean {
+  const key = (component: {
+    type: string; name: string | null; capacity_value: number | null;
+    capacity_unit: string | null; quantity: number | null;
+    physical_type: string; commercial_inclusion: string;
+    product_identity: string; verification_status: string;
+  }) => [
+    normalizeIdentityText(component.type), normalizeIdentityText(component.name),
+    normalizeNumber(component.capacity_value), component.capacity_unit ?? '', normalizeNumber(component.quantity),
+    component.physical_type, component.commercial_inclusion, component.product_identity, component.verification_status,
+  ].join('|');
+  const storedKeys = stored.map((component) => key({
+    type: component.component_type,
+    name: component.name,
+    capacity_value: component.capacity_value,
+    capacity_unit: component.capacity_unit,
+    quantity: component.quantity,
+    physical_type: component.physical_type,
+    commercial_inclusion: component.commercial_inclusion,
+    product_identity: component.product_identity,
+    verification_status: component.verification_status,
+  })).sort();
+  const incomingKeys = incoming.map(key).sort();
+  return storedKeys.length === incomingKeys.length && storedKeys.every((value, index) => value === incomingKeys[index]);
 }
 
 function normalizeIdentityText(value: string | null): string {
@@ -1203,7 +1266,7 @@ function determineOfferComparisonStatus(
   ) return 'UNKNOWN';
   const anchorMain = mainComponentTotals(anchor.components);
   const offerMain = mainComponentTotals(offer.components);
-  if (!anchorMain || !offerMain || !hasExactPaidConfiguration(anchor.components, offer.components)) return 'UNKNOWN';
+  if (!anchorMain || !offerMain || !hasExactPaidConfiguration(anchor, offer.components)) return 'UNKNOWN';
   if (
     anchorMain.unit === offerMain.unit &&
     anchorMain.total === offerMain.total
@@ -1294,19 +1357,32 @@ function toAiSeller(sellerName: string): string {
 }
 
 function hasExactPaidConfiguration(
-  anchor: readonly ProductComponentContract[],
+  anchor: ProductIdentityContract,
   candidate: readonly ProductComponentContract[],
 ): boolean {
-  const paidSame = (component: ProductComponentContract) => (
-    component.physical_type === 'COSMETIC' && component.commercial_inclusion === 'PAID' &&
-    component.product_identity === 'SAME_PRODUCT' && component.verification_status === 'VERIFIED'
+  const verifiedPaidCandidate = (component: ProductComponentContract) => (
+    component.commercial_inclusion === 'PAID' && component.verification_status === 'VERIFIED'
   );
-  const componentKey = (component: ProductComponentContract) => [
-    normalizeIdentityText(component.name), component.physical_type, component.product_identity,
+  // The anchor establishes which product/configuration was searched, but it
+  // is not itself seller-offer evidence. Direct verifier paths may prove the
+  // candidate's physical/inclusion/identity dimensions while matching the
+  // anchor's exact normalized main configuration.
+  // Identified anchors predate commercial dimensions. A main anchor still
+  // supplies the exact configuration expected by a direct verifier; any
+  // explicit paid bundle member also participates.
+  const anchorPaid = (component: ProductComponentContract) => (
+    component.type === 'MAIN' || component.commercial_inclusion === 'PAID'
+  );
+  const anchorKey = (component: ProductComponentContract) => [
+    normalizeIdentityText(anchor.normalized_product_name),
     normalizeNumber(component.capacity_value), component.capacity_unit ?? '', normalizeNumber(component.quantity),
   ].join('|');
-  const anchorKeys = anchor.filter(paidSame).map(componentKey).sort();
-  const candidateKeys = candidate.filter(paidSame).map(componentKey).sort();
+  const candidateKey = (component: ProductComponentContract) => [
+    normalizeIdentityText(component.name),
+    normalizeNumber(component.capacity_value), component.capacity_unit ?? '', normalizeNumber(component.quantity),
+  ].join('|');
+  const anchorKeys = anchor.components.filter(anchorPaid).map(anchorKey).sort();
+  const candidateKeys = candidate.filter(verifiedPaidCandidate).map(candidateKey).sort();
   return anchorKeys.length > 0 && anchorKeys.length === candidateKeys.length &&
     anchorKeys.every((key, index) => key === candidateKeys[index]);
 }

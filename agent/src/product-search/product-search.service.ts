@@ -1819,7 +1819,16 @@ function verifyZigzagSellerPageCandidate<T extends DirectSellerPageCandidate>(
     capacity_value: facts.mainCapacity.value,
     capacity_unit: facts.mainCapacity.unit,
     quantity: facts.mainCapacity.quantity,
-  }];
+    // This is direct page evidence, not an AI claim: the Zigzag product ID,
+    // purchasability, title, and exact capacity were checked immediately
+    // above. Extra fields intentionally survive the Agent-to-Core JSON
+    // boundary even though the AI-facing schema does not ask the model for
+    // them.
+    physical_type: 'COSMETIC',
+    commercial_inclusion: 'PAID',
+    product_identity: 'SAME_PRODUCT',
+    verification_status: 'VERIFIED',
+  }] as unknown as ProductIdentity['components'];
 
   const directDiscountConditions = facts.publicCouponAmount === null
     ? []

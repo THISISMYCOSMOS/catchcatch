@@ -47,6 +47,10 @@ export function compareOfferToAnchor(
     return { offerId: offer.id, comparisonStatus: 'UNKNOWN' };
   }
 
+  if (!hasMatchingVerifiedPaidIdentity(anchor.components, offer.components)) {
+    return { offerId: offer.id, comparisonStatus: 'NOT_COMPARABLE' };
+  }
+
   const anchorTotals = calculateCosmeticCapacityTotals(anchor.components);
   const offerTotals = calculateCosmeticCapacityTotals(offer.components);
   if (
@@ -58,7 +62,11 @@ export function compareOfferToAnchor(
     return { offerId: offer.id, comparisonStatus: 'UNKNOWN' };
   }
 
-  if (anchorTotals.ml === offerTotals.ml && anchorTotals.g === offerTotals.g) {
+  if (
+    hasExactVerifiedPaidConfiguration(anchor.components, offer.components) &&
+    anchorTotals.ml === offerTotals.ml &&
+    anchorTotals.g === offerTotals.g
+  ) {
     return { offerId: offer.id, comparisonStatus: 'DIRECTLY_COMPARABLE' };
   }
 
@@ -70,6 +78,41 @@ export function compareOfferToAnchor(
     offerId: offer.id,
     comparisonStatus: sharesComparableUnit ? 'UNIT_COMPARABLE' : 'NOT_COMPARABLE',
   };
+}
+
+function hasMatchingVerifiedPaidIdentity(
+  anchor: readonly ProductComponent[],
+  offer: readonly ProductComponent[],
+): boolean {
+  const identityKey = (component: ProductComponent) => [
+    component.name?.trim().toLowerCase() ?? '', component.physicalType, component.productIdentity,
+  ].join('|');
+  return verifiedPaidComponents(anchor).map(identityKey).sort().join('\n') ===
+    verifiedPaidComponents(offer).map(identityKey).sort().join('\n');
+}
+
+function hasExactVerifiedPaidConfiguration(
+  anchor: readonly ProductComponent[],
+  offer: readonly ProductComponent[],
+): boolean {
+  const key = (component: ProductComponent) => [
+    component.name?.trim().toLowerCase() ?? '',
+    component.physicalType,
+    component.productIdentity,
+    component.capacityValue ?? '',
+    component.capacityUnit ?? '',
+    component.quantity ?? '',
+  ].join('|');
+  const left = verifiedPaidComponents(anchor).map(key).sort();
+  const right = verifiedPaidComponents(offer).map(key).sort();
+  return left.length > 0 && left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function verifiedPaidComponents(components: readonly ProductComponent[]): ProductComponent[] {
+  return components.filter((component) => (
+    component.commercialInclusion === 'PAID' &&
+    component.verificationStatus === 'VERIFIED'
+  ));
 }
 
 function hasVerifiedOfferProof(offer: SellerOffer): boolean {

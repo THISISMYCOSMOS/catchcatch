@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import {
@@ -68,9 +69,37 @@ describe('CoreIntegrationService', () => {
     });
     expect(await products.findById(first.productId)).toMatchObject({
       canonical_name: 'Round Lab Sun Cream',
-      product_key: expect.stringMatching(/^identity:v2:[0-9a-f]{32}$/),
+      product_key: expect.stringMatching(/^identity:v3:[0-9a-f]{32}$/),
     });
     expect(await components.findByProductId(first.productId)).toHaveLength(1);
+  });
+
+  it('reuses an exact legacy v2 identity without rewriting it', async () => {
+    const identity = resolveProductRequest().identification.anchor_product!;
+    const legacy = await products.create({
+      canonical_name: identity.normalized_product_name!,
+      brand: identity.brand,
+      product_key: legacyV2ProductKey(identity),
+      product_type: identity.product_type,
+      option: identity.option,
+      shade_or_scent: identity.shade_or_scent,
+      version_or_renewal: identity.version_or_renewal,
+      package_type: 'single',
+    });
+    await components.createMany(identity.components.map((component) => ({
+      product_id: legacy.id,
+      component_type: component.type as never,
+      name: component.name,
+      capacity_value: component.capacity_value,
+      capacity_unit: component.capacity_unit as never,
+      quantity: component.quantity,
+    })));
+
+    const resolved = await resolveProduct(resolveProductRequest('legacy-v2'));
+
+    expect(resolved.productId).toBe(legacy.id);
+    expect((await products.findById(legacy.id))?.product_key).toMatch(/^identity:v2:/);
+    expect(database.store.products).toHaveLength(1);
   });
 
   it('accepts Zigzag as an identified source seller', async () => {
@@ -292,6 +321,33 @@ describe('CoreIntegrationService', () => {
 
     const [stored] = await sellerOffers.findByProductId(product.productId);
     expect(stored.comparison_status).toBe('UNKNOWN');
+  });
+
+  it('persists direct option/configuration proofs only with an exact verified paid component', async () => {
+    const product = await resolveProduct(resolveProductRequest());
+    const request = ingestOffersRequest('direct-proof');
+    request.search.seller_results = [request.search.seller_results[0]];
+    (request.search.seller_results[0] as Record<string, unknown>).source = {
+      ...request.search.seller_results[0].source!,
+      acquisition_method: 'DIRECT_HTTP',
+      selected_option_verification_status: 'VERIFIED',
+      paid_configuration_verification_status: 'VERIFIED',
+    };
+    (request.search.seller_results[0].candidate_offer!.components as unknown[]) = [{
+      type: 'MAIN', name: 'Round Lab Sun Cream', capacity_value: 50, capacity_unit: 'ML', quantity: 1,
+      physical_type: 'COSMETIC', commercial_inclusion: 'PAID',
+      product_identity: 'SAME_PRODUCT', verification_status: 'VERIFIED',
+    }];
+
+    await service.ingestOffers(product.productId, request);
+
+    const [stored] = await sellerOffers.findByProductId(product.productId);
+    expect(stored).toMatchObject({
+      source_verification_status: 'VERIFIED',
+      selected_option_verification_status: 'VERIFIED',
+      paid_configuration_verification_status: 'VERIFIED',
+      comparison_status: 'DIRECTLY_COMPARABLE',
+    });
   });
 
   it('keeps verified sellers when the zero-AI Bigroom adapter fails', async () => {
@@ -1158,6 +1214,31 @@ describe('CoreIntegrationService', () => {
     return { analysisId: analysis.id, productId: product.id };
   }
 });
+
+function legacyV2ProductKey(identity: {
+  brand: string | null;
+  normalized_product_name: string | null;
+  product_type: string | null;
+  option: string | null;
+  shade_or_scent: string | null;
+  version_or_renewal: string | null;
+  components: Array<{
+    type: string; name: string | null; capacity_value: number | null;
+    capacity_unit: string | null; quantity: number | null;
+  }>;
+}): string {
+  const text = (value: string | null) => (value ?? '').trim().toLowerCase();
+  const number = (value: number | null) => value === null ? '' : String(value);
+  const components = identity.components.map((component) => [
+    text(component.type), text(component.name), number(component.capacity_value),
+    component.capacity_unit ?? '', number(component.quantity),
+  ].join('|')).sort();
+  const canonical = [
+    text(identity.brand), text(identity.normalized_product_name), text(identity.product_type),
+    text(identity.option), text(identity.shade_or_scent), text(identity.version_or_renewal), components.join(';'),
+  ].join('::');
+  return `identity:v2:${createHash('sha256').update(canonical).digest('hex').slice(0, 32)}`;
+}
 
 function expectAgentSchemaParse(schemaName: 'judgmentInputSchema' | 'aiJudgmentSchema', payload: unknown): void {
   const command = process.platform === 'win32' ? 'C:\\Windows\\System32\\cmd.exe' : 'npm';

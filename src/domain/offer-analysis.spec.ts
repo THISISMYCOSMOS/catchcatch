@@ -34,6 +34,25 @@ describe('offer analysis', () => {
       expect(result.comparisonStatus).toBe('UNIT_COMPARABLE');
     });
 
+    it('does not directly compare a single product with an extra paid bundle member', () => {
+      const single = offer({
+        components: [verifiedComponent('MAIN', 'serum', 50, 'ML', 1)],
+      });
+      const paidBundle = offer({
+        id: 'paid-bundle',
+        components: [
+          verifiedComponent('MAIN', 'serum', 50, 'ML', 1),
+          {
+            ...verifiedComponent('NON_COSMETIC_GIFT', 'pouch', 1, 'G', 1),
+            physicalType: 'NON_COSMETIC',
+            productIdentity: 'DIFFERENT_PRODUCT',
+          },
+        ],
+      });
+
+      expect(compareOfferToAnchor(single, paidBundle).comparisonStatus).toBe('NOT_COMPARABLE');
+    });
+
     it('marks unclear component capacity as unknown comparison', () => {
       const result = compareOfferToAnchor(
         offer({ id: 'anchor' }),

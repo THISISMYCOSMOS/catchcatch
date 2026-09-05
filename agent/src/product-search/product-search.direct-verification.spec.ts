@@ -549,7 +549,11 @@ describe('ProductSearchService normal direct seller-page price verification', ()
         discount_conditions: ['지그재그 공개 쿠폰 6070원 적용'],
         shipping_condition: '무료배송',
       },
-      source: { verification_status: 'CONTENT_VERIFIED' },
+      source: {
+        verification_status: 'CONTENT_VERIFIED',
+        selected_option_verification_status: 'VERIFIED',
+        paid_configuration_verification_status: 'VERIFIED',
+      },
     });
   });
 

@@ -63,7 +63,7 @@ test('continues an anchor-present ambiguous cosmetic identification through sear
   const orchestrator = new AnalysisOrchestrator(agent, backend);
 
   const result = await orchestrator.analyze({
-    sourceUrl: 'https://www.coupang.com/vp/products/1',
+    sourceUrl: 'https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000263178',
     idempotencyKey: 'request-1',
     authorization: 'Bearer test-token',
   });
@@ -79,6 +79,47 @@ test('continues an anchor-present ambiguous cosmetic identification through sear
     'judge',
     'finalize',
   ]);
+});
+
+test('returns insufficient evidence without calling the AI judge', async () => {
+  const calls: string[] = [];
+  const initial: BackendAnalysis = { ...analysis('analysis-needs-data', null), status: 'NEEDS_MORE_DATA' };
+  const agent: AgentClient = {
+    async identify() {
+      calls.push('identify');
+      return {
+        identification_status: 'AMBIGUOUS',
+        analysis_category: 'COSMETIC',
+        category_evidence: null,
+        anchor_product: identity,
+        preview: null,
+        source: { source_url: 'https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000263178' },
+        warnings: [],
+      };
+    },
+    async search() { calls.push('search'); return { anchor_product: identity, seller_results: [], warnings: [] }; },
+    async judge() { throw new Error('judge must not run'); },
+  };
+  const backend: BackendClient = {
+    async resolveProduct() { calls.push('resolve'); return { productId: 'product-1', brandId: null }; },
+    async ingestOffers() { calls.push('ingest'); },
+    async createAnalysis() { calls.push('calculate'); return initial; },
+    async getJudgmentInput() { throw new Error('judgment input must not run'); },
+    async finalizeJudgment() { throw new Error('finalize must not run'); },
+    async findRecentAnalyses() { return []; },
+    async findAnalysis() { return initial; },
+    async deleteAnalysis() {},
+  };
+
+  const result = await new AnalysisOrchestrator(agent, backend).analyze({
+    sourceUrl: 'https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000263178',
+    idempotencyKey: 'needs-data',
+    authorization: 'Bearer test-token',
+  });
+
+  assert.equal(result.status, 'NEEDS_MORE_DATA');
+  assert.equal(result.judgment, null);
+  assert.deepEqual(calls, ['identify', 'resolve', 'search', 'ingest', 'calculate']);
 });
 
 test('returns a public product preview using identification only', async () => {
