@@ -8,7 +8,6 @@ import {
 import {
   assertAllowedSellerUrl,
   assertSellerMatchesUrl,
-  inferBrandOfficialDomain,
   sellerPageUrlsReferToSameProduct,
 } from '../ai-contracts/seller-domain.policy';
 import {
@@ -38,6 +37,8 @@ const productIdentificationResultShape = {
     'UNSUPPORTED',
     'UNKNOWN',
   ]),
+  analysis_category: z.enum(['COSMETIC', 'NON_COSMETIC', 'UNKNOWN']),
+  category_evidence: z.string().min(1).nullable(),
   anchor_product: productIdentitySchema.nullable(),
   warnings: z.array(z.string()),
 };
@@ -76,6 +77,7 @@ export const productIdentificationResultSchema = z.object({
 function addIdentificationIssues(
   result: {
     identification_status: 'IDENTIFIED' | 'AMBIGUOUS' | 'UNSUPPORTED' | 'UNKNOWN';
+    analysis_category: 'COSMETIC' | 'NON_COSMETIC' | 'UNKNOWN';
     anchor_product: z.infer<typeof productIdentitySchema> | null;
     source: unknown | null;
   },
@@ -101,11 +103,40 @@ function addIdentificationIssues(
       });
     }
   }
-  if (result.identification_status === 'UNSUPPORTED' && result.anchor_product) {
+  if (result.identification_status === 'AMBIGUOUS') {
+    if (result.analysis_category !== 'COSMETIC') {
+      context.addIssue({
+        code: 'custom',
+        path: ['analysis_category'],
+        message: 'AMBIGUOUS is reserved for a clearly cosmetic product with incomplete identity',
+      });
+    }
+    if (!result.source) {
+      context.addIssue({
+        code: 'custom',
+        path: ['source'],
+        message: 'AMBIGUOUS requires an exact product-page source',
+      });
+    }
+  }
+  if (
+    (result.identification_status === 'UNSUPPORTED' || result.identification_status === 'UNKNOWN') &&
+    result.analysis_category !== 'UNKNOWN'
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['analysis_category'],
+      message: 'UNKNOWN and UNSUPPORTED require an unknown category',
+    });
+  }
+  if (
+    (result.identification_status === 'UNSUPPORTED' || result.identification_status === 'UNKNOWN') &&
+    result.anchor_product
+  ) {
     context.addIssue({
       code: 'custom',
       path: ['anchor_product'],
-      message: 'UNSUPPORTED cannot return an anchor product',
+      message: 'UNKNOWN and UNSUPPORTED cannot return an anchor product',
     });
   }
 }
@@ -131,7 +162,7 @@ export function validateProductIdentificationResult(
       assertSellerMatchesUrl(
         result.preview.seller,
         result.source.source_url,
-        inferBrandOfficialDomain(input.allowed_domains),
+        null,
       );
     }
   }

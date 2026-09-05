@@ -15,6 +15,8 @@ const input: ProductIdentificationInput = {
 
 const identified = {
   identification_status: 'IDENTIFIED',
+  analysis_category: 'COSMETIC',
+  category_evidence: null,
   anchor_product: {
     brand: '예시브랜드',
     normalized_product_name: '예시 세럼',
@@ -40,7 +42,7 @@ const identified = {
 
 describe('conditional product identification prompt and contract', () => {
   it('keeps preview identification separate from cross-seller search', () => {
-    expect(PRODUCT_IDENTIFICATION_PROMPT_VERSION).toBe('catchcatch-product-identification-v3');
+    expect(PRODUCT_IDENTIFICATION_PROMPT_VERSION).toBe('catchcatch-product-identification-v4');
     expect(CATCHCATCH_PRODUCT_IDENTIFICATION_INSTRUCTIONS).toContain('조건부 상품 식별기');
     expect(CATCHCATCH_PRODUCT_IDENTIFICATION_INSTRUCTIONS).toContain('다른 판매처 검색');
     expect(CATCHCATCH_PRODUCT_IDENTIFICATION_INSTRUCTIONS).toContain('과거 검색 결과를 기억하거나 재사용하지 않는다');
@@ -91,5 +93,41 @@ describe('conditional product identification prompt and contract', () => {
         source_url: 'https://www.oliveyoung.co.kr/store/goods/other',
       },
     })).toThrow('Identification source must match input product URL');
+  });
+
+  it('accepts a non-cosmetic identity so Core can stop before search and persistence', () => {
+    expect(validateProductIdentificationResult(input, {
+      ...identified,
+      analysis_category: 'NON_COSMETIC',
+      category_evidence: '상품 분류: 공기청정기',
+      anchor_product: { ...identified.anchor_product, product_type: '공기청정기' },
+    })).toMatchObject({
+      analysis_category: 'NON_COSMETIC',
+      anchor_product: { product_type: '공기청정기' },
+    });
+  });
+
+  it('does not require a non-cosmetic label without page evidence to become a hard block', () => {
+    expect(validateProductIdentificationResult(input, {
+      ...identified,
+      analysis_category: 'NON_COSMETIC',
+      category_evidence: null,
+      anchor_product: { ...identified.anchor_product, product_type: '공기청정기' },
+    })).toMatchObject({
+      analysis_category: 'NON_COSMETIC',
+      category_evidence: null,
+    });
+  });
+
+  it('does not allow an arbitrary input host to be labelled as brand official', () => {
+    const arbitraryInput = {
+      product_url: 'https://brand.example.com/products/1',
+      allowed_domains: ['brand.example.com'],
+    };
+    expect(() => validateProductIdentificationResult(arbitraryInput, {
+      ...identified,
+      preview: { ...identified.preview, seller: 'BRAND_OFFICIAL' },
+      source: { ...identified.source, source_url: arbitraryInput.product_url },
+    })).toThrow('Brand official domain is not registered');
   });
 });

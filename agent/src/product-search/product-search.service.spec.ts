@@ -43,8 +43,8 @@ describe('ProductSearchService mode boundaries', () => {
     expect(result.warnings.some((warning) => warning.includes('discovery does not run in sample mode'))).toBe(true);
   });
 
-  it('defaults to sample mode when PRODUCT_DATA_MODE is unset, matching .env.example', async () => {
-    const service = new ProductSearchService(new ConfigService({}));
+  it('uses sample mode only when explicitly enabled for a test fixture', async () => {
+    const service = new ProductSearchService(new ConfigService({ PRODUCT_DATA_MODE: 'sample' }));
     await expect(service.searchSameProduct(input)).resolves.toMatchObject({
       anchor_product: input.anchor_product,
     });

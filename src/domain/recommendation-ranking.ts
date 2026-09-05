@@ -20,9 +20,9 @@ export function rankRecommendedOffers(
   return [...offers]
     .filter((offer) => {
       const status = snapshotString(offer, 'comparisonStatus');
-      return (
-        status === 'DIRECTLY_COMPARABLE' || status === 'UNIT_COMPARABLE'
-      ) && effectivePrice(offer) !== null;
+      // Absolute-price recommendations never admit a unit-normalized
+      // alternative. Those belong only to the explicitly labelled unit lane.
+      return status === 'DIRECTLY_COMPARABLE' && effectivePrice(offer) !== null;
     })
     .sort((left, right) => {
       for (const criterion of selectedCriteria) {

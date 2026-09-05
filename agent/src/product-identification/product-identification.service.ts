@@ -47,7 +47,7 @@ export class ProductIdentificationService {
     const input = parseRequestInput(productIdentificationInputSchema, rawInput);
     assertAllowedSellerUrl(input.product_url, input.allowed_domains);
 
-    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
+    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'web_search');
     if (mode === 'sample') {
       return this.createSampleIdentification(input);
     }
@@ -168,6 +168,8 @@ export class ProductIdentificationService {
   ): ProductIdentificationResult {
     const sampleAiResult = {
       identification_status: 'IDENTIFIED' as const,
+      analysis_category: 'COSMETIC' as const,
+      category_evidence: null,
       anchor_product: {
         brand: 'CatchCatch Sample Brand',
         normalized_product_name: 'CatchCatch Sample Product',

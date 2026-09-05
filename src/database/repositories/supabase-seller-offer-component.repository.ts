@@ -68,5 +68,9 @@ function sellerOfferComponentInputKey(input: Insert<'seller_offer_components'>):
     input.capacity_value ?? '',
     input.capacity_unit ?? '',
     input.quantity ?? '',
+    input.physical_type ?? 'UNKNOWN',
+    input.commercial_inclusion ?? 'UNKNOWN',
+    input.product_identity ?? 'UNKNOWN',
+    input.verification_status ?? 'UNKNOWN',
   ].join(':');
 }

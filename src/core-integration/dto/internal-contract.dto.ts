@@ -34,3 +34,11 @@ export class SaveJudgmentDto {
   @IsObject()
   judgment!: Record<string, unknown>;
 }
+
+export class SaveAlternativeConfigurationsDto {
+  @IsIn(['product-configuration-search.v1'])
+  schemaVersion!: 'product-configuration-search.v1';
+
+  @IsObject()
+  search!: Record<string, unknown>;
+}

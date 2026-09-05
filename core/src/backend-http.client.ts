@@ -1,6 +1,7 @@
 import {
   AnalysisAccessRequest,
   BackendAnalysis,
+  ProductConfigurationSearchResult,
   BackendClient,
   ProductIdentificationResult,
   ProductSearchResult,
@@ -100,6 +101,24 @@ export class BackendHttpClient implements BackendClient {
     return this.http.request(`/analyses/recent${query}`, {
       headers: authorizationHeader(input.authorization),
     });
+  }
+
+  async saveAlternativeConfigurations(input: {
+    analysisId: string;
+    search: ProductConfigurationSearchResult;
+    authorization: string;
+  }): Promise<void> {
+    await this.http.request(
+      `/internal/v1/analyses/${encodeURIComponent(input.analysisId)}/alternative-configurations`,
+      {
+        method: 'PUT',
+        headers: authorizationHeader(input.authorization),
+        body: {
+          schemaVersion: 'product-configuration-search.v1',
+          search: input.search,
+        },
+      },
+    );
   }
 
   findAnalysis(input: AnalysisAccessRequest): Promise<BackendAnalysis> {

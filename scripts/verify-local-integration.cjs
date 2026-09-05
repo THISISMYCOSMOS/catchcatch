@@ -101,7 +101,6 @@ async function main() {
       BACKEND_BASE_URL: `http://127.0.0.1:${backendPort}`,
       AGENT_BASE_URL: `http://127.0.0.1:${fixtureAgent.port}`,
       INTERNAL_API_TOKEN: internalToken,
-      ALLOWED_PRODUCT_DOMAINS: 'coupang.com,oliveyoung.co.kr,musinsa.com,zigzag.kr',
       GEMINI_API_KEY: '',
     });
     children.push(core);
@@ -242,6 +241,8 @@ async function startFixtureAgent() {
 function fixtureIdentification() {
   return {
     identification_status: 'IDENTIFIED',
+    analysis_category: 'COSMETIC',
+    category_evidence: null,
     anchor_product: {
       brand: 'CatchCatch Fixture Brand',
       normalized_product_name: 'CatchCatch Fixture Serum',

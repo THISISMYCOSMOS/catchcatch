@@ -22,11 +22,7 @@ const backend = new BackendHttpClient(new HttpJsonClient(
   config.upstreamTimeoutMs,
   commonInternalHeaders,
 ));
-const orchestrator = new AnalysisOrchestrator(
-  agent,
-  backend,
-  config.allowedProductDomains,
-);
+const orchestrator = new AnalysisOrchestrator(agent, backend);
 const publicApiProxy = new BackendPublicApiProxy(
   config.backendBaseUrl,
   config.upstreamTimeoutMs,

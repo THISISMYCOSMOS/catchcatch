@@ -18,6 +18,8 @@ export type ProductIdentity = {
 
 export type ProductIdentificationResult = {
   identification_status: 'IDENTIFIED' | 'AMBIGUOUS' | 'UNSUPPORTED' | 'UNKNOWN';
+  analysis_category: 'COSMETIC' | 'NON_COSMETIC' | 'UNKNOWN';
+  category_evidence: string | null;
   anchor_product: ProductIdentity | null;
   preview: {
     seller: 'OLIVE_YOUNG' | 'MUSINSA_BEAUTY' | 'COUPANG' | 'BRAND_OFFICIAL' | null;
@@ -29,6 +31,12 @@ export type ProductIdentificationResult = {
 };
 
 export type ProductSearchResult = {
+  anchor_product: ProductIdentity;
+  seller_results: Array<Record<string, unknown>>;
+  warnings: string[];
+};
+
+export type ProductConfigurationSearchResult = {
   anchor_product: ProductIdentity;
   seller_results: Array<Record<string, unknown>>;
   warnings: string[];
@@ -106,9 +114,9 @@ export type AnalysisRequest = {
 
 export type AnalysisResult = {
   analysisId: string;
-  status: 'COMPLETED';
+  status: 'COMPLETED' | 'NEEDS_MORE_DATA';
   analysis: BackendAnalysis;
-  judgment: unknown;
+  judgment: unknown | null;
 };
 
 export type ProductPreviewRequest = {
@@ -123,6 +131,8 @@ export type ProductPreviewResult = {
   seller: string | null;
   listedPrice: number | null;
   imageUrl: string | null;
+  analysisCategory: 'COSMETIC' | 'NON_COSMETIC' | 'UNKNOWN';
+  analysisEligible: boolean;
 };
 
 export type AnalysisAccessRequest = {
@@ -146,6 +156,12 @@ export interface AgentClient {
     brand_id: string | null;
     cached_seller_offers: CachedSellerOffer[];
   }): Promise<ProductSearchResult>;
+  searchConfigurations?(input: {
+    product_url: string;
+    anchor_product: ProductIdentity;
+    brand_id: string | null;
+    cached_seller_offers: CachedSellerOffer[];
+  }): Promise<ProductConfigurationSearchResult>;
   judge(input: unknown): Promise<unknown>;
 }
 
@@ -168,6 +184,11 @@ export interface BackendClient {
     idempotencyKey: string;
     authorization: string;
   }): Promise<BackendAnalysis>;
+  saveAlternativeConfigurations?(input: {
+    analysisId: string;
+    search: ProductConfigurationSearchResult;
+    authorization: string;
+  }): Promise<void>;
   getJudgmentInput(input: {
     analysisId: string;
     authorization: string;

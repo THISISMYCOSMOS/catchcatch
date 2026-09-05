@@ -78,12 +78,12 @@ AI는 가격을 새로 만들거나 임의로 판단하지 않습니다. 상품 
 
 | 변수 | 값 | 동작 |
 |---|---|---|
-| `PRODUCT_DATA_MODE` | `sample` (기본값) | `product-identification`, `product-search`가 OpenAI를 호출하지 않고, 실제 응답과 동일한 Zod 스키마를 통과하는 고정 샘플 데이터를 반환합니다. 응답의 `warnings`에 샘플 데이터임을 명시합니다. |
+| `PRODUCT_DATA_MODE` | `web_search` (기본값) | `product-identification`, `product-search`가 OpenAI Responses API의 `web_search`로 실제 판매처 데이터를 조회합니다. `OPENAI_API_KEY`가 필요합니다. `sample`은 자동화 테스트 전용입니다. |
 | | `web_search` | OpenAI Responses API의 `web_search` 도구로 실제 판매처를 조회합니다. `OPENAI_API_KEY`가 필요합니다. |
-| `AI_JUDGMENT_MODE` | `mock` (기본값) | `ai-judgment`가 OpenAI를 호출하지 않고, 입력을 그대로 반영한 결정적 mock 판단을 반환합니다. |
+| `AI_JUDGMENT_MODE` | `real` (기본값) | `ai-judgment`가 OpenAI Responses API로 실제 구매 판단을 생성합니다. `OPENAI_API_KEY`가 필요합니다. `mock`은 자동화 테스트 전용입니다. |
 | | `real` | OpenAI로 실제 구매 판단을 생성합니다. `OPENAI_API_KEY`가 필요합니다. |
 
-`agent/.env.example`을 그대로 `.env`로 복사하고 `INTERNAL_API_TOKEN`만 채우면(`PRODUCT_DATA_MODE=sample`, `AI_JUDGMENT_MODE=mock`이 기본값이므로) `OPENAI_API_KEY` 없이도 세 엔드포인트 모두 스키마를 통과하는 응답을 반환합니다. Core↔Agent 연동을 로컬에서 확인할 때는 이 기본값을 그대로 쓰면 됩니다. 실제 판매처 데이터와 실제 AI 판단이 필요할 때만 두 값을 각각 `web_search`, `real`로 바꾸고 `OPENAI_API_KEY`를 채웁니다.
+`agent/.env.example`을 `.env`로 복사한 뒤 `INTERNAL_API_TOKEN`과 `OPENAI_API_KEY`를 채우면 실제 판매처 데이터 조회와 AI 판단을 사용합니다. 자동화 테스트에서만 `PRODUCT_DATA_MODE=sample` 또는 `AI_JUDGMENT_MODE=mock`을 명시적으로 지정할 수 있습니다.
 
 ### 분석당 OpenAI 비용 예산
 

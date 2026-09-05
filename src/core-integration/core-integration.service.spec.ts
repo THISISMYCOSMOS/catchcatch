@@ -170,6 +170,15 @@ describe('CoreIntegrationService', () => {
     expect(database.store.priceHistory).toHaveLength(0);
   });
 
+  it('resolves an anchor-present ambiguous cosmetic product so seller search can continue', async () => {
+    const request = resolveProductRequest('ambiguous-anchor');
+    request.identification.identification_status = 'AMBIGUOUS';
+
+    await expect(resolveProduct(request)).resolves.toMatchObject({
+      productId: expect.stringMatching(UUID_V4_PATTERN),
+    });
+  });
+
   it('keeps old seller URLs as history but returns only the newest URL for refresh', async () => {
     const product = await resolveProduct(resolveProductRequest());
     await service.ingestOffers(product.productId, ingestOffersRequest());
@@ -271,18 +280,18 @@ describe('CoreIntegrationService', () => {
     const storedBigroomOffers = await sellerOffers.findByProductId(product.productId);
     expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/100'))?.app_benefit_advertised).toBe(true);
     expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/101'))?.app_benefit_advertised).toBe(false);
-    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/100'))?.comparison_status).toBe('DIRECTLY_COMPARABLE');
-    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/101'))?.comparison_status).toBe('UNIT_COMPARABLE');
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/100'))?.comparison_status).toBe('UNKNOWN');
+    expect(storedBigroomOffers.find((offer) => offer.seller_url.endsWith('/101'))?.comparison_status).toBe('UNKNOWN');
   });
 
-  it('keeps an identity-verified legacy seller comparable when capacity evidence is incomplete', async () => {
+  it('marks an identity-verified legacy seller unknown when capacity evidence is incomplete', async () => {
     const product = await resolveProduct(resolveProductRequest());
     const request = ingestOffersRequest('missing-capacity');
 
     await service.ingestOffers(product.productId, request);
 
     const [stored] = await sellerOffers.findByProductId(product.productId);
-    expect(stored.comparison_status).toBe('DIRECTLY_COMPARABLE');
+    expect(stored.comparison_status).toBe('UNKNOWN');
   });
 
   it('keeps verified sellers when the zero-AI Bigroom adapter fails', async () => {
@@ -548,7 +557,20 @@ describe('CoreIntegrationService', () => {
     expectAgentSchemaParse('judgmentInputSchema', result);
   });
 
-  it('connects criterion assessments only to matching fact types', async () => {
+  it('locks the AI judgment to the backend-selected final recommendation', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis({
+      includeSecondVerifiedOffer: true,
+      recommendedOfferIds: ['offer-public-lowest', 'offer-lowest'],
+      finalRecommendationOfferId: 'offer-lowest',
+    });
+
+    const result = await service.buildJudgmentInput(analysisId, 'user-1');
+
+    expect(result.allowed_offer_ids).toEqual(['offer-lowest']);
+    expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('keeps the analysis-time criterion priority when current preferences later change', async () => {
     const { analysisId } = await seedJudgmentReadyAnalysis();
     await preferences.upsert({
       user_id: 'user-1',
@@ -588,11 +610,37 @@ describe('CoreIntegrationService', () => {
       'history:recent-average',
     ]));
     expect(result.criterion_assessments).toEqual([
-      { criterion: 'SET_AND_GIFTS', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:composition'] },
-      { criterion: 'FAST_DELIVERY', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:delivery'] },
+      { criterion: 'FINAL_PAYMENT_AMOUNT', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:price'] },
       { criterion: 'PURCHASE_TIMING', status: 'NEUTRAL', fact_ids: ['history:recent-average'] },
+      { criterion: 'UNIT_PRICE', status: 'NEUTRAL', fact_ids: ['offer:offer-lowest:price'] },
     ]);
     expectAgentSchemaParse('judgmentInputSchema', result);
+  });
+
+  it('persists only content-verified same-product alternative configurations in the analysis result', async () => {
+    const { analysisId } = await seedJudgmentReadyAnalysis();
+
+    await service.saveAlternativeConfigurations(analysisId, 'user-1', {
+      schemaVersion: 'product-configuration-search.v1',
+      search: alternativeConfigurationsSearch(),
+    });
+
+    await expect(analyses.findById(analysisId)).resolves.toMatchObject({
+      result_json: expect.objectContaining({
+        alternativeConfigurations: {
+          warnings: ['일부 판매처는 다른 구성을 확인하지 못했습니다.'],
+          candidates: [
+            expect.objectContaining({
+              seller: 'COUPANG',
+              configuration_name: '50ml x 2',
+              comparison_status: 'UNIT_COMPARABLE',
+              equivalent_price: 9500,
+              source_url: 'https://example.com/coupang-50ml-x2',
+            }),
+          ],
+        },
+      }),
+    });
   });
 
   it('validates and saves AI judgment results into the existing analysis row', async () => {
@@ -885,10 +933,101 @@ describe('CoreIntegrationService', () => {
     };
   }
 
+  function alternativeConfigurationsSearch(): Record<string, unknown> {
+    return {
+      anchor_product: resolveProductRequest().identification.anchor_product,
+      seller_results: [
+        {
+          seller: 'COUPANG',
+          availability: 'AVAILABLE',
+          notes: [],
+          candidates: [
+            {
+              relation_type: 'SAME_PRODUCT_CONFIGURATION',
+              configuration_summary: '50ml x 2',
+              comparison_status: 'UNIT_COMPARABLE',
+              capacity_unit: 'ML',
+              anchor_main_total_amount: 50,
+              candidate_main_total_amount: 100,
+              equivalent_price: 9500,
+              equivalent_price_scope: 'REFERENCE_ONLY',
+              price_basis: 'LISTED_SALE_PRICE',
+              basis_price: 19000,
+              candidate_offer: {
+                product_name: 'Round Lab Sun Cream',
+                brand: 'Round Lab',
+                product_type: 'SUNSCREEN',
+                option: null,
+                shade_or_scent: null,
+                version_or_renewal: null,
+                list_price: 20000,
+                listed_sale_price: 19000,
+                public_coupon_amount: null,
+                automatic_discount_amount: null,
+                shipping_fee: 0,
+                discount_conditions: [],
+                shipping_condition: null,
+                components: [],
+              },
+              relation_evidence: ['동일 제품명과 버전'],
+              configuration_difference_evidence: ['50ml 2개 구성'],
+              source: {
+                source_type: 'SELLER_PAGE',
+                source_url: 'https://example.com/coupang-50ml-x2',
+                acquisition_method: 'AI_WEB_SEARCH',
+                observed_at: '2026-09-05T00:00:00.000Z',
+                verification_status: 'CONTENT_VERIFIED',
+              },
+            },
+            {
+              relation_type: 'SAME_LINE_VARIANT',
+              configuration_summary: '리뉴얼 50ml',
+              comparison_status: 'DIRECTLY_COMPARABLE',
+              capacity_unit: 'ML',
+              anchor_main_total_amount: 50,
+              candidate_main_total_amount: 50,
+              equivalent_price: 10000,
+              equivalent_price_scope: 'DIRECT',
+              price_basis: 'LISTED_SALE_PRICE',
+              basis_price: 10000,
+              candidate_offer: {
+                product_name: 'Round Lab Sun Cream Renewal',
+                brand: 'Round Lab',
+                product_type: 'SUNSCREEN',
+                option: null,
+                shade_or_scent: null,
+                version_or_renewal: 'renewal',
+                list_price: 10000,
+                listed_sale_price: 10000,
+                public_coupon_amount: null,
+                automatic_discount_amount: null,
+                shipping_fee: 0,
+                discount_conditions: [],
+                shipping_condition: null,
+                components: [],
+              },
+              relation_evidence: ['같은 제품 라인 리뉴얼'],
+              configuration_difference_evidence: ['리뉴얼 버전'],
+              source: {
+                source_type: 'SELLER_PAGE',
+                source_url: 'https://example.com/coupang-renewal',
+                acquisition_method: 'AI_WEB_SEARCH',
+                observed_at: '2026-09-05T00:00:00.000Z',
+                verification_status: 'CONTENT_VERIFIED',
+              },
+            },
+          ],
+        },
+      ],
+      warnings: ['일부 판매처는 다른 구성을 확인하지 못했습니다.'],
+    };
+  }
+
   async function seedJudgmentReadyAnalysis(options: {
     includeSecondVerifiedOffer?: boolean;
     lowestResultId?: string;
     recommendedOfferIds?: string[];
+    finalRecommendationOfferId?: string;
     secondSellerName?: string;
   } = {}) {
     await preferences.upsert({
@@ -941,6 +1080,9 @@ describe('CoreIntegrationService', () => {
         ...(options.recommendedOfferIds
           ? { recommendedOfferIds: options.recommendedOfferIds }
           : {}),
+        ...(options.finalRecommendationOfferId
+          ? { finalRecommendationOfferId: options.finalRecommendationOfferId }
+          : {}),
       },
     });
     await analysisOffers.createMany([
@@ -965,6 +1107,10 @@ describe('CoreIntegrationService', () => {
           sourceUrl: 'https://example.com/offer-lowest',
           observedAt: '2026-08-10T00:00:00.000Z',
           verificationStatus: 'CONTENT_VERIFIED',
+          sourceVerificationStatus: 'VERIFIED',
+          selectedOptionVerificationStatus: 'VERIFIED',
+          paidConfigurationVerificationStatus: 'VERIFIED',
+          compositionVerificationStatus: 'VERIFIED',
         },
       },
       ...(options.includeSecondVerifiedOffer
@@ -989,6 +1135,10 @@ describe('CoreIntegrationService', () => {
               sourceUrl: 'https://example.com/offer-public-lowest',
               observedAt: '2026-08-10T00:00:00.000Z',
               verificationStatus: 'CONTENT_VERIFIED',
+              sourceVerificationStatus: 'VERIFIED',
+              selectedOptionVerificationStatus: 'VERIFIED',
+              paidConfigurationVerificationStatus: 'VERIFIED',
+              compositionVerificationStatus: 'VERIFIED',
             },
           }]
         : []),

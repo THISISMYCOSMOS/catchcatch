@@ -134,6 +134,10 @@ export class SupabaseSellerOfferRepository implements SellerOfferRepository {
       is_active: input.is_active ?? true,
       ...(input.purchase_url === undefined ? {} : { purchase_url: input.purchase_url }),
       observed_at: input.observed_at ?? null,
+      source_verification_status: input.source_verification_status ?? 'UNKNOWN',
+      selected_option_verification_status: input.selected_option_verification_status ?? 'UNKNOWN',
+      paid_configuration_verification_status: input.paid_configuration_verification_status ?? 'UNKNOWN',
+      verification_reason_codes: input.verification_reason_codes ?? [],
     };
     const { data, error } = await this.client
       .from('seller_offers')

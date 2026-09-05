@@ -9,6 +9,7 @@ import {
 import {
   calculateDiscountRateFromRecentAverage,
   calculateCosmeticCapacityTotals,
+  calculateBonusIncludedCosmeticCapacityTotals,
   calculateMarketEffectivePriceBreakdown,
   calculateSavingFromPreviousSale,
   calculateUnitPrice,
@@ -80,6 +81,7 @@ export type AnalysisCalculationResult = {
   savingRateFromPreviousSale: number | null;
   offerCount: number;
   recommendedOfferIds: string[];
+  finalRecommendationOfferId: string | null;
 };
 
 export type AnalysisResponse = {
@@ -239,7 +241,7 @@ export class AnalysesService {
         productId: input.productId,
         sourceUrl: input.sourceUrl,
         idempotencyKey: input.idempotencyKey ?? null,
-        status: 'READY_FOR_JUDGMENT',
+        status: result.hasRankableOffer ? 'READY_FOR_JUDGMENT' : 'NEEDS_MORE_DATA',
         verdict: null,
         allowedConclusions: result.allowedConclusions,
         selectedCriteria: preferences.selected_criteria,
@@ -346,6 +348,7 @@ export class AnalysesService {
     resultJson: Json;
     analysisOfferSnapshots: Omit<Row<'analysis_offers'>, 'id' | 'analysis_id' | 'created_at'>[];
     priceHistoryEntries: Omit<Row<'price_history'>, 'id' | 'analysis_id' | 'created_at'>[];
+    hasRankableOffer: boolean;
   }> {
     const [componentRows, offerRows, historyRows, membershipRows, shoppingGradeRows, cardRows] = await Promise.all([
       this.productComponents.findByProductId(product.id),
@@ -367,10 +370,14 @@ export class AnalysesService {
     const calculatedOffers = offerRows.map((offer) => (
       calculateOfferForUser(offer, componentsByOfferId.get(offer.id) ?? [], benefitRows, benefitContext)
     ));
-    const domainOffers = calculatedOffers.map((offer) => (
-      toDomainOffer(product, offer.source, offer.components, offer.userPrice.price)
-    ));
-    const anchorOffer = domainOffers[0] ?? toAnchorOffer(product, components);
+    const domainOfferEntries = calculatedOffers.map((offer) => ({
+      calculatedOffer: offer,
+      domainOffer: toDomainOffer(product, offer.source, offer.components, offer.userPrice.price),
+    }));
+    const domainOffers = domainOfferEntries.map(({ domainOffer }) => domainOffer);
+    const anchorOffer = domainOfferEntries.find(({ calculatedOffer }) => (
+      isVerifiedOfferForComparison(calculatedOffer.source, calculatedOffer.components)
+    ))?.domainOffer ?? toAnchorOffer(product, components);
     const comparisonResults = domainOffers.map((offer) => compareOfferToAnchor(anchorOffer, offer));
     const lowestEffectivePriceOffer = findLowestEffectivePriceOffer(domainOffers, comparisonResults);
     const lowestMlUnitPrice = findLowestUnitPriceOffer(domainOffers, comparisonResults, 'ML');
@@ -404,10 +411,15 @@ export class AnalysesService {
       hasSufficientCompositionData: hasSufficientCompositionData(calculatedOffers),
       hasSetOrGiftEvidence: hasSetOrGiftEvidence(components, calculatedOffers),
     }, analysisDate);
-    const warningCodes: Row<'analyses'>['warning_codes'] = priceHistorySufficient
-      ? []
-      : ['PRICE_HISTORY_INSUFFICIENT'];
     const analysisOfferSnapshots = calculatedOffers.map((offer) => toAnalysisOfferSnapshot(offer, offer.components));
+    const recommendedOfferIds = rankRecommendedOffers(analysisOfferSnapshots, selectedCriteria);
+    const hasRankableOffer = comparisonResults.some((comparison) => (
+      comparison.comparisonStatus === 'DIRECTLY_COMPARABLE'
+    )) && recommendedOfferIds.length > 0;
+    const warningCodes: Row<'analyses'>['warning_codes'] = [
+      ...(priceHistorySufficient ? [] : ['PRICE_HISTORY_INSUFFICIENT' as const]),
+      ...(hasRankableOffer ? [] : ['COMPOSITION_UNCLEAR' as const]),
+    ];
     const result: AnalysisCalculationResult = {
       lowestEffectivePriceOffer: lowestEffectivePriceOffer
         ? {
@@ -437,7 +449,10 @@ export class AnalysesService {
       savingFromPreviousSale,
       savingRateFromPreviousSale,
       offerCount: offerRows.length,
-      recommendedOfferIds: rankRecommendedOffers(analysisOfferSnapshots, selectedCriteria),
+      recommendedOfferIds,
+      // The first entry is the deterministic winner under the stored
+      // priority-1 → priority-2 → priority-3 ordering.
+      finalRecommendationOfferId: recommendedOfferIds[0] ?? null,
     };
 
     return {
@@ -460,6 +475,7 @@ export class AnalysesService {
         ),
         observed_at: offer.source.observed_at ?? analysisDate.toISOString(),
       })),
+      hasRankableOffer,
     };
   }
 }
@@ -680,6 +696,7 @@ function toAnalysisOfferSnapshot(
 ): Omit<Row<'analysis_offers'>, 'id' | 'analysis_id' | 'created_at'> {
   const offer = calculatedOffer.source;
   const unitSnapshot = calculatePrimaryUnitSnapshot(calculatedOffer, components);
+  const bonusIncludedUnitSnapshot = calculateBonusIncludedUnitSnapshot(calculatedOffer, components);
   const knownQuantity = calculateTotalKnownQuantity(components);
   return {
     seller_offer_id: offer.id,
@@ -717,10 +734,20 @@ function toAnalysisOfferSnapshot(
       totalAmount: unitSnapshot.totalAmount,
       unit: unitSnapshot.unit,
       calculatedUnitPrice: unitSnapshot.calculatedUnitPrice,
+      bonusIncludedTotalAmount: bonusIncludedUnitSnapshot.totalAmount,
+      bonusIncludedUnit: bonusIncludedUnitSnapshot.unit,
+      bonusIncludedUnitPrice: bonusIncludedUnitSnapshot.calculatedUnitPrice,
+      sourceVerificationStatus: offer.source_verification_status,
+      selectedOptionVerificationStatus: offer.selected_option_verification_status,
+      paidConfigurationVerificationStatus: offer.paid_configuration_verification_status,
+      compositionVerificationStatus: hasVerifiedComposition(components) ? 'VERIFIED' : 'UNKNOWN',
+      verificationStatus: offer.source_verification_status === 'VERIFIED' ? 'CONTENT_VERIFIED' : 'UNKNOWN',
       officialSellerStatus: offer.official_seller_status,
       returnPolicyStatus: offer.return_policy_status,
       deliveryDays: offer.delivery_days,
-      comparisonStatus: offer.comparison_status,
+      comparisonStatus: isVerifiedOfferForComparison(offer, components)
+        ? offer.comparison_status
+        : 'UNKNOWN',
       appBenefitAdvertised: offer.app_benefit_advertised,
       observedAt: offer.observed_at,
       sourceUrl: offer.seller_url,
@@ -733,11 +760,44 @@ function toAnalysisOfferSnapshot(
 function toSnapshotComponent(component: ProductComponent): Json {
   return {
     type: component.type,
-    name: null,
+    name: component.name ?? null,
     capacity_value: component.capacityValue,
     capacity_unit: component.capacityUnit,
     quantity: component.quantity,
+    physical_type: component.physicalType ?? 'UNKNOWN',
+    commercial_inclusion: component.commercialInclusion ?? 'UNKNOWN',
+    product_identity: component.productIdentity ?? 'UNKNOWN',
+    verification_status: component.verificationStatus ?? 'UNKNOWN',
   };
+}
+
+function calculateBonusIncludedUnitSnapshot(
+  calculatedOffer: CalculatedOffer,
+  components: readonly ProductComponent[],
+): { unit: Row<'analysis_offers'>['unit']; totalAmount: number | null; calculatedUnitPrice: number | null } {
+  const totals = calculateBonusIncludedCosmeticCapacityTotals(components);
+  if (totals.ml !== null && totals.ml > 0) {
+    return { unit: 'ML', totalAmount: totals.ml, calculatedUnitPrice: calculateUnitPrice(calculatedOffer.userPrice.price, totals.ml) };
+  }
+  if (totals.g !== null && totals.g > 0) {
+    return { unit: 'G', totalAmount: totals.g, calculatedUnitPrice: calculateUnitPrice(calculatedOffer.userPrice.price, totals.g) };
+  }
+  return { unit: null, totalAmount: null, calculatedUnitPrice: null };
+}
+
+function hasVerifiedComposition(components: readonly ProductComponent[]): boolean {
+  const totals = calculateCosmeticCapacityTotals(components);
+  return (totals.ml !== null && totals.ml > 0) || (totals.g !== null && totals.g > 0);
+}
+
+function isVerifiedOfferForComparison(
+  offer: Row<'seller_offers'>,
+  components: readonly ProductComponent[],
+): boolean {
+  return offer.source_verification_status === 'VERIFIED' &&
+    offer.selected_option_verification_status === 'VERIFIED' &&
+    offer.paid_configuration_verification_status === 'VERIFIED' &&
+    hasVerifiedComposition(components);
 }
 
 function calculatePrimaryUnitSnapshot(
@@ -792,6 +852,9 @@ function toDomainOffer(
     returnPolicyStatus: offer.return_policy_status ?? 'unconfirmed',
     deliveryDays: offer.delivery_days,
     packageType: product.package_type ?? 'unknown',
+    sourceVerificationStatus: offer.source_verification_status,
+    selectedOptionVerificationStatus: offer.selected_option_verification_status,
+    paidConfigurationVerificationStatus: offer.paid_configuration_verification_status,
   };
 }
 
@@ -808,6 +871,9 @@ function toAnchorOffer(
     returnPolicyStatus: 'unconfirmed',
     deliveryDays: null,
     packageType: product.package_type ?? 'unknown',
+    sourceVerificationStatus: 'UNKNOWN',
+    selectedOptionVerificationStatus: 'UNKNOWN',
+    paidConfigurationVerificationStatus: 'UNKNOWN',
   };
 }
 
@@ -824,16 +890,20 @@ function groupComponentsByOfferId(
 }
 
 function toProductComponent(
-  row: Pick<
-    Row<'product_components'> | Row<'seller_offer_components'>,
-    'component_type' | 'capacity_value' | 'capacity_unit' | 'quantity'
-  >,
+  row: Pick<Row<'product_components'> | Row<'seller_offer_components'>,
+    'component_type' | 'capacity_value' | 'capacity_unit' | 'quantity'> & Partial<Pick<Row<'seller_offer_components'>,
+    'name' | 'physical_type' | 'commercial_inclusion' | 'product_identity' | 'verification_status'>>,
 ): ProductComponent {
   return {
     type: row.component_type,
+    name: row.name ?? null,
     capacityValue: row.capacity_value,
     capacityUnit: row.capacity_unit,
     quantity: row.quantity,
+    physicalType: row.physical_type ?? 'UNKNOWN',
+    commercialInclusion: row.commercial_inclusion ?? 'UNKNOWN',
+    productIdentity: row.product_identity ?? 'UNKNOWN',
+    verificationStatus: row.verification_status ?? 'UNKNOWN',
   };
 }
 

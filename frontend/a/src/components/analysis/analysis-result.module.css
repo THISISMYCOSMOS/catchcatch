@@ -152,7 +152,7 @@
   margin: 14px 0 0;
   padding: 4px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   border-radius: 14px;
   background: var(--inactive);
@@ -348,6 +348,7 @@
 .storeHeading h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 16px; font-weight: 700; line-height: 1.4; }
 .storeHeading strong { flex: none; font-size: 17px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
 .storeCopy > span { margin-top: 6px; display: block; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.storeCopy > .unitPrice { margin-top: 4px; display: block; color: var(--muted); font-size: 11px; font-weight: 650; line-height: 1.45; }
 .storeCard a { width: fit-content; min-height: 38px; margin-top: 13px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--panel); font-size: 11px; font-weight: 650; text-decoration: none; }
 .affiliateDisclosure { margin: 12px 2px 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 
@@ -385,7 +386,7 @@
   .productPlaceholder { width: 88px; }
   .productCopy h1 { font-size: 16px; }
   .mainTabs { gap: 8px; }
-  .mainTabs button { font-size: 15px; }
+  .mainTabs button { font-size: 13px; }
   .discountGrid { gap: 8px; }
   .discountGrid article { padding: 13px; }
   .similarButton span { display: none; }

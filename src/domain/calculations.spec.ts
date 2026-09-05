@@ -527,7 +527,16 @@ function component(
   capacityUnit: ProductComponent['capacityUnit'],
   quantity: number | null,
 ): ProductComponent {
-  return { type, capacityValue, capacityUnit, quantity };
+  return {
+    type,
+    capacityValue,
+    capacityUnit,
+    quantity,
+    physicalType: type === 'NON_COSMETIC_GIFT' || type === 'UNKNOWN' ? 'UNKNOWN' : 'COSMETIC',
+    commercialInclusion: 'PAID',
+    productIdentity: type === 'OTHER_COSMETIC' ? 'DIFFERENT_PRODUCT' : 'SAME_PRODUCT',
+    verificationStatus: 'VERIFIED',
+  };
 }
 
 function discount(

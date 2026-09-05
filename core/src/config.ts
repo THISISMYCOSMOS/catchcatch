@@ -3,7 +3,6 @@ import { CoreError } from './errors.js';
 export type CoreConfig = {
   port: number;
   allowedOrigins: string[];
-  allowedProductDomains: string[];
   backendBaseUrl: URL;
   agentBaseUrl: URL;
   internalApiToken: string;
@@ -28,9 +27,6 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): CoreConfig 
   return {
     port: positiveInteger(source.CORE_PORT ?? '3002', 'CORE_PORT'),
     allowedOrigins: commaList(source.CORE_ALLOWED_ORIGINS ?? ''),
-    allowedProductDomains: commaList(
-      source.ALLOWED_PRODUCT_DOMAINS ?? 'coupang.com,oliveyoung.co.kr,musinsa.com,zigzag.kr',
-    ),
     backendBaseUrl: serviceUrl(source.BACKEND_BASE_URL ?? 'http://127.0.0.1:3000'),
     agentBaseUrl: serviceUrl(source.AGENT_BASE_URL ?? 'http://127.0.0.1:3001'),
     internalApiToken,

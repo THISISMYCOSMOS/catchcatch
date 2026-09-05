@@ -48,6 +48,7 @@ export const productIdentitySchema = z.object({
   components: z.array(productComponentSchema),
 });
 
+
 export const sourceCandidateMetadataSchema = z.object({
   source_type: z.literal('SELLER_PAGE'),
   // Provider-facing structured output cannot include JSON Schema
@@ -69,6 +70,8 @@ export const sourceMetadataSchema = z.object({
     'CONTENT_VERIFIED',
     'REJECTED',
   ]),
+  selected_option_verification_status: z.enum(['VERIFIED', 'UNKNOWN']).optional(),
+  paid_configuration_verification_status: z.enum(['VERIFIED', 'UNKNOWN']).optional(),
 }).strict();
 
 export type Seller = z.infer<typeof sellerSchema>;

@@ -9,6 +9,8 @@ export type ProductPreview = {
   seller: string | null;
   listedPrice: number | null;
   imageUrl: string | null;
+  analysisCategory: "COSMETIC" | "NON_COSMETIC" | "UNKNOWN";
+  analysisEligible: boolean;
 };
 
 export async function previewProduct(sourceUrl: string): Promise<ProductPreview> {

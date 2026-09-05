@@ -134,6 +134,8 @@ test('returns an authenticated product preview and rejects unknown fields', asyn
         seller: 'COUPANG',
         listedPrice: 15000,
         imageUrl: null,
+        analysisCategory: 'COSMETIC' as const,
+        analysisEligible: true,
       };
     },
     async analyze() { throw new Error('must not be called'); },
@@ -173,6 +175,8 @@ test('returns an authenticated product preview and rejects unknown fields', asyn
     seller: 'COUPANG',
     listedPrice: 15000,
     imageUrl: null,
+    analysisCategory: 'COSMETIC',
+    analysisEligible: true,
   });
   assert.deepEqual(received, { sourceUrl, authorization: 'Bearer access-token' });
   assert.equal(unknownFieldResponse.status, 400);

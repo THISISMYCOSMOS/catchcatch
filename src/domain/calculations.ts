@@ -6,13 +6,6 @@ import {
   USER_CRITERIA,
 } from './types';
 
-const COSMETIC_COMPONENT_TYPES = new Set<ProductComponent['type']>([
-  'MAIN',
-  'REFILL',
-  'MINI',
-  'TRAVEL',
-]);
-
 export type MarketEffectivePriceInput = {
   listedSalePrice: number | null;
   discounts: readonly PriceDiscount[];
@@ -234,7 +227,14 @@ export function calculateCosmeticCapacityTotals(
   const indeterminateUnits = new Set<CapacityUnit>([]);
 
   for (const component of components) {
-    if (!COSMETIC_COMPONENT_TYPES.has(component.type)) {
+    // Legacy rows lack all new dimensions and are intentionally unknown. Do
+    // not infer PAID or SAME_PRODUCT from component_type during the rollout.
+    if (
+      component.physicalType !== 'COSMETIC' ||
+      component.commercialInclusion !== 'PAID' ||
+      component.productIdentity !== 'SAME_PRODUCT' ||
+      component.verificationStatus !== 'VERIFIED'
+    ) {
       continue;
     }
 
@@ -255,6 +255,43 @@ export function calculateCosmeticCapacityTotals(
     totals[component.capacityUnit] += component.capacityValue * component.quantity;
   }
 
+  return {
+    ml: indeterminateUnits.has('ML') ? null : totals.ML,
+    g: indeterminateUnits.has('G') ? null : totals.G,
+  };
+}
+
+/**
+ * A separately labelled denominator for verified same-product bonuses. It is
+ * never a substitute for the base PAID-only denominator above.
+ */
+export function calculateBonusIncludedCosmeticCapacityTotals(
+  components: readonly ProductComponent[],
+): CosmeticCapacityTotals {
+  return calculateCapacityTotalsForInclusions(components, new Set(['PAID', 'BONUS']));
+}
+
+function calculateCapacityTotalsForInclusions(
+  components: readonly ProductComponent[],
+  inclusions: ReadonlySet<ProductComponent['commercialInclusion']>,
+): CosmeticCapacityTotals {
+  const totals = { ML: 0, G: 0 };
+  const indeterminateUnits = new Set<CapacityUnit>();
+  for (const component of components) {
+    if (
+      component.physicalType !== 'COSMETIC' ||
+      component.productIdentity !== 'SAME_PRODUCT' ||
+      component.verificationStatus !== 'VERIFIED' ||
+      !component.commercialInclusion ||
+      !inclusions.has(component.commercialInclusion)
+    ) continue;
+    if (component.capacityValue === null || component.capacityUnit === null || component.quantity === null) {
+      if (component.capacityUnit) indeterminateUnits.add(component.capacityUnit);
+      else { indeterminateUnits.add('ML'); indeterminateUnits.add('G'); }
+      continue;
+    }
+    totals[component.capacityUnit] += component.capacityValue * component.quantity;
+  }
   return {
     ml: indeterminateUnits.has('ML') ? null : totals.ML,
     g: indeterminateUnits.has('G') ? null : totals.G,

@@ -6,6 +6,7 @@ export type AnalysisFailureStatus =
   | "NEEDS_MORE_DATA"
   | "INVALID_LINK"
   | "PRODUCT_MISMATCH"
+  | "NON_COSMETIC_PRODUCT"
   | "AI_JUDGMENT_FAILED"
   | "INTERNAL_ERROR";
 
@@ -110,6 +111,7 @@ export async function deleteAnalysis(analysisId: string): Promise<void> {
 export function toAnalysisFailureStatus(error: unknown): AnalysisFailureStatus {
   if (!(error instanceof ApiError)) return "INTERNAL_ERROR";
   if (error.status === 400 || error.status === 415) return "INVALID_LINK";
+  if (error.code === "NON_COSMETIC_PRODUCT") return "NON_COSMETIC_PRODUCT";
   if (error.code.includes("IDENTIFICATION") || error.code.includes("AMBIGUOUS")) return "PRODUCT_MISMATCH";
   if (error.code.includes("JUDGMENT")) return "AI_JUDGMENT_FAILED";
   if (error.status === 422) return "NEEDS_MORE_DATA";

@@ -22,7 +22,12 @@ import {
 import { calculateMarketEffectivePrice } from '../domain/calculations';
 import { rankRecommendedOffers } from '../domain/recommendation-ranking';
 import { AllowedConclusion, CapacityUnit, ComparisonStatus, CriterionStatus, UserCriterion, Verdict, WarningCode } from '../domain/types';
-import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
+import {
+  IngestOffersDto,
+  ResolveProductDto,
+  SaveAlternativeConfigurationsDto,
+  SaveJudgmentDto,
+} from './dto/internal-contract.dto';
 import { SearchQuotaService } from '../search-quota/search-quota.service';
 import { BigroomCatalogService } from '../bigroom/bigroom-catalog.service';
 import { CoupangPartnersService } from './coupang-partners.service';
@@ -33,6 +38,10 @@ type ProductComponentContract = {
   capacity_value: number | null;
   capacity_unit: CapacityUnit | null;
   quantity: number | null;
+  physical_type: 'COSMETIC' | 'NON_COSMETIC' | 'UNKNOWN';
+  commercial_inclusion: 'PAID' | 'BONUS' | 'UNKNOWN';
+  product_identity: 'SAME_PRODUCT' | 'DIFFERENT_PRODUCT' | 'NOT_APPLICABLE' | 'UNKNOWN';
+  verification_status: 'VERIFIED' | 'UNKNOWN';
 };
 
 type ProductIdentityContract = {
@@ -86,12 +95,36 @@ type SellerSearchResultContract = {
     acquisition_method: 'AI_WEB_SEARCH' | 'DIRECT_HTTP';
     observed_at: string;
     verification_status: 'UNVERIFIED' | 'URL_VERIFIED' | 'CONTENT_VERIFIED' | 'REJECTED';
+    selected_option_verification_status?: 'VERIFIED' | 'UNKNOWN';
+    paid_configuration_verification_status?: 'VERIFIED' | 'UNKNOWN';
   } | null;
 };
 
 type ProductSearchContract = {
   anchor_product: ProductIdentityContract;
   seller_results: SellerSearchResultContract[];
+  warnings: string[];
+};
+
+type AlternativeConfigurationContract = {
+  seller: string;
+  configuration_name: string;
+  comparison_status: 'DIRECTLY_COMPARABLE' | 'UNIT_COMPARABLE';
+  capacity_unit: CapacityUnit | null;
+  anchor_main_total_amount: number | null;
+  candidate_main_total_amount: number | null;
+  equivalent_price: number | null;
+  equivalent_price_scope: 'DIRECT' | 'REFERENCE_ONLY' | null;
+  price_basis: 'LISTED_SALE_PRICE' | 'LIST_PRICE' | null;
+  basis_price: number | null;
+  source_url: string;
+  candidate_offer: CandidateOfferContract;
+  relation_evidence: string[];
+  configuration_difference_evidence: string[];
+};
+
+type AlternativeConfigurationSearchContract = {
+  candidates: AlternativeConfigurationContract[];
   warnings: string[];
 };
 
@@ -220,8 +253,14 @@ export class CoreIntegrationService {
 
   async resolveProduct(input: ResolveProductDto, userId: string): Promise<ResolvedProductResponse> {
     const identification = parseIdentification(input.identification);
-    if (identification.identification_status !== 'IDENTIFIED' || !identification.anchor_product) {
-      throw new BadRequestException('Only IDENTIFIED products can be resolved');
+    if (
+      (identification.identification_status !== 'IDENTIFIED' && identification.identification_status !== 'AMBIGUOUS') ||
+      !identification.anchor_product ||
+      !identification.anchor_product.brand ||
+      !identification.anchor_product.normalized_product_name ||
+      !identification.anchor_product.product_type
+    ) {
+      throw new BadRequestException('Only identified or anchor-present ambiguous products can be resolved');
     }
     await this.searchQuota.consumeForUser(userId, input.idempotencyKey);
     const identity = identification.anchor_product;
@@ -256,6 +295,10 @@ export class CoreIntegrationService {
       capacity_value: component.capacity_value,
       capacity_unit: component.capacity_unit,
       quantity: component.quantity,
+      physical_type: component.physical_type,
+      commercial_inclusion: component.commercial_inclusion,
+      product_identity: component.product_identity,
+      verification_status: component.verification_status,
     })));
     return { productId: product.id, brandId: null, cachedSellerOffers: [] };
   }
@@ -313,7 +356,11 @@ export class CoreIntegrationService {
         official_seller_status: null,
         return_policy_status: null,
         delivery_days: null,
-        comparison_status: determineOfferComparisonStatus(search.anchor_product, offer),
+        comparison_status: determineOfferComparisonStatus(search.anchor_product, offer, result.source!),
+        source_verification_status: result.source!.verification_status === 'CONTENT_VERIFIED' ? 'VERIFIED' as const : 'UNKNOWN' as const,
+        selected_option_verification_status: result.source!.selected_option_verification_status ?? 'UNKNOWN',
+        paid_configuration_verification_status: result.source!.paid_configuration_verification_status ?? 'UNKNOWN',
+        verification_reason_codes: offerVerificationReasonCodes(result.source!),
         app_benefit_advertised: offer.discount_conditions.some((condition) => (
           condition.includes('앱 추가 혜택')
         )),
@@ -347,6 +394,10 @@ export class CoreIntegrationService {
           capacity_value: component.capacity_value,
           capacity_unit: component.capacity_unit,
           quantity: component.quantity,
+          physical_type: component.physical_type,
+          commercial_inclusion: component.commercial_inclusion,
+          product_identity: component.product_identity,
+          verification_status: component.verification_status,
         })),
       );
     }
@@ -435,6 +486,10 @@ export class CoreIntegrationService {
         capacity_value: component.capacity_value,
         capacity_unit: component.capacity_unit,
         quantity: component.quantity,
+        physical_type: component.physical_type,
+        commercial_inclusion: component.commercial_inclusion,
+        product_identity: component.product_identity,
+        verification_status: component.verification_status,
       });
       componentsByOfferId.set(component.seller_offer_id, existing);
     }
@@ -466,16 +521,15 @@ export class CoreIntegrationService {
     if (!analysis.product_id) {
       throw new NotFoundException(`Analysis product not found: ${analysisId}`);
     }
-    const [product, components, snapshots, preferences] = await Promise.all([
+    const [product, components, snapshots] = await Promise.all([
       this.products.findById(analysis.product_id),
       this.productComponents.findByProductId(analysis.product_id),
       this.analysisOffers.findByAnalysisId(analysis.id),
-      this.preferences.findByUserId(userId),
     ]);
     if (!product) {
       throw new NotFoundException(`Product not found: ${analysis.product_id}`);
     }
-    const selectedCriteria = preferences?.selected_criteria ?? analysis.selected_criteria;
+    const selectedCriteria = analysis.selected_criteria;
     const verifiedSnapshots = snapshots.filter(isContentVerifiedSnapshot);
     if (verifiedSnapshots.length === 0) {
       throw new BadRequestException('No CONTENT_VERIFIED offer snapshots are available for judgment');
@@ -483,10 +537,16 @@ export class CoreIntegrationService {
     const comparableOfferIds = new Set(verifiedSnapshots
       .filter((snapshot) => isComparable(snapshot))
       .map((snapshot) => snapshot.seller_identifier));
+    const finalRecommendationOfferId = getStringResultValue(
+      analysis.result_json,
+      'finalRecommendationOfferId',
+    );
     const rankedOfferIds = getStringArrayResultValue(analysis.result_json, 'recommendedOfferIds');
-    const allowedOfferIds = rankedOfferIds
-      .filter((offerId) => comparableOfferIds.has(offerId))
-      .slice(0, 3);
+    const allowedOfferIds = finalRecommendationOfferId && comparableOfferIds.has(finalRecommendationOfferId)
+      ? [finalRecommendationOfferId]
+      : rankedOfferIds
+        .filter((offerId) => comparableOfferIds.has(offerId))
+        .slice(0, 3);
     if (allowedOfferIds.length === 0) {
       allowedOfferIds.push(...rankRecommendedOffers(verifiedSnapshots, selectedCriteria));
     }
@@ -593,6 +653,26 @@ export class CoreIntegrationService {
     };
   }
 
+  async saveAlternativeConfigurations(
+    analysisId: string,
+    userId: string,
+    input: SaveAlternativeConfigurationsDto,
+  ): Promise<void> {
+    const analysis = await this.findOwnedAnalysis(analysisId, userId);
+    const alternatives = parseAlternativeConfigurationSearch(input.search);
+    const resultJson = {
+      ...(isJsonObject(analysis.result_json) ? analysis.result_json : {}),
+      alternativeConfigurations: alternatives,
+    };
+    await this.analyses.updateResult(analysis.id, {
+      status: analysis.status,
+      verdict: analysis.verdict,
+      allowed_conclusions: analysis.allowed_conclusions,
+      warning_codes: analysis.warning_codes,
+      result_json: resultJson as Json,
+    });
+  }
+
   private async findOwnedAnalysis(analysisId: string, userId: string): Promise<Row<'analyses'>> {
     const analysis = await this.analyses.findById(analysisId);
     if (!analysis) {
@@ -653,6 +733,92 @@ function parseSearch(value: Record<string, unknown>): ProductSearchContract {
   };
 }
 
+function parseAlternativeConfigurationSearch(
+  value: Record<string, unknown>,
+): AlternativeConfigurationSearchContract {
+  if (!isRecord(value)) {
+    throw new BadRequestException('Invalid product configuration search payload');
+  }
+  const candidates: AlternativeConfigurationContract[] = [];
+  const seen = new Set<string>();
+  for (const [sellerIndex, sellerResult] of parseArray(value.seller_results, 'seller_results').entries()) {
+    if (!isRecord(sellerResult)) {
+      throw new BadRequestException(`seller_results[${sellerIndex}] must be an object`);
+    }
+    const seller = sellerResult.seller;
+    if (!isSeller(seller)) {
+      throw new BadRequestException(`seller_results[${sellerIndex}].seller is invalid`);
+    }
+    const rawCandidates = parseArray(sellerResult.candidates, `seller_results[${sellerIndex}].candidates`);
+    for (const [candidateIndex, rawCandidate] of rawCandidates.entries()) {
+      if (!isRecord(rawCandidate)) {
+        throw new BadRequestException(`seller_results[${sellerIndex}].candidates[${candidateIndex}] must be an object`);
+      }
+      if (rawCandidate.relation_type === 'SAME_LINE_VARIANT') continue;
+      if (rawCandidate.relation_type !== 'SAME_PRODUCT_CONFIGURATION') {
+        throw new BadRequestException(`seller_results[${sellerIndex}].candidates[${candidateIndex}].relation_type is invalid`);
+      }
+      const comparisonStatus = rawCandidate.comparison_status;
+      if (comparisonStatus !== 'DIRECTLY_COMPARABLE' && comparisonStatus !== 'UNIT_COMPARABLE') continue;
+      const source = parseSource(rawCandidate.source, `seller_results[${sellerIndex}].candidates[${candidateIndex}].source`);
+      if (!source || source.verification_status !== 'CONTENT_VERIFIED') continue;
+      const sourceKey = `${seller}:${source.source_url}`;
+      if (seen.has(sourceKey)) continue;
+      seen.add(sourceKey);
+      const path = `seller_results[${sellerIndex}].candidates[${candidateIndex}]`;
+      candidates.push({
+        seller,
+        configuration_name: requiredString(parseNullableString(rawCandidate.configuration_summary, `${path}.configuration_summary`), `${path}.configuration_summary`),
+        comparison_status: comparisonStatus,
+        capacity_unit: parseCapacityUnit(rawCandidate.capacity_unit, `${path}.capacity_unit`),
+        anchor_main_total_amount: parseNullablePositiveNumber(rawCandidate.anchor_main_total_amount, `${path}.anchor_main_total_amount`),
+        candidate_main_total_amount: parseNullablePositiveNumber(rawCandidate.candidate_main_total_amount, `${path}.candidate_main_total_amount`),
+        equivalent_price: parseNullableMoney(rawCandidate.equivalent_price, `${path}.equivalent_price`),
+        equivalent_price_scope: parseEquivalentPriceScope(rawCandidate.equivalent_price_scope, `${path}.equivalent_price_scope`),
+        price_basis: parsePriceBasis(rawCandidate.price_basis, `${path}.price_basis`),
+        basis_price: parseNullableMoney(rawCandidate.basis_price, `${path}.basis_price`),
+        source_url: source.source_url,
+        candidate_offer: parseCandidateOffer(rawCandidate.candidate_offer, `${path}.candidate_offer`),
+        relation_evidence: parseStringArray(rawCandidate.relation_evidence, `${path}.relation_evidence`),
+        configuration_difference_evidence: parseStringArray(rawCandidate.configuration_difference_evidence, `${path}.configuration_difference_evidence`),
+      });
+    }
+  }
+  return { candidates, warnings: parseStringArray(value.warnings, 'warnings') };
+}
+
+function parseCapacityUnit(value: unknown, path: string): CapacityUnit | null {
+  if (value === null || value === undefined) return null;
+  if (value !== 'ML' && value !== 'G') {
+    throw new BadRequestException(`${path} is invalid`);
+  }
+  return value;
+}
+
+function parseNullablePositiveNumber(value: unknown, path: string): number | null {
+  const number = parseNullableNumber(value, path);
+  if (number !== null && number <= 0) {
+    throw new BadRequestException(`${path} must be positive`);
+  }
+  return number;
+}
+
+function parseEquivalentPriceScope(value: unknown, path: string): 'DIRECT' | 'REFERENCE_ONLY' | null {
+  if (value === null || value === undefined) return null;
+  if (value !== 'DIRECT' && value !== 'REFERENCE_ONLY') {
+    throw new BadRequestException(`${path} is invalid`);
+  }
+  return value;
+}
+
+function parsePriceBasis(value: unknown, path: string): 'LISTED_SALE_PRICE' | 'LIST_PRICE' | null {
+  if (value === null || value === undefined) return null;
+  if (value !== 'LISTED_SALE_PRICE' && value !== 'LIST_PRICE') {
+    throw new BadRequestException(`${path} is invalid`);
+  }
+  return value;
+}
+
 function requiredString(value: string | null, name: string): string {
   if (!value) {
     throw new BadRequestException(`${name} is required`);
@@ -664,9 +830,14 @@ function createProductKey(identity: ProductIdentityContract): string {
   const components = identity.components
     .map((component) => [
       normalizeIdentityText(component.type),
+      normalizeIdentityText(component.name),
       normalizeNumber(component.capacity_value),
       component.capacity_unit ?? '',
       normalizeNumber(component.quantity),
+      component.physical_type,
+      component.commercial_inclusion,
+      component.product_identity,
+      component.verification_status,
     ].join('|'))
     .sort();
   const canonical = [
@@ -745,7 +916,35 @@ function parseProductComponent(value: unknown, path: string): ProductComponentCo
     capacity_value: capacityValue,
     capacity_unit: capacityUnit,
     quantity,
+    physical_type: parseComponentPhysicalType(value.physical_type, `${path}.physical_type`),
+    commercial_inclusion: parseCommercialInclusion(value.commercial_inclusion, `${path}.commercial_inclusion`),
+    product_identity: parseComponentProductIdentity(value.product_identity, `${path}.product_identity`),
+    verification_status: parseVerificationStatus(value.verification_status, `${path}.verification_status`),
   };
+}
+
+function parseComponentPhysicalType(value: unknown, path: string): ProductComponentContract['physical_type'] {
+  if (value === undefined || value === null) return 'UNKNOWN';
+  if (value === 'COSMETIC' || value === 'NON_COSMETIC' || value === 'UNKNOWN') return value;
+  throw new BadRequestException(`${path} is invalid`);
+}
+
+function parseCommercialInclusion(value: unknown, path: string): ProductComponentContract['commercial_inclusion'] {
+  if (value === undefined || value === null) return 'UNKNOWN';
+  if (value === 'PAID' || value === 'BONUS' || value === 'UNKNOWN') return value;
+  throw new BadRequestException(`${path} is invalid`);
+}
+
+function parseComponentProductIdentity(value: unknown, path: string): ProductComponentContract['product_identity'] {
+  if (value === undefined || value === null) return 'UNKNOWN';
+  if (value === 'SAME_PRODUCT' || value === 'DIFFERENT_PRODUCT' || value === 'NOT_APPLICABLE' || value === 'UNKNOWN') return value;
+  throw new BadRequestException(`${path} is invalid`);
+}
+
+function parseVerificationStatus(value: unknown, path: string): ProductComponentContract['verification_status'] {
+  if (value === undefined || value === null) return 'UNKNOWN';
+  if (value === 'VERIFIED' || value === 'UNKNOWN') return value;
+  throw new BadRequestException(`${path} is invalid`);
 }
 
 function parseIdentificationPreview(value: unknown): ProductIdentificationContract['preview'] {
@@ -862,7 +1061,21 @@ function parseSource(value: unknown, path: string): SellerSearchResultContract['
     acquisition_method: acquisitionMethod,
     observed_at: value.observed_at,
     verification_status: verificationStatus,
+    selected_option_verification_status: parseOptionalOfferVerificationStatus(
+      value.selected_option_verification_status,
+      `${path}.selected_option_verification_status`,
+    ),
+    paid_configuration_verification_status: parseOptionalOfferVerificationStatus(
+      value.paid_configuration_verification_status,
+      `${path}.paid_configuration_verification_status`,
+    ),
   };
+}
+
+function parseOptionalOfferVerificationStatus(value: unknown, path: string): 'VERIFIED' | 'UNKNOWN' | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'VERIFIED' || value === 'UNKNOWN') return value;
+  throw new BadRequestException(`${path} is invalid`);
 }
 
 function parseArray(value: unknown, path: string): unknown[] {
@@ -981,13 +1194,16 @@ function calculateCoreMarketEffectivePrice(offer: CandidateOfferContract): numbe
 function determineOfferComparisonStatus(
   anchor: ProductIdentityContract,
   offer: CandidateOfferContract,
+  source: NonNullable<SellerSearchResultContract['source']>,
 ): ComparisonStatus {
+  if (
+    source.verification_status !== 'CONTENT_VERIFIED' ||
+    source.selected_option_verification_status !== 'VERIFIED' ||
+    source.paid_configuration_verification_status !== 'VERIFIED'
+  ) return 'UNKNOWN';
   const anchorMain = mainComponentTotals(anchor.components);
   const offerMain = mainComponentTotals(offer.components);
-  // Search results have already passed the product-identity match gate. Keep
-  // legacy verified offers eligible when capacity evidence is incomplete;
-  // only downgrade when known totals demonstrate a real difference.
-  if (!anchorMain || !offerMain) return 'DIRECTLY_COMPARABLE';
+  if (!anchorMain || !offerMain || !hasExactPaidConfiguration(anchor.components, offer.components)) return 'UNKNOWN';
   if (
     anchorMain.unit === offerMain.unit &&
     anchorMain.total === offerMain.total
@@ -1050,8 +1266,11 @@ function isComparable(snapshot: Row<'analysis_offers'>): boolean {
 }
 
 function isContentVerifiedSnapshot(snapshot: Row<'analysis_offers'>): boolean {
-  const value = getSnapshotValue(snapshot, 'verificationStatus');
-  return value === undefined || value === 'CONTENT_VERIFIED';
+  return getSnapshotValue(snapshot, 'verificationStatus') === 'CONTENT_VERIFIED' &&
+    getSnapshotValue(snapshot, 'sourceVerificationStatus') === 'VERIFIED' &&
+    getSnapshotValue(snapshot, 'selectedOptionVerificationStatus') === 'VERIFIED' &&
+    getSnapshotValue(snapshot, 'paidConfigurationVerificationStatus') === 'VERIFIED' &&
+    getSnapshotValue(snapshot, 'compositionVerificationStatus') === 'VERIFIED';
 }
 
 function getSnapshotSourceUrl(snapshot: Row<'analysis_offers'>): string | null {
@@ -1072,6 +1291,34 @@ function toAiSeller(sellerName: string): string {
   if (normalized.includes('olive')) return 'OLIVE_YOUNG';
   if (normalized.includes('zigzag') || normalized.includes('지그재그')) return 'ZIGZAG';
   return 'BRAND_OFFICIAL';
+}
+
+function hasExactPaidConfiguration(
+  anchor: readonly ProductComponentContract[],
+  candidate: readonly ProductComponentContract[],
+): boolean {
+  const paidSame = (component: ProductComponentContract) => (
+    component.physical_type === 'COSMETIC' && component.commercial_inclusion === 'PAID' &&
+    component.product_identity === 'SAME_PRODUCT' && component.verification_status === 'VERIFIED'
+  );
+  const componentKey = (component: ProductComponentContract) => [
+    normalizeIdentityText(component.name), component.physical_type, component.product_identity,
+    normalizeNumber(component.capacity_value), component.capacity_unit ?? '', normalizeNumber(component.quantity),
+  ].join('|');
+  const anchorKeys = anchor.filter(paidSame).map(componentKey).sort();
+  const candidateKeys = candidate.filter(paidSame).map(componentKey).sort();
+  return anchorKeys.length > 0 && anchorKeys.length === candidateKeys.length &&
+    anchorKeys.every((key, index) => key === candidateKeys[index]);
+}
+
+function offerVerificationReasonCodes(
+  source: NonNullable<SellerSearchResultContract['source']>,
+): string[] {
+  const codes: string[] = [];
+  if (source.verification_status !== 'CONTENT_VERIFIED') codes.push('SOURCE_EVIDENCE_UNVERIFIED');
+  if (source.selected_option_verification_status !== 'VERIFIED') codes.push('SELECTED_OPTION_UNVERIFIED');
+  if (source.paid_configuration_verification_status !== 'VERIFIED') codes.push('PAID_CONFIGURATION_UNVERIFIED');
+  return codes;
 }
 
 function buildFacts(
@@ -1214,6 +1461,12 @@ function getStringArrayResultValue(resultJson: Json | null, key: string): string
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function getStringResultValue(resultJson: Json | null, key: string): string | null {
+  if (!isJsonObject(resultJson)) return null;
+  const value = resultJson[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function determineComparisonBasis(snapshots: readonly Row<'analysis_offers'>[]): 'PUBLIC' | 'PERSONALIZED' {

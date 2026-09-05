@@ -203,6 +203,10 @@ export class InMemoryProductComponentRepository implements ProductComponentRepos
         capacity_value: input.capacity_value ?? null,
         capacity_unit: input.capacity_unit ?? null,
         quantity: input.quantity ?? null,
+        physical_type: input.physical_type ?? 'UNKNOWN',
+        commercial_inclusion: input.commercial_inclusion ?? 'UNKNOWN',
+        product_identity: input.product_identity ?? 'UNKNOWN',
+        verification_status: input.verification_status ?? 'UNKNOWN',
         created_at: input.created_at ?? nowIso(),
       };
       return row;
@@ -265,6 +269,10 @@ export class InMemorySellerOfferRepository implements SellerOfferRepository {
           is_active: input.is_active ?? true,
           ...(input.purchase_url === undefined ? {} : { purchase_url: input.purchase_url }),
           observed_at: input.observed_at ?? null,
+          source_verification_status: input.source_verification_status ?? 'UNKNOWN',
+          selected_option_verification_status: input.selected_option_verification_status ?? 'UNKNOWN',
+          paid_configuration_verification_status: input.paid_configuration_verification_status ?? 'UNKNOWN',
+          verification_reason_codes: input.verification_reason_codes ?? [],
         });
         rows.push(existing);
         continue;
@@ -352,6 +360,10 @@ export class InMemorySellerOfferComponentRepository implements SellerOfferCompon
       capacity_value: input.capacity_value ?? null,
       capacity_unit: input.capacity_unit ?? null,
       quantity: input.quantity ?? null,
+      physical_type: input.physical_type ?? 'UNKNOWN',
+      commercial_inclusion: input.commercial_inclusion ?? 'UNKNOWN',
+      product_identity: input.product_identity ?? 'UNKNOWN',
+      verification_status: input.verification_status ?? 'UNKNOWN',
       created_at: input.created_at ?? nowIso(),
     }));
     this.database.store.sellerOfferComponents.push(...rows);
@@ -867,6 +879,10 @@ function sellerOfferRow(
     is_active: input.is_active ?? true,
     purchase_url: input.purchase_url ?? null,
     observed_at: input.observed_at ?? null,
+    source_verification_status: input.source_verification_status ?? 'UNKNOWN',
+    selected_option_verification_status: input.selected_option_verification_status ?? 'UNKNOWN',
+    paid_configuration_verification_status: input.paid_configuration_verification_status ?? 'UNKNOWN',
+    verification_reason_codes: input.verification_reason_codes ?? [],
     created_at: input.created_at ?? nowIso(),
   };
 }
@@ -1041,6 +1057,10 @@ function sellerOfferComponentInputKey(input: Insert<'seller_offer_components'>):
     input.capacity_value ?? '',
     input.capacity_unit ?? '',
     input.quantity ?? '',
+    input.physical_type ?? 'UNKNOWN',
+    input.commercial_inclusion ?? 'UNKNOWN',
+    input.product_identity ?? 'UNKNOWN',
+    input.verification_status ?? 'UNKNOWN',
   ].join(':');
 }
 

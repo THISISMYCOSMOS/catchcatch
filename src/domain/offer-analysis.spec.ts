@@ -10,6 +10,7 @@ import {
   isPriceHistorySufficient,
 } from './offer-analysis';
 import { ProductComponent, SellerOffer } from './types';
+import { calculateBonusIncludedCosmeticCapacityTotals, calculateCosmeticCapacityTotals } from './calculations';
 
 describe('offer analysis', () => {
   const analysisDate = new Date('2026-07-24T00:00:00+09:00');
@@ -40,6 +41,47 @@ describe('offer analysis', () => {
       );
 
       expect(result.comparisonStatus).toBe('UNKNOWN');
+    });
+
+    it('fails closed when seller-page, selected option, or paid configuration proof is absent', () => {
+      const anchor = offer();
+      expect(compareOfferToAnchor(anchor, offer({
+        sourceVerificationStatus: 'UNKNOWN',
+      })).comparisonStatus).toBe('UNKNOWN');
+      expect(compareOfferToAnchor(anchor, offer({
+        selectedOptionVerificationStatus: 'UNKNOWN',
+      })).comparisonStatus).toBe('UNKNOWN');
+      expect(compareOfferToAnchor(anchor, offer({
+        paidConfigurationVerificationStatus: 'UNKNOWN',
+      })).comparisonStatus).toBe('UNKNOWN');
+    });
+  });
+
+  describe('verified composition denominators', () => {
+    it('keeps a RoundLab 50ml base separate from a different-product cream bonus', () => {
+      const totals = calculateCosmeticCapacityTotals([
+        verifiedComponent('MAIN', 'RoundLab serum', 50, 'ML', 1),
+        verifiedComponent('OTHER_COSMETIC', 'different cream', 20, 'ML', 1, 'BONUS', 'DIFFERENT_PRODUCT'),
+      ]);
+      expect(totals).toEqual({ ml: 50, g: 0 });
+    });
+
+    it('does not add toner ML or cleanser G bonuses to an Aestura 80ml base', () => {
+      const totals = calculateCosmeticCapacityTotals([
+        verifiedComponent('MAIN', 'Aestura cream', 80, 'ML', 1),
+        verifiedComponent('OTHER_COSMETIC', 'toner', 25, 'ML', 1, 'BONUS', 'DIFFERENT_PRODUCT'),
+        verifiedComponent('OTHER_COSMETIC', 'cleanser', 3, 'G', 3, 'BONUS', 'DIFFERENT_PRODUCT'),
+      ]);
+      expect(totals).toEqual({ ml: 80, g: 0 });
+    });
+
+    it('exposes same-product bonus capacity only through the separately labelled total', () => {
+      const components = [
+        verifiedComponent('MAIN', 'serum', 50, 'ML', 1),
+        verifiedComponent('MINI', 'serum', 10, 'ML', 1, 'BONUS', 'SAME_PRODUCT'),
+      ];
+      expect(calculateCosmeticCapacityTotals(components)).toEqual({ ml: 50, g: 0 });
+      expect(calculateBonusIncludedCosmeticCapacityTotals(components)).toEqual({ ml: 60, g: 0 });
     });
   });
 
@@ -249,6 +291,9 @@ function offer(overrides: Partial<SellerOffer> = {}): SellerOffer {
     returnPolicyStatus: 'confirmed',
     deliveryDays: 1,
     packageType: 'single',
+    sourceVerificationStatus: 'VERIFIED',
+    selectedOptionVerificationStatus: 'VERIFIED',
+    paidConfigurationVerificationStatus: 'VERIFIED',
     ...overrides,
   };
 }
@@ -259,7 +304,33 @@ function component(
   capacityUnit: ProductComponent['capacityUnit'],
   quantity: number | null,
 ): ProductComponent {
-  return { type, capacityValue, capacityUnit, quantity };
+  return {
+    type,
+    capacityValue,
+    capacityUnit,
+    quantity,
+    physicalType: 'COSMETIC',
+    commercialInclusion: 'PAID',
+    productIdentity: 'SAME_PRODUCT',
+    verificationStatus: 'VERIFIED',
+  };
+}
+
+function verifiedComponent(
+  type: ProductComponent['type'],
+  name: string,
+  capacityValue: number,
+  capacityUnit: 'ML' | 'G',
+  quantity: number,
+  commercialInclusion: 'PAID' | 'BONUS' = 'PAID',
+  productIdentity: 'SAME_PRODUCT' | 'DIFFERENT_PRODUCT' = 'SAME_PRODUCT',
+): ProductComponent {
+  return {
+    ...component(type, capacityValue, capacityUnit, quantity),
+    name,
+    commercialInclusion,
+    productIdentity,
+  };
 }
 
 function directResults(offers: readonly SellerOffer[]) {

@@ -3,12 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
-import { DEMO_PRODUCT_URL } from "@/lib/mock/home";
 import { AnalysisLimitDialog } from "@/components/home/analysis-limit-dialog";
 import { PreviousAnalysisDialog } from "@/components/home/previous-analysis-dialog";
 import { RecentAnalysisCard } from "@/components/home/recent-analysis-card";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
-import { ANALYSIS_RESULT_PATH, validateCoupangProductUrl } from "@/lib/analysis-url";
+import { ANALYSIS_RESULT_PATH, validateProductUrl } from "@/lib/analysis-url";
 import { dismissBenefitPrompt, getBenefitProfile, isBenefitPromptDismissed } from "@/lib/benefits";
 import { createAnalysis, toAnalysisFailureStatus, type AnalysisFailureStatus } from "@/lib/api/analyses";
 import type { RecentAnalysisItem } from "@/lib/api/analyses";
@@ -18,7 +17,7 @@ import styles from "./analysis-status.module.css";
 
 const ANALYSIS_LINK_STORAGE_KEY = "catchcatch:last-analysis-link";
 type AnalysisState = "idle" | "loading" | "error";
-type AnalysisRequest = { productUrl: string; platform: "쿠팡" };
+type AnalysisRequest = { productUrl: string };
 const SELLER_LABELS: Record<string, string> = {
   COUPANG: "쿠팡",
   OLIVE_YOUNG: "올리브영",
@@ -43,6 +42,10 @@ const ANALYSIS_ERROR_MESSAGES: Record<AnalysisFailureStatus, { title: string; de
   PRODUCT_MISMATCH: {
     title: "상품 정보를 정확히 비교하기 어려워요",
     description: "동일한 상품인지 확인하기 어려워 분석을 완료하지 못했습니다.",
+  },
+  NON_COSMETIC_PRODUCT: {
+    title: "화장품 상품만 분석할 수 있어요",
+    description: "화장품 본품 상품 링크를 입력한 뒤 다시 시도해주세요.",
   },
   AI_JUDGMENT_FAILED: {
     title: "구매 판단을 완료하지 못했어요",
@@ -241,7 +244,7 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
     const savedLink = window.sessionStorage.getItem(ANALYSIS_LINK_STORAGE_KEY);
     if (!savedLink) return;
 
-    const validation = validateCoupangProductUrl(savedLink);
+    const validation = validateProductUrl(savedLink);
     if (!validation.ok) return;
 
     const restoreLink = window.setTimeout(() => {
@@ -307,13 +310,14 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
 
   function handleLinkChange(value: string) {
     closeProductPopover();
-    setLinkValue(value);
     setLinkError("");
-    const validation = validateCoupangProductUrl(value);
+    const validation = validateProductUrl(value);
     if (!validation.ok) {
+      setLinkValue(value);
       clearProductPreview();
       return;
     }
+    setLinkValue(validation.productUrl);
     queueProductPreview(validation.productUrl);
   }
 
@@ -333,10 +337,7 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
       setIsAnalysisLimitDialogOpen(true);
       return;
     }
-    const query = new URLSearchParams({
-      url: request.productUrl,
-      platform: request.platform,
-    });
+    const query = new URLSearchParams({ url: request.productUrl });
 
     isAnalyzingRef.current = true;
     setLastAnalysisRequest(request);
@@ -368,7 +369,7 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
       return;
     }
 
-    const validation = validateCoupangProductUrl(linkValue);
+    const validation = validateProductUrl(linkValue);
     if (!validation.ok) {
       setProduct(null);
       setIsProductPopoverOpen(false);
@@ -376,7 +377,13 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
       return;
     }
 
-    void runAnalysis({ productUrl: validation.productUrl, platform: validation.platform });
+    const preview = productPreviewCacheRef.current.get(validation.productUrl);
+    if (preview && !preview.analysisEligible) {
+      setLinkError("화장품 본품 상품 링크만 분석할 수 있어요.");
+      return;
+    }
+
+    void runAnalysis({ productUrl: validation.productUrl });
   }
 
   return (
@@ -493,7 +500,6 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
                 <span aria-hidden="true">?</span>
               </button>
             </div>
-            <p className="demo-link-hint">데모 링크: {DEMO_PRODUCT_URL}</p>
           </form>
         )}
 

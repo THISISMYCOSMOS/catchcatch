@@ -4,7 +4,12 @@ import { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { InternalApiGuard } from '../auth/internal-api.guard';
 import { CoreIntegrationService } from './core-integration.service';
-import { IngestOffersDto, ResolveProductDto, SaveJudgmentDto } from './dto/internal-contract.dto';
+import {
+  IngestOffersDto,
+  ResolveProductDto,
+  SaveAlternativeConfigurationsDto,
+  SaveJudgmentDto,
+} from './dto/internal-contract.dto';
 
 @UseGuards(AuthGuard, InternalApiGuard)
 @Controller('internal/v1')
@@ -35,6 +40,15 @@ export class CoreIntegrationController {
     return {
       judgmentInput: await this.service.buildJudgmentInput(analysisId, user.id),
     };
+  }
+
+  @Put('analyses/:analysisId/alternative-configurations')
+  async saveAlternativeConfigurations(
+    @Param('analysisId', new ParseUUIDPipe({ version: '4' })) analysisId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: SaveAlternativeConfigurationsDto,
+  ) {
+    await this.service.saveAlternativeConfigurations(analysisId, user.id, body);
   }
 
   @Put('analyses/:analysisId/judgment')

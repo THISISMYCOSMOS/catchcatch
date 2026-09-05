@@ -4,6 +4,9 @@ import {
   CapacityUnit,
   ComparisonStatus,
   ComponentType,
+  ComponentPhysicalType,
+  CommercialInclusion,
+  ComponentProductIdentity,
   PackageType,
   ReturnPolicyStatus,
   UserCriterion,
@@ -411,6 +414,10 @@ export type Database = {
           capacity_value: number | null;
           capacity_unit: CapacityUnit | null;
           quantity: number | null;
+          physical_type: ComponentPhysicalType;
+          commercial_inclusion: CommercialInclusion;
+          product_identity: ComponentProductIdentity;
+          verification_status: 'VERIFIED' | 'UNKNOWN';
           created_at: string;
         };
         Insert: {
@@ -421,6 +428,10 @@ export type Database = {
           capacity_value?: number | null;
           capacity_unit?: CapacityUnit | null;
           quantity?: number | null;
+          physical_type?: ComponentPhysicalType;
+          commercial_inclusion?: CommercialInclusion;
+          product_identity?: ComponentProductIdentity;
+          verification_status?: 'VERIFIED' | 'UNKNOWN';
           created_at?: string;
         };
         Update: {
@@ -431,6 +442,10 @@ export type Database = {
           capacity_value?: number | null;
           capacity_unit?: CapacityUnit | null;
           quantity?: number | null;
+          physical_type?: ComponentPhysicalType;
+          commercial_inclusion?: CommercialInclusion;
+          product_identity?: ComponentProductIdentity;
+          verification_status?: 'VERIFIED' | 'UNKNOWN';
           created_at?: string;
         };
         Relationships: [
@@ -516,6 +531,10 @@ export type Database = {
           is_active: boolean;
           purchase_url: string | null;
           observed_at: string | null;
+          source_verification_status: 'VERIFIED' | 'UNKNOWN';
+          selected_option_verification_status: 'VERIFIED' | 'UNKNOWN';
+          paid_configuration_verification_status: 'VERIFIED' | 'UNKNOWN';
+          verification_reason_codes: string[];
           created_at: string;
         };
         Insert: {
@@ -539,6 +558,10 @@ export type Database = {
           is_active?: boolean;
           purchase_url?: string | null;
           observed_at?: string | null;
+          source_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          selected_option_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          paid_configuration_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          verification_reason_codes?: string[];
           created_at?: string;
         };
         Update: {
@@ -562,6 +585,10 @@ export type Database = {
           is_active?: boolean;
           purchase_url?: string | null;
           observed_at?: string | null;
+          source_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          selected_option_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          paid_configuration_verification_status?: 'VERIFIED' | 'UNKNOWN';
+          verification_reason_codes?: string[];
           created_at?: string;
         };
         Relationships: [
@@ -636,6 +663,10 @@ export type Database = {
           capacity_value: number | null;
           capacity_unit: CapacityUnit | null;
           quantity: number | null;
+          physical_type: ComponentPhysicalType;
+          commercial_inclusion: CommercialInclusion;
+          product_identity: ComponentProductIdentity;
+          verification_status: 'VERIFIED' | 'UNKNOWN';
           created_at: string;
         };
         Insert: {
@@ -646,6 +677,10 @@ export type Database = {
           capacity_value?: number | null;
           capacity_unit?: CapacityUnit | null;
           quantity?: number | null;
+          physical_type?: ComponentPhysicalType;
+          commercial_inclusion?: CommercialInclusion;
+          product_identity?: ComponentProductIdentity;
+          verification_status?: 'VERIFIED' | 'UNKNOWN';
           created_at?: string;
         };
         Update: {
@@ -656,6 +691,10 @@ export type Database = {
           capacity_value?: number | null;
           capacity_unit?: CapacityUnit | null;
           quantity?: number | null;
+          physical_type?: ComponentPhysicalType;
+          commercial_inclusion?: CommercialInclusion;
+          product_identity?: ComponentProductIdentity;
+          verification_status?: 'VERIFIED' | 'UNKNOWN';
           created_at?: string;
         };
         Relationships: [

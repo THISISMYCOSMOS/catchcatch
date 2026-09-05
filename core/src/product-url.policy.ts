@@ -1,9 +1,12 @@
 import { CoreError } from './errors.js';
+import { isIP } from 'node:net';
 
-export function resolveAllowedProductDomains(
-  rawUrl: string,
-  configuredDomains: readonly string[],
-): string[] {
+/**
+ * Returns the one public hostname that may be used to identify the submitted
+ * product page. Cross-seller search has its own registered-seller allowlist;
+ * accepting a source page must not make that host a comparison target.
+ */
+export function resolveProductSourceDomain(rawUrl: string): string[] {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -20,15 +23,26 @@ export function resolveAllowedProductDomains(
   }
 
   const hostname = normalizeHostname(url.hostname);
-  const matchedDomain = configuredDomains
-    .map(normalizeHostname)
-    .find((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-  if (!matchedDomain) {
-    throw new CoreError(422, 'UNSUPPORTED_PRODUCT_DOMAIN', '지원하지 않는 판매처입니다.');
+  if (!isPublicHostname(hostname)) {
+    throw new CoreError(400, 'INVALID_PRODUCT_URL', '공개 HTTPS 상품 링크만 사용할 수 있습니다.');
   }
-  return [matchedDomain];
+  return [hostname];
 }
 
 function normalizeHostname(value: string): string {
-  return value.trim().toLowerCase().replace(/^www\./, '');
+  return value.trim().toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+}
+
+function isPublicHostname(hostname: string): boolean {
+  if (isIP(hostname) !== 0) return false;
+  if (!hostname.includes('.')) return false;
+  return !(
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.test') ||
+    hostname.endsWith('.example') ||
+    hostname.endsWith('.invalid')
+  );
 }

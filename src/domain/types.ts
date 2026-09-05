@@ -40,6 +40,18 @@ export type ComponentType =
 
 export type CapacityUnit = 'ML' | 'G';
 
+// `type` remains the legacy display/category field.  These dimensions are
+// deliberately independent: a mini can be paid, a bonus, or unknown, and a
+// cosmetic can be the same product, a different product, or unknown.
+export type ComponentPhysicalType = 'COSMETIC' | 'NON_COSMETIC' | 'UNKNOWN';
+export type CommercialInclusion = 'PAID' | 'BONUS' | 'UNKNOWN';
+export type ComponentProductIdentity =
+  | 'SAME_PRODUCT'
+  | 'DIFFERENT_PRODUCT'
+  | 'NOT_APPLICABLE'
+  | 'UNKNOWN';
+export type VerificationStatus = 'VERIFIED' | 'UNKNOWN';
+
 export type ComparisonStatus =
   | 'DIRECTLY_COMPARABLE'
   | 'UNIT_COMPARABLE'
@@ -66,14 +78,23 @@ export type WarningCode =
   | 'RETURN_POLICY_UNCONFIRMED'
   | 'OPTION_CONFIRMATION_REQUIRED'
   | 'COMPOSITION_UNCLEAR'
+  | 'SOURCE_EVIDENCE_UNVERIFIED'
+  | 'SELECTED_OPTION_UNVERIFIED'
+  | 'PAID_CONFIGURATION_UNVERIFIED'
+  | 'COMPONENT_COMPOSITION_UNVERIFIED'
   | 'DATA_OUTDATED'
   | 'OTHER';
 
 export type ProductComponent = {
   type: ComponentType;
+  name?: string | null;
   capacityValue: number | null;
   capacityUnit: CapacityUnit | null;
   quantity: number | null;
+  physicalType?: ComponentPhysicalType;
+  commercialInclusion?: CommercialInclusion;
+  productIdentity?: ComponentProductIdentity;
+  verificationStatus?: VerificationStatus;
 };
 
 export type SellerOffer = {
@@ -85,6 +106,9 @@ export type SellerOffer = {
   returnPolicyStatus: ReturnPolicyStatus;
   deliveryDays: number | null;
   packageType: PackageType;
+  sourceVerificationStatus?: VerificationStatus;
+  selectedOptionVerificationStatus?: VerificationStatus;
+  paidConfigurationVerificationStatus?: VerificationStatus;
 };
 
 export type OfferComparisonResult = {

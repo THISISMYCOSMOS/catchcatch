@@ -351,7 +351,7 @@ describe('AnalysesService', () => {
       productId: product.id,
     });
 
-    expect(result.status).toBe('READY_FOR_JUDGMENT');
+    expect(result.status).toBe('NEEDS_MORE_DATA');
     expect(result.allowedConclusions).toEqual([]);
     expect(result.result).toMatchObject({
       lowestEffectivePriceOffer: null,
@@ -375,8 +375,22 @@ describe('AnalysesService', () => {
         seller_url: 'https://example.com/offer',
         listed_sale_price: 10500,
         shipping_fee: 500,
+        source_verification_status: 'VERIFIED',
+        selected_option_verification_status: 'VERIFIED',
+        paid_configuration_verification_status: 'VERIFIED',
       },
     ]);
+    await offerComponents.replaceForSellerOffer('offer-one', [{
+      seller_offer_id: 'offer-one',
+      component_type: 'MAIN',
+      capacity_value: 50,
+      capacity_unit: 'ML',
+      quantity: 1,
+      physical_type: 'COSMETIC',
+      commercial_inclusion: 'PAID',
+      product_identity: 'SAME_PRODUCT',
+      verification_status: 'VERIFIED',
+    }]);
 
     const result = await service.create({
       userId: 'user-1',
@@ -473,7 +487,7 @@ describe('AnalysesService', () => {
 
     expect(persistence.persistAnalysisAtomically).toHaveBeenCalledWith(expect.objectContaining({
       idempotencyKey: 'idem-1',
-      status: 'READY_FOR_JUDGMENT',
+      status: 'NEEDS_MORE_DATA',
     }));
     expect(result.id).toBe(generatedId);
     expect(result.expiresAt).toBe('2026-08-02T00:00:00.000Z');
@@ -887,6 +901,10 @@ describe('AnalysesService', () => {
         public_discount_amount: 1000,
         shipping_fee: 0,
         user_effective_price: 7777,
+        comparison_status: 'DIRECTLY_COMPARABLE',
+        source_verification_status: 'VERIFIED',
+        selected_option_verification_status: 'VERIFIED',
+        paid_configuration_verification_status: 'VERIFIED',
       },
       {
         id: 'offer-lowest',
@@ -898,6 +916,10 @@ describe('AnalysesService', () => {
         public_discount_amount: 1000,
         shipping_fee: 0,
         user_effective_price: 8888,
+        comparison_status: 'DIRECTLY_COMPARABLE',
+        source_verification_status: 'VERIFIED',
+        selected_option_verification_status: 'VERIFIED',
+        paid_configuration_verification_status: 'VERIFIED',
       },
     ]);
     await offerComponents.replaceForSellerOffer('offer-high', [
@@ -907,6 +929,10 @@ describe('AnalysesService', () => {
         capacity_value: 50,
         capacity_unit: 'ML',
         quantity: 1,
+        physical_type: 'COSMETIC',
+        commercial_inclusion: 'PAID',
+        product_identity: 'SAME_PRODUCT',
+        verification_status: 'VERIFIED',
       },
       {
         seller_offer_id: 'offer-high',
@@ -914,6 +940,10 @@ describe('AnalysesService', () => {
         capacity_value: 20,
         capacity_unit: 'G',
         quantity: 1,
+        physical_type: 'COSMETIC',
+        commercial_inclusion: 'BONUS',
+        product_identity: 'DIFFERENT_PRODUCT',
+        verification_status: 'VERIFIED',
       },
     ]);
     await offerComponents.replaceForSellerOffer('offer-lowest', [
@@ -923,6 +953,10 @@ describe('AnalysesService', () => {
         capacity_value: 50,
         capacity_unit: 'ML',
         quantity: 1,
+        physical_type: 'COSMETIC',
+        commercial_inclusion: 'PAID',
+        product_identity: 'SAME_PRODUCT',
+        verification_status: 'VERIFIED',
       },
     ]);
     await history.createMany([
@@ -1049,14 +1083,14 @@ describe('rankRecommendedOffers', () => {
     expect(rankRecommendedOffers(
       [onePlusOne, single],
       ['FINAL_PAYMENT_AMOUNT', 'UNIT_PRICE', 'RIGHT_SIZED_PURCHASE'],
-    )).toEqual(['single', 'one-plus-one']);
+    )).toEqual(['single']);
   });
 
   it('prefers same-product 1+1 when unit price is the first criterion', () => {
     expect(rankRecommendedOffers(
       [single, onePlusOne],
       ['UNIT_PRICE', 'FINAL_PAYMENT_AMOUNT', 'RIGHT_SIZED_PURCHASE'],
-    )).toEqual(['one-plus-one', 'single']);
+    )).toEqual(['single']);
   });
 
   it('returns one global top three and excludes non-comparable offers', () => {
@@ -1071,7 +1105,7 @@ describe('rankRecommendedOffers', () => {
     expect(rankRecommendedOffers(
       offers,
       ['FINAL_PAYMENT_AMOUNT', 'UNIT_PRICE', 'RIGHT_SIZED_PURCHASE'],
-    )).toEqual(['single', 'one-plus-one', 'third']);
+    )).toEqual(['single', 'third', 'fourth']);
   });
 
   it('does not compare capacity and item count as the same right-size unit', () => {

@@ -102,17 +102,13 @@ export class ProductSearchService {
     const input = parseRequestInput(productSearchInputSchema, rawInput);
     const relaxedFieldWarnings = collectAnchorProductWarnings(input.anchor_product);
 
-    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
+    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'web_search');
     if (mode === 'sample') {
-      const allowedDomains = buildAllowedSearchDomains(null);
-      assertAllowedSellerUrl(input.product_url, allowedDomains);
       return this.createSampleSearchResult(input, relaxedFieldWarnings);
     }
     if (mode !== 'web_search') {
       throw new ServiceUnavailableException('PRODUCT_DATA_MODE must be sample or web_search');
     }
-
-    assertAllowedSellerUrl(input.product_url, buildAllowedSearchDomains(null));
 
     const cachedRefresh = await this.refreshCachedSellerOffers(input);
     const directlyRefreshedSellers = new Set(cachedRefresh.results.keys());
@@ -132,10 +128,6 @@ export class ProductSearchService {
         false,
       );
     }
-    // Reject an out-of-scope input before spending anything on official-domain
-    // discovery. The discovered domain only expands output search scope; it
-    // must never legitimize an unregistered input seller URL.
-
     const client = new OpenAI({
       apiKey,
       timeout: Number(this.config.get<string>(
@@ -161,7 +153,6 @@ export class ProductSearchService {
       )
       : { domain: null as string | null, warnings: [] as string[] };
     const allowedDomains = buildAllowedSearchDomains(brandDiscovery.domain);
-    assertAllowedSellerUrl(input.product_url, allowedDomains);
     const preSearchWarnings = mergeWarnings(
       relaxedFieldWarnings,
       cachedRefresh.warnings,
@@ -329,7 +320,7 @@ export class ProductSearchService {
       });
     }
     const maxCandidatesPerSeller = input.max_candidates_per_seller ?? 2;
-    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'sample');
+    const mode = this.config.get<string>('PRODUCT_DATA_MODE', 'web_search');
 
     if (mode === 'sample') {
       const allowedDomains = buildAllowedSearchDomains(null);
@@ -1859,6 +1850,10 @@ function verifyZigzagSellerPageCandidate<T extends DirectSellerPageCandidate>(
         acquisition_method: 'DIRECT_HTTP',
         observed_at: new Date().toISOString(),
         verification_status: 'CONTENT_VERIFIED',
+        // Zigzag's product ID, purchasability, name, and exact main capacity
+        // are all bound to this direct page before this promotion.
+        selected_option_verification_status: 'VERIFIED',
+        paid_configuration_verification_status: 'VERIFIED',
       },
     } as T,
     warnings: corrected

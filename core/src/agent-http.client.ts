@@ -1,6 +1,7 @@
 import {
   AgentClient,
   CachedSellerOffer,
+  ProductConfigurationSearchResult,
   ProductIdentificationResult,
   ProductIdentity,
   ProductSearchResult,
@@ -27,6 +28,18 @@ export class AgentHttpClient implements AgentClient {
     cached_seller_offers: CachedSellerOffer[];
   }): Promise<ProductSearchResult> {
     return this.http.request('/internal/v1/product-search', {
+      method: 'POST',
+      body: input,
+    });
+  }
+
+  searchConfigurations(input: {
+    product_url: string;
+    anchor_product: ProductIdentity;
+    brand_id: string | null;
+    cached_seller_offers: CachedSellerOffer[];
+  }): Promise<ProductConfigurationSearchResult> {
+    return this.http.request('/internal/v1/product-search/configurations', {
       method: 'POST',
       body: input,
     });

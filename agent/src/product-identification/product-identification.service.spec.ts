@@ -28,6 +28,7 @@ describe('ProductIdentificationService', () => {
     const result = await service.identify(input);
     expect(result).toMatchObject({
       identification_status: 'IDENTIFIED',
+      analysis_category: 'COSMETIC',
       source: {
         source_url: input.product_url,
         verification_status: 'URL_VERIFIED',
@@ -36,8 +37,8 @@ describe('ProductIdentificationService', () => {
     expect(result.warnings.some((warning) => warning.includes('sample data'))).toBe(true);
   });
 
-  it('defaults to sample mode when PRODUCT_DATA_MODE is unset, matching .env.example', async () => {
-    const service = new ProductIdentificationService(config({}));
+  it('uses sample mode only when explicitly enabled for a test fixture', async () => {
+    const service = new ProductIdentificationService(config({ PRODUCT_DATA_MODE: 'sample' }));
     await expect(service.identify(input)).resolves.toMatchObject({
       identification_status: 'IDENTIFIED',
     });
@@ -74,6 +75,8 @@ describe('ProductIdentificationService', () => {
       }],
       output_parsed: {
         identification_status: 'IDENTIFIED',
+        analysis_category: 'COSMETIC',
+        category_evidence: null,
         anchor_product: {
           brand: 'Example',
           normalized_product_name: 'Example Product',

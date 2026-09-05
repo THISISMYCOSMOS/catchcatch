@@ -42,6 +42,7 @@ export const searchedOfferSchema = z.object({
   components: z.array(productComponentSchema),
 });
 
+
 export const cachedSellerOfferSchema = z.object({
   seller: sellerSchema,
   source_url: z.string().url(),
@@ -56,6 +57,7 @@ const sellerSearchResultShape = {
   match_evidence: z.array(z.string()),
   mismatch_reasons: z.array(z.string()),
 };
+
 
 export const aiSellerSearchResultSchema = z.object({
   ...sellerSearchResultShape,

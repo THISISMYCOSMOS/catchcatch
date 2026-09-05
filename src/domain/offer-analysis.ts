@@ -43,6 +43,9 @@ export function compareOfferToAnchor(
   if (anchor.productKey !== offer.productKey) {
     return { offerId: offer.id, comparisonStatus: 'NOT_COMPARABLE' };
   }
+  if (!hasVerifiedOfferProof(anchor) || !hasVerifiedOfferProof(offer)) {
+    return { offerId: offer.id, comparisonStatus: 'UNKNOWN' };
+  }
 
   const anchorTotals = calculateCosmeticCapacityTotals(anchor.components);
   const offerTotals = calculateCosmeticCapacityTotals(offer.components);
@@ -67,6 +70,12 @@ export function compareOfferToAnchor(
     offerId: offer.id,
     comparisonStatus: sharesComparableUnit ? 'UNIT_COMPARABLE' : 'NOT_COMPARABLE',
   };
+}
+
+function hasVerifiedOfferProof(offer: SellerOffer): boolean {
+  return offer.sourceVerificationStatus === 'VERIFIED' &&
+    offer.selectedOptionVerificationStatus === 'VERIFIED' &&
+    offer.paidConfigurationVerificationStatus === 'VERIFIED';
 }
 
 export function findLowestEffectivePriceOffer(
