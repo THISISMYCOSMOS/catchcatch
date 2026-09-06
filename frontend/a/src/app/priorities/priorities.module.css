@@ -15,6 +15,62 @@
   padding: 12px 52px;
 }
 
+.priorityPillPreview {
+  border-color: var(--gold-text);
+  background: var(--surface);
+}
+
+.priorityPreview {
+  width: 100%;
+  min-width: 0;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--surface);
+  text-align: left;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.priorityPreviewEmpty {
+  padding: 2px 0 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.priorityPreviewTitle {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.01em;
+}
+
+.priorityPreviewDescription {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.priorityPreviewGuidance {
+  margin: 8px 0 0;
+  color: var(--gold-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.priorityPreviewPlaceholder {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 @media (max-width: 359px) {
   .priorityList {
     gap: 22px;

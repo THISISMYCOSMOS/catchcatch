@@ -360,7 +360,7 @@
 .modalHeader button { position: absolute; top: 10px; right: 10px; width: 40px; height: 40px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 10px; color: var(--text); background: var(--inactive); cursor: pointer; }
 .modalHeader svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .modalIntro { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.modalBody { min-height: 0; padding: 18px 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
+.modalBody { min-height: 0; padding: 18px 20px; overflow-y: auto; overscroll-behavior: contain; }
 .similarList { width: 100%; max-width: 378px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .similarList article { width: 100%; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel-surface); text-align: left; }
 .similarList h3 { margin: 0; overflow-wrap: anywhere; font-size: 15px; font-weight: 700; line-height: 1.45; }

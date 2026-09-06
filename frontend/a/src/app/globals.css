@@ -45,9 +45,34 @@
   --app-logo-gutter: 28px;
   --app-logo-side-slot: 48px;
   --app-logo-header-height: 48px;
+  --scrollbar-size: 4px;
+  --scrollbar-thumb: rgba(60, 60, 60, .28);
+  --scrollbar-thumb-active: rgba(60, 60, 60, .4);
 }
 
 * { box-sizing: border-box; }
+*::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border-radius: 999px; background-color: transparent; transition: background-color 180ms ease; }
+*::-webkit-scrollbar-corner { background: transparent; }
+.is-scrolling::-webkit-scrollbar-thumb,
+.is-scroll-hovered::-webkit-scrollbar-thumb { background-color: var(--scrollbar-thumb); }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-active); }
+
+@supports (-moz-appearance: none) {
+  * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+  .is-scrolling,
+  .is-scroll-hovered { scrollbar-color: var(--scrollbar-thumb) transparent; }
+}
+
+@media (max-width: 480px), (hover: none), (pointer: coarse) {
+  :root { --scrollbar-size: 3px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *::-webkit-scrollbar-thumb { transition: none; }
+}
+
 html { min-width: 320px; background: var(--background); }
 body { margin: 0; color: var(--text); background: var(--background); font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 button, input { font: inherit; }
@@ -111,6 +136,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 700; line-height: 1.3; letter-spac
 .terms-view-button:focus-visible { outline: 3px solid var(--gold-text); outline-offset: 1px; }
 .legal-page-card .stage-header { margin-bottom: 20px; }
 .signup-card .stage-form { gap: 0; }
+.signup-card .field-group + .field-group { margin-top: 14px; }
 .signup-card .terms-group { margin-top: 24px; }
 .signup-card .button-stack { margin-top: clamp(48px, 18svh, 160px); }
 .login-password-options { display: flex; flex-direction: column; gap: 10px; }
@@ -411,7 +437,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 700; line-height: 1.3; letter-spac
 .calendar-month-view { display: flex; flex-direction: column; }
 .calendar-month-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(44px, 1fr)); gap: 6px 8px; padding-top: 6px; }
 .calendar-month-grid button, .calendar-year-grid button { min-width: 0; min-height: 44px; padding: 0 6px; border: 0; border-radius: 9px; color: var(--text); background: transparent; font-size: 13px; cursor: pointer; opacity: .5; transition: opacity 180ms ease-out, color 180ms ease-out; }
-.calendar-year-grid { height: 100%; min-height: 0; padding: 2px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 44px; align-content: start; gap: 6px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.calendar-year-grid { height: 100%; min-height: 0; padding: 2px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 44px; align-content: start; gap: 6px; overflow-y: auto; overscroll-behavior: contain; }
 .calendar-popover button:focus-visible { outline: 2px solid var(--strong-border); outline-offset: -2px; }
 .calendar-header-text:focus-visible { background: transparent; background-color: transparent; box-shadow: none; }
 @media (hover: hover) and (pointer: fine) {
@@ -846,7 +872,7 @@ button, input, textarea, select { font: inherit; }
 .previous-analysis-close svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .previous-analysis-close:focus-visible { outline: 3px solid var(--gold-text); outline-offset: 1px; }
 
-.previous-analysis-content { width: 100%; min-height: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
+.previous-analysis-content { width: 100%; min-height: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-y: auto; overscroll-behavior: contain; }
 .previous-analysis-result-dialog .previous-analysis-content { padding: 0 21px 28px; overflow-x: hidden; }
 .previous-analysis-product { width: 100%; max-width: 378px; padding: 22px 18px 20px; display: flex; flex-direction: column; gap: 16px; align-items: center; border: 1px solid var(--border); border-radius: var(--card-radius); background: var(--previous-result-product-surface); text-align: center; }
 .previous-analysis-image { width: 112px; aspect-ratio: 1; display: block; flex: none; margin: 0 auto; border: 1px solid var(--border); border-radius: 14px; background: var(--inactive); object-fit: cover; }
@@ -873,8 +899,10 @@ button, input, textarea, select { font: inherit; }
 .analysis-limit-dialog { width: min(100%, 400px); min-height: 220px; background: var(--panel-surface); }
 .analysis-limit-dialog .previous-analysis-header { min-height: 64px; padding: 10px 58px; border-bottom: 0; background: var(--panel-surface); }
 .analysis-limit-dialog .previous-analysis-header h2 { font-size: 20px; }
-.analysis-limit-content { flex: 1; padding: 16px 28px 28px; background: var(--panel-surface); text-align: center; }
-.analysis-limit-content p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.analysis-limit-content { flex: 1; align-items: stretch; gap: 14px; padding: 16px 24px 24px; background: var(--panel-surface); text-align: left; }
+.analysis-limit-content p { margin: 0; color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.6; word-break: keep-all; overflow-wrap: break-word; }
+.analysis-limit-content p:first-child { font-weight: 600; }
+.analysis-limit-content .analysis-limit-remaining { font-size: 13px; }
 
 @media (hover: hover) and (pointer: fine) {
   .recent-card-interactive:hover { border-color: var(--strong-border); background: var(--surface); }
@@ -915,7 +943,6 @@ button, input, textarea, select { font: inherit; }
   height: var(--app-logo-header-height);
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-gutter: stable;
   pointer-events: none;
 }
 
@@ -1453,6 +1480,11 @@ button, input, textarea, select { font: inherit; }
 .profile-edit-card > .profile-edit-readonly { min-height: 58px; }
 .profile-edit-readonly > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .profile-edit-readonly > strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: right; }
+.profile-edit-readonly > .is-empty { color: var(--muted); font-weight: var(--type-body-weight); }
+.profile-password-value { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.profile-password-mask { flex: none; letter-spacing: .08em; white-space: nowrap; }
+.profile-password-action { min-height: 34px; padding: 0 8px; flex: none; border: 0; border-radius: 8px; color: var(--gold-text); background: transparent; font-size: 12px; font-weight: 650; line-height: 1.4; cursor: pointer; }
+.profile-password-action:focus-visible { outline: 3px solid var(--gold-text); outline-offset: 1px; }
 .profile-edit-card > .profile-edit-row { min-height: 0; padding: 13px 0; display: block; }
 .profile-edit-row .field-group { width: 100%; }
 .profile-edit-row .field-group label { margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: var(--type-body-weight); line-height: 1.45; }
@@ -1491,12 +1523,17 @@ button, input, textarea, select { font: inherit; }
 .profile-dialog { width: min(100%, 420px); max-height: calc(100% - 24px); background: var(--panel-surface); }
 .profile-dialog-header { position: relative; padding: 22px 58px 16px 20px; flex: none; border-bottom: 1px solid var(--divider); }
 .profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-header { padding: 22px 38px 20px; border-bottom: 0; text-align: center; }
-.profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-header p { width: min(100%, 280px); margin: 16px auto 0; }
+.profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-header > p { width: min(100%, 280px); margin: 16px auto 0; }
+.profile-dialog:has(.profile-withdrawal-details) .profile-dialog-header { padding-right: 24px; padding-left: 24px; }
+.profile-dialog:has(.profile-withdrawal-details) .profile-dialog-header > p { width: min(100%, 205px); word-break: keep-all; overflow-wrap: break-word; }
+.profile-dialog:has(.profile-withdrawal-confirm) .profile-dialog-close { top: 14px; }
 .profile-dialog-header h2 { margin: 0; font-size: 21px; font-weight: var(--type-section-weight); line-height: var(--type-section-line); letter-spacing: -.02em; }
 .profile-dialog-header p { margin: 7px 0 0; color: var(--muted); font-size: 13px; font-weight: var(--type-body-weight); line-height: 1.55; }
 .profile-dialog-close { top: 10px; right: 10px; }
 .profile-dialog-close svg { width: 20px; height: 20px; }
 .profile-dialog-content { min-height: 0; padding: 20px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.profile-reauthentication-form { display: flex; flex-direction: column; gap: 16px; }
+.profile-reauthentication-form > .button { width: 100%; margin-top: 4px; }
 .profile-password-form { display: flex; flex-direction: column; gap: 16px; }
 .profile-password-form .profile-dialog-actions { margin-top: 4px; }
 .profile-dialog-actions { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1504,6 +1541,8 @@ button, input, textarea, select { font: inherit; }
 .profile-support-notice { margin: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); background: var(--app-background); font-size: 12px; line-height: 1.55; }
 .profile-withdrawal-copy { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .profile-withdrawal-copy + .profile-support-notice { margin-top: 14px; }
+.profile-withdrawal-details { width: 100%; margin: 18px auto 0; padding: 0; display: flex; flex-direction: column; gap: 10px; color: var(--muted); font-size: 12px; line-height: 1.65; text-align: left; }
+.profile-withdrawal-details p { margin: 0; word-break: keep-all; overflow-wrap: break-word; }
 .profile-withdrawal-confirm { border-color: rgba(156, 76, 66, .24); color: #9c4c42; background: var(--surface); }
 .profile-dialog:has(.profile-withdrawal-confirm) .profile-withdrawal-confirm { margin-top: 24px; }
 .profile-withdrawal-confirm:focus-visible { outline: 3px solid rgba(156, 76, 66, .35); outline-offset: 2px; }
@@ -1520,6 +1559,7 @@ button, input, textarea, select { font: inherit; }
   .sale-calendar-month-nav button:hover { color: var(--text); background: var(--inactive); }
   .sale-card:hover { border-color: #c8bfa9; background: var(--panel-surface); }
   .profile-edit-button:hover,
+  .profile-password-action:hover,
   .profile-action-card button:hover,
   .profile-dialog-close:hover { background: var(--inactive); }
   .profile-withdrawal-confirm:hover { background: #fff8f5; }
@@ -1541,6 +1581,7 @@ button, input, textarea, select { font: inherit; }
   .profile-info-card { padding-right: 16px; padding-left: 16px; }
   .profile-info-card > div { grid-template-columns: minmax(68px, .5fr) minmax(0, 1.5fr); gap: 10px; }
   .profile-dialog-header { padding-left: 18px; }
+  .profile-dialog:has(.profile-withdrawal-details) .profile-dialog-header { padding-right: 20px; padding-left: 20px; }
   .profile-dialog-content { padding: 18px; }
 }
 

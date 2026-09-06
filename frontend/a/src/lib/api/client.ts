@@ -11,6 +11,7 @@ const LEGACY_MOCK_AUTH_KEYS = [
 
 export type AuthUser = {
   id: string;
+  accountId?: string | null;
   email: string | null;
   phone: string | null;
 };

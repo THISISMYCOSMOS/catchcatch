@@ -35,6 +35,7 @@ const MENU_ITEMS = [
   { label: "세일캘린더", href: "/sale-calendar" },
   { label: "관심상품", href: "/saved-products" },
   { label: "1:1문의", href: "/inquiry" },
+  { label: "서비스 이용안내", href: "/guide" },
   { label: "설정", href: "/settings" },
 ] as const;
 

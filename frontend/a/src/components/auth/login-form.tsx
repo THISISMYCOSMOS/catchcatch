@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AccountRecoveryDialog, type AccountRecoveryMode } from "@/components/auth/account-recovery-dialog";
 import { FormField, PasswordVisibilityButton } from "@/components/auth/form-field";
 import { login, restoreAuthenticatedUser } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
 import { authenticatedRoute } from "@/lib/api/user-preferences";
+import recoveryStyles from "./account-recovery-dialog.module.css";
 
 export function LoginForm() {
   const router = useRouter();
@@ -15,6 +17,7 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ accountId?: string; password?: string; form?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState<AccountRecoveryMode | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,43 +62,61 @@ export function LoginForm() {
   }
 
   return (
-    <form className="stage-form" onSubmit={handleSubmit} noValidate>
-      <FormField
-        id="account-id"
-        label="아이디"
-        type="text"
-        homeLinkFocus
-        placeholder="아이디 입력"
-        autoComplete="username"
-        value={accountId}
-        onChange={(event) => { setAccountId(event.target.value); setErrors({}); }}
-        error={errors.accountId}
-        autoFocus
-      />
-      <FormField
-        id="password"
-        label="비밀번호"
-        type={showPassword ? "text" : "password"}
-        homeLinkFocus
-        placeholder="비밀번호 입력"
-        autoComplete="current-password"
-        value={password}
-        onChange={(event) => { setPassword(event.target.value); setErrors({}); }}
-        error={errors.password}
-        trailingControl={(
-          <PasswordVisibilityButton
-            visible={showPassword}
-            onToggle={() => setShowPassword((value) => !value)}
-          />
-        )}
-      />
-      {errors.form ? <p className="form-error" role="alert">{errors.form}</p> : null}
-      <div className="button-stack">
-        <button className="button button-primary" type="submit" disabled={isSubmitting || !accountId.trim() || !password}>
-          {isSubmitting ? "로그인 중..." : "로그인"}
-        </button>
-        <Link className="button button-secondary" href="/signup">회원가입</Link>
-      </div>
-    </form>
+    <>
+      <form className="stage-form" onSubmit={handleSubmit} noValidate>
+        <FormField
+          id="account-id"
+          label="아이디"
+          type="text"
+          homeLinkFocus
+          placeholder="아이디 입력"
+          autoComplete="username"
+          value={accountId}
+          onChange={(event) => { setAccountId(event.target.value); setErrors({}); }}
+          error={errors.accountId}
+          autoFocus
+        />
+        <FormField
+          id="password"
+          label="비밀번호"
+          type={showPassword ? "text" : "password"}
+          homeLinkFocus
+          placeholder="비밀번호 입력"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => { setPassword(event.target.value); setErrors({}); }}
+          error={errors.password}
+          trailingControl={(
+            <PasswordVisibilityButton
+              visible={showPassword}
+              onToggle={() => setShowPassword((value) => !value)}
+            />
+          )}
+        />
+        <div className={recoveryStyles.recoveryActions} aria-label="계정 찾기">
+          <button className={recoveryStyles.recoveryLink} type="button" onClick={() => setRecoveryMode("accountId")}>
+            아이디 찾기
+          </button>
+          <span className={recoveryStyles.recoverySeparator} aria-hidden="true">·</span>
+          <button className={recoveryStyles.recoveryLink} type="button" onClick={() => setRecoveryMode("password")}>
+            비밀번호 찾기
+          </button>
+        </div>
+        {errors.form ? <p className="form-error" role="alert">{errors.form}</p> : null}
+        <div className="button-stack">
+          <button className="button button-primary" type="submit" disabled={isSubmitting || !accountId.trim() || !password}>
+            {isSubmitting ? "로그인 중..." : "로그인"}
+          </button>
+          <Link className="button button-secondary" href="/signup">회원가입</Link>
+        </div>
+      </form>
+      {recoveryMode ? (
+        <AccountRecoveryDialog
+          key={recoveryMode}
+          mode={recoveryMode}
+          onClose={() => setRecoveryMode(null)}
+        />
+      ) : null}
+    </>
   );
 }

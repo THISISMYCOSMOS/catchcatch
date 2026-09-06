@@ -1,0 +1,137 @@
+.accountIdField + :global(.field-group) {
+  margin-top: 14px;
+}
+
+.accountIdCheckRow {
+  min-height: 40px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.accountIdCheckButton {
+  min-width: 72px;
+  min-height: 38px;
+  margin-left: auto;
+  padding: 0 11px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.accountIdCheckButton:disabled {
+  color: var(--muted);
+  background: var(--inactive);
+  cursor: default;
+}
+
+.accountIdCheckButton:focus-visible {
+  outline: 3px solid var(--gold-text);
+  outline-offset: 1px;
+}
+
+.accountIdStatus {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.accountIdStatus[data-status="available"] {
+  color: var(--gold-text);
+}
+
+.accountIdStatus[data-status="duplicate"] {
+  color: var(--error);
+}
+
+.accountIdStatus[data-status="unavailable"] {
+  color: var(--muted);
+}
+
+.otpSection {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider);
+}
+
+.otpInstruction {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.otpTimer {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  color: var(--gold-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.otpTimerExpired {
+  color: var(--error);
+}
+
+.otpExpiredNotice {
+  margin: 6px 0 0;
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.resendButton {
+  min-height: 40px;
+  margin: 4px 0 0 auto;
+  padding: 0 4px;
+  display: block;
+  border: 0;
+  border-radius: 6px;
+  color: var(--gold-text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.resendButton:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.resendButton:focus-visible {
+  outline: 3px solid var(--gold-text);
+  outline-offset: 1px;
+}
+
+.notice {
+  margin: 0;
+  color: var(--gold-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .accountIdCheckButton:not(:disabled):hover {
+    border-color: var(--strong-border);
+  }
+}

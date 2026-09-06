@@ -4,25 +4,27 @@ import { KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef } from "r
 
 type AnalysisLimitDialogProps = {
   onClose: () => void;
+  remainingCount: number;
 };
 
-// 분석 제한 안내 문구 입력 위치
 const ANALYSIS_LIMIT_NOTICE = {
-  title: "",
-  content: "",
+  title: "분석 이용 안내",
+  paragraphs: [
+    "캐치캐치는 14일 동안 최대 10회의 상품 분석을 이용할 수 있어요.",
+    "첫 분석을 시작한 날부터 14일간 이용 횟수가 적용되며, 기간이 끝난 뒤 다음 분석부터 새로운 14일 이용기간과 10회의 분석 횟수가 시작돼요.",
+    "남은 분석 횟수는 홈 화면에서 언제든 확인할 수 있어요.",
+  ],
 } as const;
 
 function CloseIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
 
-export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
+export function AnalysisLimitDialog({ onClose, remainingCount }: AnalysisLimitDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
-  const title = ANALYSIS_LIMIT_NOTICE.title.trim();
-  const content = ANALYSIS_LIMIT_NOTICE.content.trim();
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -90,16 +92,15 @@ export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
         className="previous-analysis-dialog analysis-limit-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={title ? undefined : "14일 분석 이용 안내"}
-        aria-labelledby={title ? "analysis-limit-title" : undefined}
-        aria-describedby={content ? "analysis-limit-description" : undefined}
+        aria-labelledby="analysis-limit-title"
+        aria-describedby="analysis-limit-description"
         ref={dialogRef}
         tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
         onKeyDown={keepFocusInside}
       >
         <header className="previous-analysis-header">
-          {title ? <h2 id="analysis-limit-title">{title}</h2> : null}
+          <h2 id="analysis-limit-title">{ANALYSIS_LIMIT_NOTICE.title}</h2>
           <button
             className="previous-analysis-close"
             type="button"
@@ -110,8 +111,13 @@ export function AnalysisLimitDialog({ onClose }: AnalysisLimitDialogProps) {
             <CloseIcon />
           </button>
         </header>
-        <div className="previous-analysis-content analysis-limit-content">
-          {content ? <p id="analysis-limit-description">{content}</p> : null}
+        <div className="previous-analysis-content analysis-limit-content" id="analysis-limit-description">
+          {ANALYSIS_LIMIT_NOTICE.paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          {Number.isInteger(remainingCount) && remainingCount >= 0 ? (
+            <p className="analysis-limit-remaining">현재 {remainingCount}회 남았어요</p>
+          ) : null}
         </div>
       </div>
     </div>

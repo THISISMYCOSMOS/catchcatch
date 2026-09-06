@@ -13,6 +13,7 @@ import { getEmailError, getPasswordError } from "@/lib/validation/auth";
 type ProfileLoadState = "loading" | "ready" | "error";
 type UserProfile = {
   id: string;
+  accountId: string | null;
   username: string;
   nickname: string | null;
   email: string | null;
@@ -32,6 +33,7 @@ type PasswordChangeValues = {
   newPasswordConfirmation: string;
 };
 type PasswordChangeField = keyof PasswordChangeValues;
+type ProfilePasswordVerifier = (password: string) => Promise<boolean>;
 
 const INITIAL_PASSWORD_VALUES: PasswordChangeValues = {
   currentPassword: "",
@@ -232,21 +234,28 @@ function WithdrawalDialog({
     <ProfileDialog
       title="회원탈퇴"
       description={step === "confirm"
-        ? "탈퇴하면 저장한 관심상품과 분석 기록을 다시 확인할 수 없어요."
+        ? "회원탈퇴 후에는 계정과 저장된 정보를 복구할 수 없어요."
         : "등록된 휴대폰으로 전송된 인증번호를 입력해 주세요."}
       initialFocusSelector=".profile-withdrawal-confirm"
       onClose={onClose}
       unifiedContent
     >
       {step === "confirm" ? (
-        <button
-          className="button profile-withdrawal-confirm"
-          type="button"
-          disabled={isSending}
-          onClick={() => void requestWithdrawalOtp()}
-        >
-          {isSending ? "인증번호 전송 중..." : "휴대폰 인증 후 탈퇴"}
-        </button>
+        <>
+          <div className="profile-withdrawal-details">
+            <p>관심상품과 개인별 분석 기록 등 저장된 서비스 이용 정보가 삭제돼요.</p>
+            <p>등록한 혜택·멤버십과 설정한 구매 기준 등 개인 설정도 함께 삭제돼요.</p>
+            <p>서비스 운영 및 동의 사실 확인에 필요한 일부 기록은 관련 정책에 따라 일정 기간 별도로 보관될 수 있어요.</p>
+          </div>
+          <button
+            className="button profile-withdrawal-confirm"
+            type="button"
+            disabled={isSending}
+            onClick={() => void requestWithdrawalOtp()}
+          >
+            {isSending ? "인증번호 전송 중..." : "휴대폰 인증 후 탈퇴"}
+          </button>
+        </>
       ) : (
         <form className="profile-withdrawal-form" onSubmit={confirmWithdrawal} noValidate>
           <FormField
@@ -297,6 +306,99 @@ function toWithdrawalErrorMessage(error: unknown, phase: "send" | "verify"): str
   return phase === "send"
     ? "인증번호를 보내지 못했어요. 잠시 후 다시 시도해 주세요."
     : "회원 탈퇴를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.";
+}
+
+function ProfileReauthenticationDialog({
+  onClose,
+  onVerified,
+  verifyPassword,
+}: {
+  onClose: () => void;
+  onVerified: () => void;
+  verifyPassword?: ProfilePasswordVerifier;
+}) {
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [error, setError] = useState("");
+
+  function resetSensitiveState() {
+    setPassword("");
+    setShowPassword(false);
+    setError("");
+  }
+
+  function resetAndClose() {
+    if (isVerifying) return;
+    resetSensitiveState();
+    onClose();
+  }
+
+  function togglePasswordVisibility() {
+    setShowPassword((current) => !current);
+    window.requestAnimationFrame(() => document.getElementById("profile-edit-password-verification")?.focus());
+  }
+
+  async function verifyCurrentPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!password || isVerifying) return;
+
+    setError("");
+    if (!verifyPassword) {
+      setError("현재 정보 수정 기능을 준비 중이에요.");
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const verified = await verifyPassword(password);
+      if (!verified) {
+        setError("비밀번호가 일치하지 않습니다.");
+        return;
+      }
+      resetSensitiveState();
+      onVerified();
+    } catch (verificationError) {
+      if (verificationError instanceof ApiError && verificationError.status === 429) {
+        setError("시도가 너무 많습니다. 잠시 후 다시 시도해주세요.");
+      } else if (verificationError instanceof ApiError && (verificationError.status === 401 || verificationError.status === 403)) {
+        setError("비밀번호가 일치하지 않습니다.");
+      } else {
+        setError("비밀번호를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.");
+      }
+    } finally {
+      setIsVerifying(false);
+    }
+  }
+
+  return (
+    <ProfileDialog
+      title="정보 수정"
+      description="정보를 수정하려면 비밀번호를 확인해주세요."
+      initialFocusSelector="#profile-edit-password-verification"
+      onClose={resetAndClose}
+    >
+      <form className="profile-reauthentication-form" onSubmit={verifyCurrentPassword} noValidate>
+        <FormField
+          id="profile-edit-password-verification"
+          label="현재 비밀번호"
+          type={showPassword ? "text" : "password"}
+          homeLinkFocus
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => {
+            setPassword(event.target.value);
+            setError("");
+          }}
+          error={error || undefined}
+          trailingControl={<PasswordVisibilityButton visible={showPassword} onToggle={togglePasswordVisibility} />}
+        />
+        <button className="button button-primary" type="submit" disabled={!password || isVerifying}>
+          {isVerifying ? "확인 중..." : "확인"}
+        </button>
+      </form>
+    </ProfileDialog>
+  );
 }
 
 function PasswordChangeDialog({
@@ -458,6 +560,8 @@ export function ProfileScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
+  const [isProfileReauthenticationOpen, setIsProfileReauthenticationOpen] = useState(false);
+  const [isProfileEditAuthorized, setIsProfileEditAuthorized] = useState(false);
   const [isPasswordChangeOpen, setIsPasswordChangeOpen] = useState(false);
   const [isWithdrawalOpen, setIsWithdrawalOpen] = useState(false);
 
@@ -472,6 +576,7 @@ export function ProfileScreen() {
     try {
       setProfile({
         id: user.id,
+        accountId: typeof user.accountId === "string" && user.accountId.trim() ? user.accountId.trim() : null,
         username: user.id,
         nickname: null,
         email: user.email,
@@ -523,12 +628,20 @@ export function ProfileScreen() {
     window.requestAnimationFrame(() => editButtonRef.current?.focus());
   }
 
-  function startEditing() {
+  function requestEditing() {
+    if (!profile) return;
+    setIsProfileEditAuthorized(false);
+    setIsProfileReauthenticationOpen(true);
+  }
+
+  function startAuthenticatedEditing() {
     if (!profile) return;
     setEditableValues(toEditableValues(profile));
     setTouched({});
     setSaveError("");
     setSaveNotice("");
+    setIsProfileReauthenticationOpen(false);
+    setIsProfileEditAuthorized(true);
     setIsEditing(true);
   }
 
@@ -538,6 +651,7 @@ export function ProfileScreen() {
     setTouched({});
     setSaveError("");
     setIsEditing(false);
+    setIsProfileEditAuthorized(false);
     focusEditButton();
   }
 
@@ -578,8 +692,10 @@ export function ProfileScreen() {
 
   const displayEmail = profile?.email ?? "등록되지 않음";
   const displayPhone = profile?.phoneNumber ?? "등록되지 않음";
+  const displayAccountId = profile?.accountId ?? "확인할 수 없음";
   const displayName = profile?.nickname ?? profile?.phoneNumber ?? profile?.email ?? "";
   const profileInitial = Array.from(displayName)[0]?.toUpperCase() ?? "";
+  const isAuthenticatedEditing = isEditing && isProfileEditAuthorized;
 
   return (
     <>
@@ -628,12 +744,23 @@ export function ProfileScreen() {
                 <div className="profile-section-heading">
                   <h2 id="profile-basic-title">기본 정보</h2>
                   {!isEditing ? (
-                    <button className="profile-edit-button" type="button" onClick={startEditing} ref={editButtonRef}>정보 수정</button>
+                    <button className="profile-edit-button" type="button" onClick={requestEditing} ref={editButtonRef}>정보 수정</button>
                   ) : null}
                 </div>
-                {isEditing ? (
+                {isAuthenticatedEditing ? (
                   <form className="profile-edit-form" onSubmit={saveProfile} noValidate>
                     <div className="profile-info-card profile-edit-card">
+                      <div className="profile-edit-readonly">
+                        <span>아이디</span>
+                        <strong className={profile.accountId ? undefined : "is-empty"}>{displayAccountId}</strong>
+                      </div>
+                      <div className="profile-edit-readonly profile-password-row">
+                        <span>비밀번호</span>
+                        <div className="profile-password-value">
+                          <span className="profile-password-mask" role="img" aria-label="비밀번호가 설정되어 있습니다">••••••••</span>
+                          <button className="profile-password-action" type="button" onClick={() => setIsPasswordChangeOpen(true)}>변경</button>
+                        </div>
+                      </div>
                       <div className="profile-edit-row">
                         <FormField
                           id="profile-nickname"
@@ -646,6 +773,10 @@ export function ProfileScreen() {
                           onBlur={() => setTouched((current) => ({ ...current, nickname: true }))}
                           error={touched.nickname ? nicknameError : undefined}
                         />
+                      </div>
+                      <div className="profile-edit-readonly">
+                        <span>휴대폰 번호</span>
+                        <strong className={profile.phoneNumber ? undefined : "is-empty"}>{displayPhone}</strong>
                       </div>
                       <div className="profile-edit-row">
                         <FormField
@@ -669,8 +800,16 @@ export function ProfileScreen() {
                   </form>
                 ) : (
                   <dl className="profile-info-card">
+                    <div><dt>아이디</dt><dd className={profile.accountId ? undefined : "is-empty"}>{displayAccountId}</dd></div>
+                    <div className="profile-password-row">
+                      <dt>비밀번호</dt>
+                      <dd className="profile-password-value">
+                        <span className="profile-password-mask" role="img" aria-label="비밀번호가 설정되어 있습니다">••••••••</span>
+                        <button className="profile-password-action" type="button" onClick={() => setIsPasswordChangeOpen(true)}>변경</button>
+                      </dd>
+                    </div>
                     <div><dt>닉네임</dt><dd className={profile.nickname ? undefined : "is-empty"}>{profile.nickname ?? "등록되지 않음"}</dd></div>
-                    <div><dt>휴대폰</dt><dd className={profile.phoneNumber ? undefined : "is-empty"}>{displayPhone}</dd></div>
+                    <div><dt>휴대폰 번호</dt><dd className={profile.phoneNumber ? undefined : "is-empty"}>{displayPhone}</dd></div>
                     <div><dt>이메일</dt><dd className={profile.email ? undefined : "is-empty"}>{displayEmail}</dd></div>
                   </dl>
                 )}
@@ -696,6 +835,12 @@ export function ProfileScreen() {
           ) : null}
         </div>
 
+        {isProfileReauthenticationOpen && profile ? (
+          <ProfileReauthenticationDialog
+            onClose={() => setIsProfileReauthenticationOpen(false)}
+            onVerified={startAuthenticatedEditing}
+          />
+        ) : null}
         {isPasswordChangeOpen && profile ? (
           <PasswordChangeDialog
             onClose={() => setIsPasswordChangeOpen(false)}

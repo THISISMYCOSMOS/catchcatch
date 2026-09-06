@@ -1,0 +1,164 @@
+.recoveryActions {
+  min-height: 44px;
+  margin: -4px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.recoveryLink {
+  min-height: 44px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.recoverySeparator {
+  color: var(--disabled-text);
+  font-size: 14px;
+  user-select: none;
+}
+
+.recoveryLink:focus-visible,
+.close:focus-visible,
+.inlineButton:focus-visible {
+  outline: 3px solid var(--gold-text);
+  outline-offset: 2px;
+}
+
+.modal {
+  position: relative;
+  overflow-x: hidden;
+}
+
+.header {
+  padding-right: 44px;
+}
+
+.close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.close svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.form {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.instruction {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.fieldActionRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.inlineButton {
+  min-width: 72px;
+  min-height: 52px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  color: var(--text);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.notice {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.result {
+  margin-top: 20px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  text-align: center;
+}
+
+.result p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.result strong {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .recoveryLink:hover {
+    color: var(--text);
+  }
+
+  .close:hover {
+    background: var(--inactive);
+  }
+
+  .inlineButton:hover {
+    border-color: var(--strong-border);
+  }
+}
+
+@media (max-width: 359px) {
+  .fieldActionRow {
+    gap: 8px;
+  }
+
+  .inlineButton {
+    min-width: 68px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}

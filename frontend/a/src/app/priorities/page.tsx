@@ -12,6 +12,7 @@ import styles from "./priorities.module.css";
 export default function PrioritiesPage() {
   const router = useRouter();
   const [selected, setSelected] = useState<PriorityId[]>([]);
+  const [previewedPriority, setPreviewedPriority] = useState<PriorityId | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [limitMessage, setLimitMessage] = useState(false);
@@ -23,6 +24,7 @@ export default function PrioritiesPage() {
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canSubmit = selected.length === 3 && !isSubmitting;
+  const previewedPriorityData = PRIORITIES.find((priority) => priority.id === previewedPriority) ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +66,13 @@ export default function PrioritiesPage() {
       clearLimitFeedback();
       setShowCompletionCue(false);
       setSelected(selected.filter((item) => item !== id));
+      return;
+    }
+
+    if (previewedPriority !== id) {
+      clearLimitFeedback();
+      setShowCompletionCue(false);
+      setPreviewedPriority(id);
       return;
     }
 
@@ -137,16 +146,17 @@ export default function PrioritiesPage() {
             <div className={`pill-row ${styles.priorityRow}`} key={rowIndex}>
               {PRIORITIES.slice(rowIndex * 2, rowIndex * 2 + 2).map((priority) => {
                 const isSelected = selected.includes(priority.id);
-                const selectionLimitReached = selected.length === 3 && !isSelected;
+                const isPreviewed = previewedPriority === priority.id;
                 const wasRejected = rejectedPriority === priority.id;
 
                 return (
                   <button
                     key={priority.id}
-                    className={`pill ${styles.priorityPill} ${isSelected ? "pill-selected" : ""} ${wasRejected ? "pill-rejected" : ""}`}
+                    className={`pill ${styles.priorityPill} ${isPreviewed && !isSelected ? styles.priorityPillPreview : ""} ${isSelected ? "pill-selected" : ""} ${wasRejected ? "pill-rejected" : ""}`}
                     type="button"
                     aria-pressed={isSelected}
-                    aria-disabled={selectionLimitReached}
+                    aria-controls="priority-preview"
+                    aria-describedby={isPreviewed ? "priority-preview-description priority-preview-guidance" : undefined}
                     onClick={() => togglePriority(priority.id)}
                   >
                     <span>{priority.label}</span>
@@ -155,6 +165,27 @@ export default function PrioritiesPage() {
               })}
             </div>
           ))}
+        </div>
+        <div
+          className={`${styles.priorityPreview} ${previewedPriorityData ? "" : styles.priorityPreviewEmpty}`}
+          id="priority-preview"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {previewedPriorityData ? (
+            <>
+              <h2 className={styles.priorityPreviewTitle}>{previewedPriorityData.label}</h2>
+              <p className={styles.priorityPreviewDescription} id="priority-preview-description">
+                {previewedPriorityData.description}
+              </p>
+              <p className={styles.priorityPreviewGuidance} id="priority-preview-guidance">
+                {selected.includes(previewedPriorityData.id) ? "선택된 기준이에요." : "한 번 더 누르면 선택돼요."}
+              </p>
+            </>
+          ) : (
+            <p className={styles.priorityPreviewPlaceholder}>기준을 눌러 설명을 확인해보세요.</p>
+          )}
         </div>
         <p className="selection-status" aria-live="polite">
           {limitMessage ? "최대 3개까지 선택할 수 있어요." : ""}

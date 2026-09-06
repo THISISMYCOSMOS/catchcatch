@@ -163,6 +163,42 @@
   line-height: 1.45;
 }
 
+.settingAction {
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.standaloneSettingsCard {
+  margin-top: 16px;
+}
+
+.settingAction strong {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.settingAction svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: #8b877d;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .switch {
   position: relative;
   width: 50px;
@@ -213,6 +249,7 @@
 
 .favoriteButton:focus-visible,
 .switch:focus-visible,
+.settingAction:focus-visible,
 .listToolbar select:focus-visible {
   outline: 3px solid var(--gold-text);
   outline-offset: -2px;
@@ -221,6 +258,10 @@
 @media (hover: hover) and (pointer: fine) {
   .favoriteButton:hover {
     background: var(--inactive);
+  }
+
+  .settingAction:hover {
+    background: var(--panel);
   }
 }
 
@@ -235,6 +276,11 @@
   }
 
   .settingRow {
+    padding-left: 12px;
+  }
+
+  .settingAction {
+    padding-right: 12px;
     padding-left: 12px;
   }
 }

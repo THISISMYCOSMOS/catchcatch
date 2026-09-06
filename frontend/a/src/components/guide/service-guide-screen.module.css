@@ -1,0 +1,192 @@
+.pageHeading {
+  margin-bottom: 0;
+  text-align: center;
+}
+
+.pageHeading p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.guideSection {
+  margin-top: 30px;
+}
+
+.guideSection > h2 {
+  margin: 0 0 11px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
+  letter-spacing: -.015em;
+}
+
+.detailCard,
+.copyCard,
+.notesCard {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--surface);
+}
+
+.detailCard {
+  padding: 0 18px;
+}
+
+.detailCard > div {
+  padding: 16px 0;
+}
+
+.detailCard > div + div,
+.copyCard article + article {
+  border-top: 1px solid var(--divider);
+}
+
+.detailCard dt,
+.copyCard h3 {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.detailCard dd,
+.copyCard p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: var(--type-body-weight);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.copyCard {
+  padding: 0 18px;
+}
+
+.copyCard article {
+  padding: 17px 0;
+}
+
+.copyCard h3 {
+  margin: 0;
+}
+
+.faqCard {
+  margin: 0;
+}
+
+.faqCard article {
+  padding: 17px 19px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--surface);
+}
+
+.faqCard article + article {
+  margin-top: 11px;
+}
+
+.faqQuestion,
+.faqAnswer {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 7px;
+  align-items: start;
+  text-align: left;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.faqQuestion {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+  letter-spacing: -.01em;
+}
+
+.faqAnswer {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: var(--type-body-weight);
+  line-height: 1.68;
+}
+
+.faqPrefix {
+  color: var(--gold-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: inherit;
+}
+
+.notesCard {
+  padding: 20px 22px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: var(--type-body-weight);
+  line-height: 1.65;
+  list-style: none;
+  text-align: left;
+}
+
+.notesCard li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  column-gap: 9px;
+  width: 100%;
+  margin-right: auto;
+  margin-left: auto;
+  align-items: flex-start;
+  text-align: left;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.notesCard li::before {
+  content: "•";
+  width: 8px;
+  text-align: center;
+}
+
+.notesCard li + li {
+  margin-top: 10px;
+}
+
+.resultSummary {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: var(--type-body-weight);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.notesSection {
+  padding-bottom: 8px;
+}
+
+.notesCard {
+  background: var(--app-background);
+}
+
+@media (max-width: 359px) {
+  .detailCard,
+  .copyCard {
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  .faqCard article {
+    padding-right: 17px;
+    padding-left: 17px;
+  }
+
+}

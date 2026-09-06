@@ -13,6 +13,8 @@ import { useRouter } from "next/navigation";
 import { AppLogo } from "@/components/app-logo";
 import {
   BenefitProfile,
+  BigroomGrade,
+  BIGROOM_GRADE_OPTIONS,
   getBenefitProfile,
   hasAnyBenefits,
   MusinsaGrade,
@@ -169,7 +171,7 @@ function benefitProfileFromPreferences(
     preferences.shoppingGrades.map((item) => [item.provider.toUpperCase(), item.grade]),
   );
   const otherMembership = preferences.memberships.find((item) => (
-    item.enabled && !["COUPANG", "OLIVE_YOUNG", "MUSINSA", "ZIGZAG"].includes(item.provider.toUpperCase())
+    item.enabled && !["COUPANG", "OLIVE_YOUNG", "MUSINSA", "ZIGZAG", "BIGROOM"].includes(item.provider.toUpperCase())
   ));
   return normalizeBenefitProfile({
     ...fallback,
@@ -179,6 +181,7 @@ function benefitProfileFromPreferences(
     oliveYoungGrade: gradeByProvider.get("OLIVE_YOUNG")?.toLowerCase() ?? "notUsing",
     musinsaGrade: gradeByProvider.get("MUSINSA")?.toLowerCase() ?? "notUsing",
     zigzagGrade: gradeByProvider.get("ZIGZAG")?.toLowerCase() ?? "notUsing",
+    bigroomGrade: gradeByProvider.get("BIGROOM")?.toLowerCase() ?? "notUsing",
     otherMembership: {
       enabled: Boolean(otherMembership),
       name: otherMembership?.provider ?? "",
@@ -213,6 +216,9 @@ function benefitsPayload(
   if (profile.zigzagGrade !== "notUsing") {
     shoppingGrades.push({ provider: "ZIGZAG", grade: profile.zigzagGrade.toUpperCase() });
   }
+  if (profile.bigroomGrade !== "notUsing") {
+    shoppingGrades.push({ provider: "BIGROOM", grade: profile.bigroomGrade.toUpperCase() });
+  }
   return { memberships, shoppingGrades, cards: existing.cards };
 }
 
@@ -229,11 +235,13 @@ export default function BenefitsPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+
       const user = await restoreAuthenticatedUser();
       if (!user) {
         router.replace("/login");
         return;
       }
+
       const preferences = await getUserPreferences(user.id);
       if (!preferences) {
         router.replace("/priorities");
@@ -341,6 +349,16 @@ export default function BenefitsPage() {
                   onChange={(zigzagGrade) => setProfile((current) => current ? ({
                     ...current,
                     zigzagGrade,
+                  }) : current)}
+                />
+
+                <MembershipGradeDropdown<BigroomGrade>
+                  label="비그룸"
+                  value={profile.bigroomGrade}
+                  options={BIGROOM_GRADE_OPTIONS}
+                  onChange={(bigroomGrade) => setProfile((current) => current ? ({
+                    ...current,
+                    bigroomGrade,
                   }) : current)}
                 />
 

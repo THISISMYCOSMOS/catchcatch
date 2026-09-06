@@ -391,7 +391,10 @@ export function HomeScreen({ username, initialAnalysisUsage, recentAnalyses }: H
       overlayContent={selectedAnalysis ? (
         <PreviousAnalysisDialog analysis={selectedAnalysis} onClose={() => setSelectedAnalysisId(null)} />
       ) : isAnalysisLimitDialogOpen ? (
-        <AnalysisLimitDialog onClose={() => setIsAnalysisLimitDialogOpen(false)} />
+        <AnalysisLimitDialog
+          onClose={() => setIsAnalysisLimitDialogOpen(false)}
+          remainingCount={analysisUsage.remainingCount}
+        />
       ) : null}
     >
         <section className="home-intro" aria-labelledby="home-title">

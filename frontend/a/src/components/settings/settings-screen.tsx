@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AuthenticatedAppFrame } from "@/components/home/authenticated-app-frame";
+import { LegalDocumentDialog } from "@/components/legal/legal-document-dialog";
 import styles from "@/components/preferences/preferences.module.css";
 import { restoreAuthenticatedUser } from "@/lib/api/auth";
 
@@ -62,10 +63,15 @@ function SettingSwitch({
   );
 }
 
+function ChevronIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></svg>;
+}
+
 export function SettingsScreen() {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_SETTINGS);
+  const [isPrivacyPolicyOpen, setIsPrivacyPolicyOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,8 +140,22 @@ export function SettingsScreen() {
             onChange={() => toggleSetting("push")}
           />
         </div>
+        <div className={`${styles.settingsCard} ${styles.standaloneSettingsCard}`}>
+          <button
+            className={styles.settingAction}
+            type="button"
+            aria-haspopup="dialog"
+            onClick={() => setIsPrivacyPolicyOpen(true)}
+          >
+            <strong>개인정보 처리방침</strong>
+            <ChevronIcon />
+          </button>
+        </div>
       </section>
 
+      {isPrivacyPolicyOpen ? (
+        <LegalDocumentDialog documentId="privacyPolicy" onClose={() => setIsPrivacyPolicyOpen(false)} />
+      ) : null}
     </AuthenticatedAppFrame>
   );
 }

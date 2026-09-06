@@ -8,7 +8,6 @@ export const OLIVE_YOUNG_GRADE_OPTIONS = [
   { id: "green", label: "그린" },
   { id: "black", label: "블랙" },
   { id: "gold", label: "골드" },
-  { id: "unknown", label: "등급을 모르겠어요" },
 ] as const;
 
 export const MUSINSA_GRADE_OPTIONS = [
@@ -22,7 +21,6 @@ export const MUSINSA_GRADE_OPTIONS = [
   { id: "platinum", label: "플래티넘" },
   { id: "diamond", label: "다이아몬드" },
   { id: "blackDiamond", label: "블랙 다이아몬드" },
-  { id: "unknown", label: "등급을 모르겠어요" },
 ] as const;
 
 export const ZIGZAG_GRADE_OPTIONS = [
@@ -34,10 +32,20 @@ export const ZIGZAG_GRADE_OPTIONS = [
   { id: "vip", label: "VIP (Z5)", purchaseAmount: "최근 6개월 구매 금액: 100만원 이상", benefit: "쿠폰팩", mileageRate: "3%" },
 ] as const;
 
+export const BIGROOM_GRADE_OPTIONS = [
+  { id: "notUsing", label: "이용 안 함" },
+  { id: "bronze", label: "브론즈" },
+  { id: "silver", label: "실버" },
+  { id: "gold", label: "골드" },
+  { id: "platinum", label: "플래티넘" },
+  { id: "diamond", label: "다이아" },
+] as const;
+
 export type OliveYoungGrade = (typeof OLIVE_YOUNG_GRADE_OPTIONS)[number]["id"];
 export type MusinsaGrade = (typeof MUSINSA_GRADE_OPTIONS)[number]["id"];
 export type ZigzagGrade = (typeof ZIGZAG_GRADE_OPTIONS)[number]["id"];
-export type MembershipId = "coupangWow" | "oliveYoung" | "musinsa" | "zigzag" | "other";
+export type BigroomGrade = (typeof BIGROOM_GRADE_OPTIONS)[number]["id"];
+export type MembershipId = "coupangWow" | "oliveYoung" | "musinsa" | "zigzag" | "bigroom" | "other";
 
 export type BenefitProfile = {
   memberships: MembershipId[];
@@ -45,6 +53,7 @@ export type BenefitProfile = {
   oliveYoungGrade: OliveYoungGrade;
   musinsaGrade: MusinsaGrade;
   zigzagGrade: ZigzagGrade;
+  bigroomGrade: BigroomGrade;
   otherMembership: {
     enabled: boolean;
     name: string;
@@ -76,13 +85,14 @@ type BenefitsByUsername = Record<string, unknown>;
 const OLIVE_YOUNG_GRADES = new Set<string>(OLIVE_YOUNG_GRADE_OPTIONS.map((option) => option.id));
 const MUSINSA_GRADES = new Set<string>(MUSINSA_GRADE_OPTIONS.map((option) => option.id));
 const ZIGZAG_GRADES = new Set<string>(ZIGZAG_GRADE_OPTIONS.map((option) => option.id));
+const BIGROOM_GRADES = new Set<string>(BIGROOM_GRADE_OPTIONS.map((option) => option.id));
 const OLIVE_YOUNG_LEGACY_GRADES: Record<string, OliveYoungGrade> = {
   베이비: "baby",
   핑크: "pink",
   그린: "green",
   블랙: "black",
   골드: "gold",
-  "등급을 모르겠어요": "unknown",
+  "등급을 모르겠어요": "notUsing",
 };
 const MUSINSA_LEGACY_GRADES: Record<string, MusinsaGrade> = {
   웰컴: "welcome",
@@ -94,31 +104,29 @@ const MUSINSA_LEGACY_GRADES: Record<string, MusinsaGrade> = {
   플래티넘: "platinum",
   다이아몬드: "diamond",
   "블랙 다이아몬드": "blackDiamond",
-  "등급을 모르겠어요": "unknown",
+  "등급을 모르겠어요": "notUsing",
 };
 
 function normalizeUsername(username: string) {
   return username.trim().toLowerCase();
 }
 
-function normalizeOliveYoungGrade(value: unknown, hasMembership: boolean): OliveYoungGrade {
+function normalizeOliveYoungGrade(value: unknown): OliveYoungGrade {
   if (typeof value === "string") {
     const normalized = value.trim();
     if (OLIVE_YOUNG_GRADES.has(normalized)) return normalized as OliveYoungGrade;
     if (normalized in OLIVE_YOUNG_LEGACY_GRADES) return OLIVE_YOUNG_LEGACY_GRADES[normalized];
-    if (normalized) return "unknown";
   }
-  return hasMembership ? "unknown" : "notUsing";
+  return "notUsing";
 }
 
-function normalizeMusinsaGrade(value: unknown, hasMembership: boolean): MusinsaGrade {
+function normalizeMusinsaGrade(value: unknown): MusinsaGrade {
   if (typeof value === "string") {
     const normalized = value.trim();
     if (MUSINSA_GRADES.has(normalized)) return normalized as MusinsaGrade;
     if (normalized in MUSINSA_LEGACY_GRADES) return MUSINSA_LEGACY_GRADES[normalized];
-    if (normalized) return "unknown";
   }
-  return hasMembership ? "unknown" : "notUsing";
+  return "notUsing";
 }
 
 function normalizeZigzagGrade(value: unknown, hasMembership: boolean): ZigzagGrade {
@@ -129,6 +137,14 @@ function normalizeZigzagGrade(value: unknown, hasMembership: boolean): ZigzagGra
   return hasMembership ? "newbie" : "notUsing";
 }
 
+function normalizeBigroomGrade(value: unknown): BigroomGrade {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (BIGROOM_GRADES.has(normalized)) return normalized as BigroomGrade;
+  }
+  return "notUsing";
+}
+
 export function createDefaultBenefitProfile(): BenefitProfile {
   return {
     memberships: [],
@@ -136,6 +152,7 @@ export function createDefaultBenefitProfile(): BenefitProfile {
     oliveYoungGrade: "notUsing",
     musinsaGrade: "notUsing",
     zigzagGrade: "notUsing",
+    bigroomGrade: "notUsing",
     otherMembership: { enabled: false, name: "" },
     coupon: { enabled: false, type: "fixed", value: 0, maxDiscount: 0 },
     points: { enabled: false, amount: 0 },
@@ -179,15 +196,16 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     || storedMemberships.includes("coupangWow");
   const oliveYoungGrade = normalizeOliveYoungGrade(
     stored.oliveYoungGrade ?? storedMembershipGrades.oliveYoung,
-    storedMemberships.includes("oliveYoung"),
   );
   const musinsaGrade = normalizeMusinsaGrade(
     stored.musinsaGrade ?? storedMembershipGrades.musinsa,
-    storedMemberships.includes("musinsa"),
   );
   const zigzagGrade = normalizeZigzagGrade(
     stored.zigzagGrade ?? storedMembershipGrades.zigzag,
     storedMemberships.includes("zigzag"),
+  );
+  const bigroomGrade = normalizeBigroomGrade(
+    stored.bigroomGrade ?? storedMembershipGrades.bigroom,
   );
   const storedOtherMembership = stored.otherMembership;
   const otherMembership = typeof storedOtherMembership === "string"
@@ -205,6 +223,7 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     ...(oliveYoungGrade !== "notUsing" ? ["oliveYoung" as const] : []),
     ...(musinsaGrade !== "notUsing" ? ["musinsa" as const] : []),
     ...(zigzagGrade !== "notUsing" ? ["zigzag" as const] : []),
+    ...(bigroomGrade !== "notUsing" ? ["bigroom" as const] : []),
     ...(otherMembership.enabled && otherMembership.name.trim() ? ["other" as const] : []),
   ];
 
@@ -214,6 +233,7 @@ export function normalizeBenefitProfile(value: unknown): BenefitProfile {
     oliveYoungGrade,
     musinsaGrade,
     zigzagGrade,
+    bigroomGrade,
     otherMembership,
     coupon: defaults.coupon,
     points: defaults.points,
@@ -247,6 +267,7 @@ export function saveBenefitProfile(username: string, profile: BenefitProfile) {
     oliveYoungGrade: profile.oliveYoungGrade,
     musinsaGrade: profile.musinsaGrade,
     zigzagGrade: profile.zigzagGrade,
+    bigroomGrade: profile.bigroomGrade,
     otherMembership: {
       enabled: profile.otherMembership.enabled,
       name: profile.otherMembership.enabled ? profile.otherMembership.name.trim() : "",
@@ -278,6 +299,7 @@ export function hasAnyBenefits(profile: BenefitProfile) {
     || profile.oliveYoungGrade !== "notUsing"
     || profile.musinsaGrade !== "notUsing"
     || profile.zigzagGrade !== "notUsing"
+    || profile.bigroomGrade !== "notUsing"
     || (profile.otherMembership.enabled && profile.otherMembership.name.trim().length > 0);
 }
 
