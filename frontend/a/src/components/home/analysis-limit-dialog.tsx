@@ -9,11 +9,10 @@ type AnalysisLimitDialogProps = {
 
 const ANALYSIS_LIMIT_NOTICE = {
   title: "분석 이용 안내",
-  paragraphs: [
-    "캐치캐치는 14일 동안 최대 10회의 상품 분석을 이용할 수 있어요.",
-    "첫 분석을 시작한 날부터 14일간 이용 횟수가 적용되며, 기간이 끝난 뒤 다음 분석부터 새로운 14일 이용기간과 10회의 분석 횟수가 시작돼요.",
-    "남은 분석 횟수는 홈 화면에서 언제든 확인할 수 있어요.",
-  ],
+  lead: "14일 동안 최대 10회의 상품 분석을 이용할",
+  leadEnding: "수 있어요.",
+  renewal: "기간이 끝난 뒤 다음 분석을 시작하면 새로운 14일 이용기간과 10회의 분석",
+  renewalEnding: "횟수가 적용돼요.",
 } as const;
 
 function CloseIcon() {
@@ -112,11 +111,29 @@ export function AnalysisLimitDialog({ onClose, remainingCount }: AnalysisLimitDi
           </button>
         </header>
         <div className="previous-analysis-content analysis-limit-content" id="analysis-limit-description">
-          {ANALYSIS_LIMIT_NOTICE.paragraphs.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
+          <p className="analysis-limit-lead">
+            {ANALYSIS_LIMIT_NOTICE.lead} <span className="analysis-limit-no-break">{ANALYSIS_LIMIT_NOTICE.leadEnding}</span>
+          </p>
+          <dl className="analysis-limit-rules">
+            <div>
+              <dt>이용 기간</dt>
+              <dd>첫 분석일부터 14일</dd>
+            </div>
+            <div>
+              <dt>분석 횟수</dt>
+              <dd>최대 10회</dd>
+            </div>
+          </dl>
+          <p className="analysis-limit-renewal">
+            {ANALYSIS_LIMIT_NOTICE.renewal} <span className="analysis-limit-no-break">{ANALYSIS_LIMIT_NOTICE.renewalEnding}</span>
+          </p>
           {Number.isInteger(remainingCount) && remainingCount >= 0 ? (
-            <p className="analysis-limit-remaining">현재 {remainingCount}회 남았어요</p>
+            <dl className="analysis-limit-remaining">
+              <div>
+                <dt>현재 남은 분석</dt>
+                <dd>{remainingCount}회</dd>
+              </div>
+            </dl>
           ) : null}
         </div>
       </div>

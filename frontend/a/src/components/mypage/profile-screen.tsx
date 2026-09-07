@@ -754,13 +754,6 @@ export function ProfileScreen() {
                         <span>아이디</span>
                         <strong className={profile.accountId ? undefined : "is-empty"}>{displayAccountId}</strong>
                       </div>
-                      <div className="profile-edit-readonly profile-password-row">
-                        <span>비밀번호</span>
-                        <div className="profile-password-value">
-                          <span className="profile-password-mask" role="img" aria-label="비밀번호가 설정되어 있습니다">••••••••</span>
-                          <button className="profile-password-action" type="button" onClick={() => setIsPasswordChangeOpen(true)}>변경</button>
-                        </div>
-                      </div>
                       <div className="profile-edit-row">
                         <FormField
                           id="profile-nickname"
@@ -791,6 +784,15 @@ export function ProfileScreen() {
                           error={touched.email ? emailError : undefined}
                         />
                       </div>
+                      <div className="profile-edit-readonly profile-password-row">
+                        <span>비밀번호</span>
+                        <div className="profile-password-value">
+                          <button className="profile-password-action" type="button" aria-label="비밀번호 변경 창 열기" onClick={() => setIsPasswordChangeOpen(true)}>
+                            <span>변경</span>
+                            <ChevronIcon />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                     {saveError ? <p className="profile-save-error" role="alert">{saveError}</p> : null}
                     <div className="profile-edit-actions">
@@ -801,16 +803,18 @@ export function ProfileScreen() {
                 ) : (
                   <dl className="profile-info-card">
                     <div><dt>아이디</dt><dd className={profile.accountId ? undefined : "is-empty"}>{displayAccountId}</dd></div>
-                    <div className="profile-password-row">
-                      <dt>비밀번호</dt>
-                      <dd className="profile-password-value">
-                        <span className="profile-password-mask" role="img" aria-label="비밀번호가 설정되어 있습니다">••••••••</span>
-                        <button className="profile-password-action" type="button" onClick={() => setIsPasswordChangeOpen(true)}>변경</button>
-                      </dd>
-                    </div>
                     <div><dt>닉네임</dt><dd className={profile.nickname ? undefined : "is-empty"}>{profile.nickname ?? "등록되지 않음"}</dd></div>
                     <div><dt>휴대폰 번호</dt><dd className={profile.phoneNumber ? undefined : "is-empty"}>{displayPhone}</dd></div>
                     <div><dt>이메일</dt><dd className={profile.email ? undefined : "is-empty"}>{displayEmail}</dd></div>
+                    <div className="profile-password-row">
+                      <dt>비밀번호</dt>
+                      <dd className="profile-password-value">
+                        <button className="profile-password-action" type="button" aria-label="비밀번호 변경 창 열기" onClick={() => setIsPasswordChangeOpen(true)}>
+                          <span>변경</span>
+                          <ChevronIcon />
+                        </button>
+                      </dd>
+                    </div>
                   </dl>
                 )}
               </section>

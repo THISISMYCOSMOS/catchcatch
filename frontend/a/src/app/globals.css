@@ -896,13 +896,26 @@ button, input, textarea, select { font: inherit; }
 .notification-detail-message { width: 100%; max-width: 320px; margin: 0 auto; padding: 0; display: flex; flex-direction: column; align-items: center; border: 0; border-radius: 0; background: transparent; box-shadow: none; text-align: center; }
 .notification-detail-message p { width: 100%; margin: 0; color: var(--text); font-size: 15px; line-height: 1.65; overflow-wrap: anywhere; text-align: center; }
 .notification-detail-message time { display: block; margin-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.45; text-align: center; }
-.analysis-limit-dialog { width: min(100%, 400px); min-height: 220px; background: var(--panel-surface); }
+.analysis-limit-dialog { width: min(100%, 400px); min-height: 0; background: var(--panel-surface); }
 .analysis-limit-dialog .previous-analysis-header { min-height: 64px; padding: 10px 58px; border-bottom: 0; background: var(--panel-surface); }
 .analysis-limit-dialog .previous-analysis-header h2 { font-size: 20px; }
-.analysis-limit-content { flex: 1; align-items: stretch; gap: 14px; padding: 16px 24px 24px; background: var(--panel-surface); text-align: left; }
-.analysis-limit-content p { margin: 0; color: var(--muted); font-size: 14px; font-weight: 400; line-height: 1.6; word-break: keep-all; overflow-wrap: break-word; }
-.analysis-limit-content p:first-child { font-weight: 600; }
-.analysis-limit-content .analysis-limit-remaining { font-size: 13px; }
+.analysis-limit-content { flex: none; align-items: stretch; padding: 22px 36px 28px; background: var(--panel-surface); text-align: left; }
+.analysis-limit-lead,
+.analysis-limit-renewal { margin: 0; word-break: keep-all; overflow-wrap: break-word; text-align: left; }
+.analysis-limit-no-break { white-space: nowrap; }
+.analysis-limit-lead { color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.55; }
+.analysis-limit-rules { margin: 24px 0 0; }
+.analysis-limit-rules > div { min-height: 42px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; border-bottom: 1px solid var(--divider); }
+.analysis-limit-rules > div:last-child { border-bottom: 0; }
+.analysis-limit-rules dt,
+.analysis-limit-remaining dt { color: var(--muted); font-size: 13px; font-weight: 400; line-height: 1.5; }
+.analysis-limit-rules dd,
+.analysis-limit-remaining dd { min-width: 0; margin: 0; color: var(--text); font-weight: 600; text-align: right; word-break: keep-all; }
+.analysis-limit-rules dd { font-size: 14px; line-height: 1.5; }
+.analysis-limit-renewal { margin-top: 22px; color: var(--muted); font-size: 13px; font-weight: 400; line-height: 1.6; }
+.analysis-limit-remaining { margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--divider); }
+.analysis-limit-remaining > div { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.analysis-limit-remaining dd { color: var(--gold-text); font-size: 20px; font-weight: 700; line-height: 1.4; }
 
 @media (hover: hover) and (pointer: fine) {
   .recent-card-interactive:hover { border-color: var(--strong-border); background: var(--surface); }
@@ -1474,16 +1487,18 @@ button, input, textarea, select { font: inherit; }
 .profile-info-card > div { min-height: 58px; padding: 10px 0; display: grid; grid-template-columns: minmax(78px, .55fr) minmax(0, 1.45fr); align-items: center; gap: 16px; border-bottom: 1px solid var(--divider); }
 .profile-info-card > div:last-child { border-bottom: 0; }
 .profile-info-card dt { color: var(--muted); font-size: 12px; line-height: 1.45; }
-.profile-info-card dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: right; }
+.profile-info-card dd { min-width: 0; margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: right; }
+.profile-info-card dd:not(.profile-password-value),
+.profile-edit-readonly > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-info-card dd.is-empty { color: var(--muted); font-weight: var(--type-body-weight); }
 .profile-edit-form { width: 100%; }
 .profile-edit-card > .profile-edit-readonly { min-height: 58px; }
 .profile-edit-readonly > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
-.profile-edit-readonly > strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: right; }
+.profile-edit-readonly > strong { min-width: 0; font-size: 14px; font-weight: 600; line-height: 1.5; text-align: right; }
 .profile-edit-readonly > .is-empty { color: var(--muted); font-weight: var(--type-body-weight); }
-.profile-password-value { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
-.profile-password-mask { flex: none; letter-spacing: .08em; white-space: nowrap; }
-.profile-password-action { min-height: 34px; padding: 0 8px; flex: none; border: 0; border-radius: 8px; color: var(--gold-text); background: transparent; font-size: 12px; font-weight: 650; line-height: 1.4; cursor: pointer; }
+.profile-password-value { min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.profile-password-action { min-height: 38px; padding: 0 0 0 8px; display: inline-flex; align-items: center; gap: 2px; flex: none; border: 0; border-radius: 8px; color: var(--gold-text); background: transparent; font-size: 12px; font-weight: 650; line-height: 1.4; cursor: pointer; }
+.profile-password-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .profile-password-action:focus-visible { outline: 3px solid var(--gold-text); outline-offset: 1px; }
 .profile-edit-card > .profile-edit-row { min-height: 0; padding: 13px 0; display: block; }
 .profile-edit-row .field-group { width: 100%; }
